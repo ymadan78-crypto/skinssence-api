@@ -1177,11 +1177,10 @@ app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
       db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
         if (err2) return res.status(500).json({ error: err2.message });
         res.json({ message: 'Wallet updated successfully' });
-          Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * 
-          Math.sin(dLon/2) * Math.sin(dLon/2); 
-  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-  return R * c; 
-}
+      });
+    }
+  );
+});
 
 app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
   const { lat, lng } = req.body;
