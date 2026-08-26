@@ -108,17 +108,15 @@ app.post('/api/patients', authenticateToken, (req, res) => {
   generateNextId((newSkinssenceId) => {
     db.run(`INSERT INTO patients (skinssence_id, first_name, last_name, mobile, dob, gender, email, emergency_mobile, address, city) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-      [newSkinssenceId, first_name, last_name, mobile, dob, gender, email, emergency_mobile, address, city], 
+      [newSkinssenceId, first_name||null, last_name||null, mobile||null, dob||null, gender||null, email||null, emergency_mobile||null, address||null, city||null], 
       function(err) {
         if (err) return res.status(500).json({ error: err.message });
 
-        
-        
         const patientId = this.lastID;
         db.run(
           `INSERT INTO skin_concerns (patient_id, concerns, other_concern, upcoming_event, event_date, last_hair_procedure, last_hair_procedure_date)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [patientId, JSON.stringify(concerns), other_concern, upcoming_event ? 1 : 0, event_date, last_hair_procedure, last_hair_procedure_date],
+          [patientId, JSON.stringify(concerns || []), other_concern||null, upcoming_event ? 1 : 0, event_date||null, last_hair_procedure||null, last_hair_procedure_date||null],
           function (err2) {
             if (err2) return res.status(500).json({ error: err2.message });
             res.json({ message: 'Patient Registered Successfully', skinssence_id: newSkinssenceId, patient_id: patientId });
@@ -133,7 +131,7 @@ app.put('/api/patients/:id', authenticateToken, (req, res) => {
   const id = req.params.id;
   db.run(
     'UPDATE patients SET first_name = ?, last_name = ?, mobile = ?, dob = ?, gender = ?, email = ?, address = ?, city = ? WHERE id = ?',
-    [first_name, last_name, mobile, dob, gender, email, address, city, id],
+    [first_name||null, last_name||null, mobile||null, dob||null, gender||null, email||null, address||null, city||null, id],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Patient updated successfully' });
@@ -820,7 +818,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     db.run(
       'INSERT INTO users (username, password_hash, role, name, monthly_salary) VALUES (?, ?, ?, ?, ?)',
-      [username, hash, role, name, monthly_salary],
+      [username, hash, role, name || null, monthly_salary || 0],
       function (err) {
         if (err) {
           if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Username already exists' });
@@ -858,10 +856,10 @@ app.put('/api/users/:id/password', authenticateToken, async (req, res) => {
 
 app.put('/api/users/:id/permissions', authenticateToken, (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
-  const { permissions } = req.body; // Expect JSON string or object
-  const permString = typeof permissions === 'string' ? permissions : JSON.stringify(permissions);
-  
-  db.run('UPDATE users SET permissions = ? WHERE id = ?', [permString, req.params.id], function(err) {
+    const { permissions } = req.body;
+    const permString = typeof permissions === 'string' ? permissions : JSON.stringify(permissions || {});
+    
+    db.run('UPDATE users SET permissions = ? WHERE id = ?', [permString, req.params.id], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: 'Permissions updated successfully' });
   });
