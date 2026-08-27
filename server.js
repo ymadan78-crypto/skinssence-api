@@ -99,13 +99,17 @@ app.get('/api/patients/check-mobile/:mobile', authenticateToken, (req, res) => {
 });
 
 app.post('/api/patients', authenticateToken, (req, res) => {
-  const { first_name, last_name, mobile, dob, gender, email, emergency_mobile, address, city, concerns, other_concern, upcoming_event, event_date, last_hair_procedure, last_hair_procedure_date } = req.body;
-  
-  if (!first_name || !last_name || !mobile || !city) {
-    return res.status(400).json({ error: 'Missing mandatory fields: First Name, Last Name, Mobile, or City' });
-  }
+    let { first_name, last_name, mobile, force_duplicate, dob, gender, email, emergency_mobile, address, city, concerns, other_concern, upcoming_event, event_date, last_hair_procedure, last_hair_procedure_date } = req.body;
+    
+    if (!first_name || !last_name || !mobile || !city) {
+      return res.status(400).json({ error: 'Missing mandatory fields: First Name, Last Name, Mobile, or City' });
+    }
 
-  generateNextId((newSkinssenceId) => {
+    if (force_duplicate) {
+      mobile = `${mobile} - ${first_name}`;
+    }
+
+    generateNextId((newSkinssenceId) => {
     db.run(`INSERT INTO patients (skinssence_id, first_name, last_name, mobile, dob, gender, email, emergency_mobile, address, city) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
       [newSkinssenceId, first_name||null, last_name||null, mobile||null, dob||null, gender||null, email||null, emergency_mobile||null, address||null, city||null], 
@@ -184,7 +188,12 @@ app.get('/api/patients/search', authenticateToken, (req, res) => {
 
 // Fetch Single Patient by S-Number
 app.get('/api/patients/by-snumber/:snumber', authenticateToken, (req, res) => {
-  db.get(`SELECT * FROM patients WHERE skinssence_id = ?`, [req.params.snumber], (err, row) => {
+  db.get(`
+    SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
+    FROM patients p 
+    LEFT JOIN skin_concerns s ON p.id = s.patient_id 
+    WHERE p.skinssence_id = ?
+  `, [req.params.snumber], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Patient not found' });
     res.json(row);
@@ -669,6 +678,7 @@ app.get('/api/events/upcoming', authenticateToken, (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
 
       const upcoming = [];
+      const today = new Date();
 
       rows.forEach(row => {
         // Check Birthdays
