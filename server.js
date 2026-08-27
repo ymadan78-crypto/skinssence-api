@@ -988,6 +988,13 @@ function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
   return R * c; 
 }
 
+app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
+  db.all('SELECT date, status FROM attendance WHERE user_id = ? ORDER BY date DESC LIMIT 30', [req.user.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
 app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
   const { lat, lng } = req.body;
   if (!lat || !lng) return res.status(400).json({ error: 'Location missing' });
@@ -1180,6 +1187,13 @@ app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
       });
     }
   );
+});
+
+app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
+  db.all('SELECT date, status FROM attendance WHERE user_id = ? ORDER BY date DESC LIMIT 30', [req.user.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
 });
 
 app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
