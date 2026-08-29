@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const xlsx = require('xlsx');
 const db = require('./db');
 
 const app = express();
@@ -12,19 +11,6 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_for_local_testing';
-
-// Ensure permissions column exists
-db.run("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'", () => {});
-// Add prepaid package balance
-db.run("ALTER TABLE patients ADD COLUMN wallet_balance REAL DEFAULT 0", () => {});
-db.run(`CREATE TABLE IF NOT EXISTS wallet_transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_id INTEGER,
-    amount REAL,
-    type TEXT,
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`, () => {});
 
 // Middleware for authentication
 const authenticateToken = (req, res, next) => {
@@ -74,17 +60,13 @@ app.post('/api/login', (req, res) => {
 
 // Helper: Generate next Skinssence ID (e.g. 3000-36 -> 3000-37)
 const generateNextId = (callback) => {
-  db.get("SELECT skinssence_id FROM patients WHERE skinssence_id LIKE 'S%' ORDER BY CAST(SUBSTR(skinssence_id, 2) AS INTEGER) DESC LIMIT 1", (err, row) => {
-    if (err || !row || !row.skinssence_id) {
-      callback('S3070'); // Default starting ID
+  db.get('SELECT skinssence_id FROM patients ORDER BY id DESC LIMIT 1', (err, row) => {
+    if (err || !row) {
+      callback('3000-1'); // Default starting ID
     } else {
-      const match = row.skinssence_id.match(/\d+/);
-      if (match) {
-        const nextNum = parseInt(match[0], 10) + 1;
-        callback(`S${nextNum}`);
-      } else {
-        callback('S3070');
-      }
+      const parts = row.skinssence_id.split('-');
+      const nextNum = parseInt(parts[1], 10) + 1;
+      callback(`3000-${nextNum}`);
     }
   });
 };
@@ -99,77 +81,29 @@ app.get('/api/patients/check-mobile/:mobile', authenticateToken, (req, res) => {
 });
 
 app.post('/api/patients', authenticateToken, (req, res) => {
-    let { first_name, last_name, mobile, force_duplicate, dob, gender, email, emergency_mobile, address, city, concerns, other_concern, upcoming_event, event_date, last_hair_procedure, last_hair_procedure_date } = req.body;
-    
-    if (!first_name || !last_name || !mobile || !city) {
-      return res.status(400).json({ error: 'Missing mandatory fields: First Name, Last Name, Mobile, or City' });
-    }
+  const { first_name, last_name, mobile, dob, gender, email, weight, emergency_mobile, address, city, concerns, other_concern, upcoming_event, event_date } = req.body;
+  
+  if (!first_name || !last_name || !mobile || !city) {
+    return res.status(400).json({ error: 'Missing mandatory fields: First Name, Last Name, Mobile, or City' });
+  }
 
-    if (force_duplicate) {
-      mobile = `${mobile} - ${first_name}`;
-    }
-
-    generateNextId((newSkinssenceId) => {
-    db.run(`INSERT INTO patients (skinssence_id, first_name, last_name, mobile, dob, gender, email, emergency_mobile, address, city) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-      [newSkinssenceId, first_name||null, last_name||null, mobile||null, dob||null, gender||null, email||null, emergency_mobile||null, address||null, city||null], 
+  generateNextId((newSkinssenceId) => {
+    db.run(`INSERT INTO patients (skinssence_id, first_name, last_name, mobile, dob, gender, email, weight, emergency_mobile, address, city) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+      [newSkinssenceId, first_name, last_name, mobile, dob, gender, email, weight, emergency_mobile, address, city], 
       function(err) {
         if (err) return res.status(500).json({ error: err.message });
-
+        
         const patientId = this.lastID;
         db.run(
-          `INSERT INTO skin_concerns (patient_id, concerns, other_concern, upcoming_event, event_date, last_hair_procedure, last_hair_procedure_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [patientId, JSON.stringify(concerns || []), other_concern||null, upcoming_event ? 1 : 0, event_date||null, last_hair_procedure||null, last_hair_procedure_date||null],
+          `INSERT INTO skin_concerns (patient_id, concerns, other_concern, upcoming_event, event_date)
+           VALUES (?, ?, ?, ?, ?)`,
+          [patientId, JSON.stringify(concerns), other_concern, upcoming_event ? 1 : 0, event_date],
           function (err2) {
             if (err2) return res.status(500).json({ error: err2.message });
-            res.json({ message: 'Patient Registered Successfully', skinssence_id: newSkinssenceId, patient_id: patientId });
+            res.json({ message: 'Patient registered successfully!', skinssence_id: newSkinssenceId });
           }
         );
-    });
-  });
-});
-
-app.put('/api/patients/:id', authenticateToken, (req, res) => {
-  const { first_name, last_name, mobile, dob, gender, email, address, city } = req.body;
-  const id = req.params.id;
-  db.run(
-    'UPDATE patients SET first_name = ?, last_name = ?, mobile = ?, dob = ?, gender = ?, email = ?, address = ?, city = ? WHERE id = ?',
-    [first_name||null, last_name||null, mobile||null, dob||null, gender||null, email||null, address||null, city||null, id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Patient updated successfully' });
-    }
-  );
-});
-
-app.delete('/api/patients/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'DOCTOR' && req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  const id = req.params.id;
-  
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-    db.run('DELETE FROM skin_concerns WHERE patient_id = ?', [id]);
-    db.run('DELETE FROM wallet_transactions WHERE patient_id = ?', [id]);
-    db.run('DELETE FROM packages WHERE patient_id = ?', [id]);
-    
-    // For visits, we also need to delete procedures, medicines, payments...
-    // Actually, SQLite doesn't natively do ON DELETE CASCADE unless enabled, but we can do a simplified delete if they are explicitly deleting a patient
-    db.all('SELECT id FROM visits WHERE patient_id = ?', [id], (err, rows) => {
-      if (!err && rows && rows.length > 0) {
-        const vIds = rows.map(r => r.id).join(',');
-        db.run(`DELETE FROM procedures WHERE visit_id IN (${vIds})`);
-        db.run(`DELETE FROM medicines WHERE visit_id IN (${vIds})`);
-        db.run(`DELETE FROM payments WHERE visit_id IN (${vIds})`);
-        db.run(`DELETE FROM visits WHERE patient_id = ?`, [id]);
-      }
-      
-      db.run('DELETE FROM patients WHERE id = ?', [id], function(err2) {
-        if (err2) return db.run('ROLLBACK', () => res.status(500).json({ error: err2.message }));
-        db.run('COMMIT', () => res.json({ message: 'Patient completely deleted' }));
-      });
     });
   });
 });
@@ -188,12 +122,7 @@ app.get('/api/patients/search', authenticateToken, (req, res) => {
 
 // Fetch Single Patient by S-Number
 app.get('/api/patients/by-snumber/:snumber', authenticateToken, (req, res) => {
-  db.get(`
-    SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
-    FROM patients p 
-    LEFT JOIN skin_concerns s ON p.id = s.patient_id 
-    WHERE p.skinssence_id = ?
-  `, [req.params.snumber], (err, row) => {
+  db.get(`SELECT * FROM patients WHERE skinssence_id = ?`, [req.params.snumber], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Patient not found' });
     res.json(row);
@@ -243,7 +172,7 @@ app.post('/api/visits', authenticateToken, (req, res) => {
       
       // 3. Package Redeemed? Update usage count
       if (package_redeemed_id) {
-        db.run('UPDATE patient_packages SET sessions_used = sessions_used + 1 WHERE id = ?', [package_redeemed_id]);
+        db.run('UPDATE packages SET used_sessions = used_sessions + 1 WHERE id = ?', [package_redeemed_id]);
       }
 
       // 4. Package Sold? Register as procedure for income, and create package row
@@ -264,115 +193,14 @@ app.post('/api/visits', authenticateToken, (req, res) => {
       
       // 6. Add Payment (if any)
       if (amount_received && amount_received > 0) {
-        // If they use a package, we don't log a payment in 'payments' because it was prepaid.
-        if (payment_mode !== 'PACKAGE_REDEMPTION') {
-          db.run('INSERT INTO payments (visit_id, mode, amount_received) VALUES (?, ?, ?)', 
-            [visit_id, payment_mode, amount_received]);
-        }
-          
-        if (payment_mode === 'PREPAID_WALLET') {
-          db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [amount_received, patient_id]);
-          // Note: using default staff_id and mode for backward compat on DEBITs.
-          db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)',
-            [patient_id, amount_received, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id]);
-        }
+        db.run('INSERT INTO payments (visit_id, mode, amount_received) VALUES (?, ?, ?)', 
+          [visit_id, payment_mode, amount_received]);
       }
       
       db.run('COMMIT', (err) => {
         if (err) return res.status(500).json({ error: 'Commit failed' });
         res.json({ message: 'Visit recorded successfully!', visit_id });
       });
-    });
-  });
-});
-
-app.delete('/api/visits/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Only admins can delete visits' });
-  const visit_id = req.params.id;
-
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-
-    // 1. Find medicines to restore inventory
-    db.all('SELECT name, quantity FROM medicines WHERE visit_id = ? AND quantity IS NOT NULL AND quantity > 0', [visit_id], (err, meds) => {
-      if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-
-      let pending = meds.length;
-      let hasError = false;
-
-      const finishDeletion = () => {
-        if (hasError) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed to restore inventory' }));
-        
-        db.run('DELETE FROM procedures WHERE visit_id = ?', [visit_id]);
-        db.run('DELETE FROM medicines WHERE visit_id = ?', [visit_id]);
-        db.run('DELETE FROM payments WHERE visit_id = ?', [visit_id]);
-        db.run('DELETE FROM visits WHERE id = ?', [visit_id], (errDel) => {
-          if (errDel) return db.run('ROLLBACK', () => res.status(500).json({ error: errDel.message }));
-          
-          db.run('COMMIT', (errC) => {
-            if (errC) return res.status(500).json({ error: 'Commit failed' });
-            res.json({ message: 'Visit and all associated records deleted successfully!' });
-          });
-        });
-      };
-
-      if (pending === 0) {
-        finishDeletion();
-      } else {
-        meds.forEach(med => {
-          db.run('UPDATE inventory SET quantity = quantity + ? WHERE medicine_name = ?', [med.quantity, med.name], (errInv) => {
-            if (errInv) hasError = true;
-            pending--;
-            if (pending === 0) finishDeletion();
-          });
-        });
-      }
-    });
-  });
-});
-
-app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
-  const { patient_id, medicines_sold, payment_mode, amount_received } = req.body;
-  const staff_id = req.user.id;
-
-  if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'No medicines selected' });
-
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-
-    db.run('INSERT INTO visits (patient_id, staff_id, planned_procedures) VALUES (?, ?, ?)', [patient_id, staff_id, 'PHARMACY SALE'], function(err) {
-      if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-      const visit_id = this.lastID;
-
-      let pending = medicines_sold.length;
-      let hasError = false;
-
-      medicines_sold.forEach(med => {
-        db.run('INSERT INTO medicines (visit_id, name, quantity, amount) VALUES (?, ?, ?, ?)', 
-          [visit_id, med.medicine_name, med.quantity, med.amount], (err1) => {
-            if (err1) hasError = true;
-            
-            db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
-              if (err2) hasError = true;
-              pending--;
-              if (pending === 0) finalize();
-            });
-        });
-      });
-
-      const finalize = () => {
-        if (hasError) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed to process inventory' }));
-        
-        db.run('INSERT INTO payments (visit_id, mode, amount_received) VALUES (?, ?, ?)', 
-          [visit_id, payment_mode, amount_received], (err3) => {
-            if (err3) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed payment' }));
-            
-            db.run('COMMIT', (err4) => {
-              if (err4) return res.status(500).json({ error: 'Commit failed' });
-              res.json({ message: 'Pharmacy Sale successful!', visit_id });
-            });
-        });
-      };
     });
   });
 });
@@ -385,93 +213,9 @@ app.get('/api/inventory', authenticateToken, (req, res) => {
   });
 });
 
-app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM inventory WHERE quantity > 0', [], (err, inventoryRows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    
-    const salesQuery = `
-      SELECT m.name, MAX(v.visit_date) as last_sale_date
-      FROM medicines m
-      JOIN visits v ON m.visit_id = v.id
-      GROUP BY m.name
-    `;
-    
-    db.all(salesQuery, [], (err, salesRows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const salesMap = {};
-      if (salesRows && salesRows.length > 0) {
-        salesRows.forEach(row => {
-          if (row.name) salesMap[row.name.toLowerCase().trim()] = new Date(row.last_sale_date);
-        });
-      }
-
-      const now = new Date();
-      const result = {
-        deadStock: {
-          notSold7Days: [],
-          notSold1Month: [],
-          notSold3Months: [],
-          notSold6Months: [],
-          notSold9Months: [],
-          notSold1Year: []
-        },
-        expiring: {
-          expired: [],
-          in3Months: [],
-          in6Months: [],
-          in9Months: [],
-          in12Months: []
-        }
-      };
-
-      inventoryRows.forEach(item => {
-        // Expiry Logic
-        if (item.expiry_date) {
-          const expDate = new Date(item.expiry_date);
-          const monthsUntilExpiry = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
-          
-          if (monthsUntilExpiry < 0 || expDate < now) {
-            result.expiring.expired.push(item);
-          } else if (monthsUntilExpiry <= 3) {
-            result.expiring.in3Months.push(item);
-          } else if (monthsUntilExpiry <= 6) {
-            result.expiring.in6Months.push(item);
-          } else if (monthsUntilExpiry <= 9) {
-            result.expiring.in9Months.push(item);
-          } else if (monthsUntilExpiry <= 12) {
-            result.expiring.in12Months.push(item);
-          }
-        }
-
-        // Dead Stock Logic
-        const itemName = item.medicine_name ? item.medicine_name.toLowerCase().trim() : '';
-        const lastSale = salesMap[itemName];
-        const daysSinceSale = lastSale ? (now - lastSale) / (1000 * 60 * 60 * 24) : Infinity;
-
-        if (daysSinceSale > 365) {
-          result.deadStock.notSold1Year.push(item);
-        } else if (daysSinceSale > 270) {
-          result.deadStock.notSold9Months.push(item);
-        } else if (daysSinceSale > 180) {
-          result.deadStock.notSold6Months.push(item);
-        } else if (daysSinceSale > 90) {
-          result.deadStock.notSold3Months.push(item);
-        } else if (daysSinceSale > 30) {
-          result.deadStock.notSold1Month.push(item);
-        } else if (daysSinceSale > 7) {
-          result.deadStock.notSold7Days.push(item);
-        }
-      });
-
-      res.json(result);
-    });
-  });
-});
-
 // --- EXPENSE ROUTES ---
 app.post('/api/expenses', authenticateToken, (req, res) => {
-  const { category, vendor, amount, expense_date, notes, raw_ocr_text, inventory_items, update_inventory } = req.body;
+  const { category, vendor, amount, expense_date, notes, raw_ocr_text, inventory_items } = req.body;
   const staff_id = req.user.id;
 
   if (!category || !amount) {
@@ -490,7 +234,7 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
         
         const expense_id = this.lastID;
 
-        if (category === 'Pharmacy' && inventory_items && inventory_items.length > 0 && update_inventory) {
+        if (category === 'Pharmacy' && inventory_items && inventory_items.length > 0) {
           let pending = inventory_items.length;
           let hasError = false;
 
@@ -574,24 +318,22 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
 
 // 1. Staff: Today's Collection
 app.get('/api/staff/collection/today', authenticateToken, (req, res) => {
-    const staff_id = req.user.id;
-    const today = new Date().toISOString().split('T')[0];
-  
-    const query = `
-      SELECT mode, SUM(amount) as total FROM (
-        SELECT mode, amount_received as amount FROM payments WHERE visit_id IN (SELECT id FROM visits WHERE staff_id = ?) AND date(payment_date) = ?
-        UNION ALL
-        SELECT mode, amount FROM wallet_transactions WHERE staff_id = ? AND date(created_at) = ? AND type = 'CREDIT'
-        UNION ALL
-        SELECT mode, price_paid as amount FROM patient_packages WHERE staff_id = ? AND date(created_at) = ?
-      ) WHERE mode IS NOT NULL GROUP BY mode
-    `;
-  
-    db.all(query, [staff_id, today, staff_id, today, staff_id, today], (err, rows) => {
+  const staff_id = req.user.id;
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  db.all(
+    `SELECT mode, SUM(amount_received) as total 
+     FROM payments 
+     WHERE visit_id IN (SELECT id FROM visits WHERE staff_id = ?)
+     AND date(payment_date) = ?
+     GROUP BY mode`,
+    [staff_id, today],
+    (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
-    });
-  });
+    }
+  );
+});
 
 // 2. Admin: Income vs Expenses Report
 app.get('/api/admin/reports', authenticateToken, (req, res) => {
@@ -600,8 +342,7 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
   const summary = { 
     today: { clinic_points: 0, medicine_points: 0, expense: 0 }, 
     months: {}, 
-    years: {},
-    procedure_stats: { months: {}, years: {} }
+    years: {} 
   };
   
   const now = new Date();
@@ -628,28 +369,9 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
       if (pending === 0) res.json(summary);
     };
 
-    // 1. Clinic Income (Procedures) & Statistics
-    db.all(`SELECT date(v.created_at) as date, p.name, p.amount FROM procedures p JOIN visits v ON p.visit_id = v.id`, [], (err, rows) => {
-      if (!err && rows) {
-        rows.forEach(r => {
-          processRow(r.date, r.amount, 'clinic_points');
-          
-          const d = r.date || todayStr;
-          const monthStr = d.substring(0, 7);
-          const yearStr = d.substring(0, 4);
-          const pName = r.name ? r.name.trim().toUpperCase() : 'UNKNOWN';
-
-          if (!summary.procedure_stats.months[monthStr]) summary.procedure_stats.months[monthStr] = {};
-          if (!summary.procedure_stats.months[monthStr][pName]) summary.procedure_stats.months[monthStr][pName] = { count: 0, amount: 0 };
-          summary.procedure_stats.months[monthStr][pName].count += 1;
-          summary.procedure_stats.months[monthStr][pName].amount += r.amount;
-
-          if (!summary.procedure_stats.years[yearStr]) summary.procedure_stats.years[yearStr] = {};
-          if (!summary.procedure_stats.years[yearStr][pName]) summary.procedure_stats.years[yearStr][pName] = { count: 0, amount: 0 };
-          summary.procedure_stats.years[yearStr][pName].count += 1;
-          summary.procedure_stats.years[yearStr][pName].amount += r.amount;
-        });
-      }
+    // 1. Clinic Income (Procedures)
+    db.all(`SELECT date(v.created_at) as date, p.amount FROM procedures p JOIN visits v ON p.visit_id = v.id`, [], (err, rows) => {
+      if (!err && rows) rows.forEach(r => processRow(r.date, r.amount, 'clinic_points'));
       checkDone();
     });
 
@@ -676,9 +398,13 @@ app.get('/api/events/upcoming', authenticateToken, (req, res) => {
     [],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const in10Days = new Date(today);
+      in10Days.setDate(today.getDate() + 10);
 
       const upcoming = [];
-      const today = new Date();
 
       rows.forEach(row => {
         // Check Birthdays
@@ -813,7 +539,7 @@ app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
 // --- USER & HR MANAGEMENT (ADMIN ONLY) ---
 app.get('/api/users', authenticateToken, (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
-  db.all('SELECT id, username, role, name, monthly_salary, permissions FROM users', [], (err, rows) => {
+  db.all('SELECT id, username, role, name, monthly_salary FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
@@ -828,7 +554,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     db.run(
       'INSERT INTO users (username, password_hash, role, name, monthly_salary) VALUES (?, ?, ?, ?, ?)',
-      [username, hash, role, name || null, monthly_salary || 0],
+      [username, hash, role, name, monthly_salary],
       function (err) {
         if (err) {
           if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Username already exists' });
@@ -862,17 +588,6 @@ app.put('/api/users/:id/password', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Encryption error' });
   }
-});
-
-app.put('/api/users/:id/permissions', authenticateToken, (req, res) => {
-  if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
-    const { permissions } = req.body;
-    const permString = typeof permissions === 'string' ? permissions : JSON.stringify(permissions || {});
-    
-    db.run('UPDATE users SET permissions = ? WHERE id = ?', [permString, req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: 'Permissions updated successfully' });
-  });
 });
 
 app.delete('/api/users/:id', authenticateToken, (req, res) => {
@@ -998,47 +713,9 @@ function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
   return R * c; 
 }
 
-app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
-  db.all('SELECT date, status FROM attendance WHERE user_id = ? ORDER BY date DESC LIMIT 30', [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
-
 app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
   const { lat, lng } = req.body;
   if (!lat || !lng) return res.status(400).json({ error: 'Location missing' });
-
-  // Time Window Check (Enforcing IST UTC+5:30)
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-  const day = istTime.getUTCDay(); // 0 is Sunday
-  const hour = istTime.getUTCHours();
-  const min = istTime.getUTCMinutes();
-  
-  let validTime = false;
-  let isLate = false;
-  let lateMinutes = 0;
-
-  if (hour === 10) {
-    validTime = true;
-    if (min > 30) {
-      isLate = true;
-      lateMinutes = min - 30;
-    }
-  } else if (hour === 16 && day !== 0) {
-    validTime = true;
-    if (min > 30) {
-      isLate = true;
-      lateMinutes = min - 30;
-    }
-  }
-
-  if (!validTime) {
-    if (day === 0) return res.status(400).json({ error: 'Sunday attendance is only allowed between 10:00 AM and 11:00 AM.' });
-    return res.status(400).json({ error: 'Attendance must be marked between 10:00-11:00 AM or 4:00-5:00 PM.' });
-  }
 
   db.all(`SELECT key, value FROM settings WHERE key IN ('clinic_lat', 'clinic_lng')`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -1054,10 +731,10 @@ app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
     }
 
     const distance = getDistanceFromLatLonInM(lat, lng, clinic_lat, clinic_lng);
-    const ALLOWED_RADIUS = 100; // REDUCED TO 100 METERS
+    const ALLOWED_RADIUS = 150; // meters
 
     if (distance <= ALLOWED_RADIUS) {
-      const todayStr = istTime.toISOString().split('T')[0];
+      const todayStr = new Date().toISOString().split('T')[0];
       
       db.run(
         `INSERT INTO attendance (user_id, date, status) VALUES (?, ?, ?)
@@ -1065,389 +742,12 @@ app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
         [req.user.id, todayStr, 'PRESENT'],
         function (err) {
           if (err) return res.status(500).json({ error: err.message });
-          let msg = 'Attendance marked successfully!';
-          if (isLate) {
-            msg = `Attendance marked successfully, but you are LATE by ${lateMinutes} minutes!`;
-          }
-          res.json({ message: msg, distance: Math.round(distance) });
+          res.json({ message: 'Attendance marked successfully!', distance: Math.round(distance) });
         }
       );
     } else {
       res.status(400).json({ error: `You are too far from the clinic (${Math.round(distance)}m away). Allowed radius is ${ALLOWED_RADIUS}m.` });
     }
-  });
-});
-
-// 5. Excel Backup Download
-app.get('/api/admin/backup', (req, res) => {
-  const token = req.query.token;
-  if (!token) return res.status(401).send('No token provided');
-  
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err || user.role !== 'DOCTOR') return res.status(403).send('Access denied. Admin only.');
-    
-    const wb = xlsx.utils.book_new();
-    
-    db.serialize(() => {
-      let pending = 5;
-      let hasError = false;
-
-      const checkDone = () => {
-        pending--;
-        if (pending === 0 && !hasError) {
-          try {
-            const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
-            res.setHeader('Content-Disposition', `attachment; filename="Skinssence_Backup_${new Date().toISOString().split('T')[0]}.xlsx"`);
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.send(buffer);
-          } catch (e) {
-            res.status(500).send('Error generating Excel file');
-          }
-        }
-      };
-
-      db.all('SELECT * FROM patients', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Patients");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT * FROM inventory', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Inventory");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT * FROM expenses', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Expenses");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT v.id, v.created_at as visit_date, p.first_name, p.last_name, p.mobile, u.name as staff_name FROM visits v JOIN patients p ON v.patient_id = p.id JOIN users u ON v.staff_id = u.id', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Visits");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT p.visit_id, p.name as procedure_name, p.amount as procedure_amount, m.name as medicine_name, m.amount as medicine_amount, pay.mode, pay.amount_received FROM procedures p LEFT JOIN medicines m ON p.visit_id = m.visit_id LEFT JOIN payments pay ON p.visit_id = pay.visit_id', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Sales_Details");
-        else hasError = true;
-        checkDone();
-      });
-    });
-  });
-});
-
-// --- FREQUENT PROCEDURES STATS ---
-app.get('/api/reports/procedures', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
-    const period = req.query.period || 'all'; // 'monthly', 'yearly', 'all'
-    let sql = `SELECT name, COUNT(*) as frequency, SUM(amount) as revenue FROM procedures`;
-    
-    if (period === 'monthly') {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue, strftime('%Y-%m', v.visit_date) as period
-        FROM procedures p
-        JOIN visits v ON p.visit_id = v.id
-        GROUP BY name, period
-        ORDER BY period DESC, frequency DESC
-        LIMIT 50
-      `;
-    } else if (period === 'yearly') {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue, strftime('%Y', v.visit_date) as period
-        FROM procedures p
-        JOIN visits v ON p.visit_id = v.id
-        GROUP BY name, period
-        ORDER BY period DESC, frequency DESC
-        LIMIT 50
-      `;
-    } else {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue 
-        FROM procedures 
-        GROUP BY name 
-        ORDER BY frequency DESC 
-        LIMIT 20
-      `;
-    }
-
-    db.all(sql, [], (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    });
-  });
-
-// --- WALLET BALANCE ENDPOINTS ---
-app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
-  const patientId = req.params.id;
-  const { amount, type, description, mode } = req.body; 
-  const staffId = req.user.id;
-
-  db.run(
-    `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patientId, amount, type, description, mode || 'CASH', staffId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const balanceChange = type === 'CREDIT' ? amount : -amount;
-      db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ message: 'Wallet updated successfully' });
-      });
-    }
-  );
-});
-
-app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
-  db.all('SELECT date, status FROM attendance WHERE user_id = ? ORDER BY date DESC LIMIT 30', [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
-
-app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
-  const { lat, lng } = req.body;
-  if (!lat || !lng) return res.status(400).json({ error: 'Location missing' });
-
-  // Time Window Check (Enforcing IST UTC+5:30)
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-  const day = istTime.getUTCDay(); // 0 is Sunday
-  const hour = istTime.getUTCHours();
-  const min = istTime.getUTCMinutes();
-  
-  let validTime = false;
-  let isLate = false;
-  let lateMinutes = 0;
-
-  if (hour === 10) {
-    validTime = true;
-    if (min > 30) {
-      isLate = true;
-      lateMinutes = min - 30;
-    }
-  } else if (hour === 16 && day !== 0) {
-    validTime = true;
-    if (min > 30) {
-      isLate = true;
-      lateMinutes = min - 30;
-    }
-  }
-
-  if (!validTime) {
-    if (day === 0) return res.status(400).json({ error: 'Sunday attendance is only allowed between 10:00 AM and 11:00 AM.' });
-    return res.status(400).json({ error: 'Attendance must be marked between 10:00-11:00 AM or 4:00-5:00 PM.' });
-  }
-
-  db.all(`SELECT key, value FROM settings WHERE key IN ('clinic_lat', 'clinic_lng')`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    
-    let clinic_lat, clinic_lng;
-    rows.forEach(r => {
-      if (r.key === 'clinic_lat') clinic_lat = parseFloat(r.value);
-      if (r.key === 'clinic_lng') clinic_lng = parseFloat(r.value);
-    });
-
-    if (!clinic_lat || !clinic_lng) {
-      return res.status(400).json({ error: 'Clinic location not set by Admin yet.' });
-    }
-
-    const distance = getDistanceFromLatLonInM(lat, lng, clinic_lat, clinic_lng);
-    const ALLOWED_RADIUS = 100; // REDUCED TO 100 METERS
-
-    if (distance <= ALLOWED_RADIUS) {
-      const todayStr = istTime.toISOString().split('T')[0];
-      
-      db.run(
-        `INSERT INTO attendance (user_id, date, status) VALUES (?, ?, ?)
-         ON CONFLICT(user_id, date) DO UPDATE SET status = excluded.status`,
-        [req.user.id, todayStr, 'PRESENT'],
-        function (err) {
-          if (err) return res.status(500).json({ error: err.message });
-          let msg = 'Attendance marked successfully!';
-          if (isLate) {
-            msg = `Attendance marked successfully, but you are LATE by ${lateMinutes} minutes!`;
-          }
-          res.json({ message: msg, distance: Math.round(distance) });
-        }
-      );
-    } else {
-      res.status(400).json({ error: `You are too far from the clinic (${Math.round(distance)}m away). Allowed radius is ${ALLOWED_RADIUS}m.` });
-    }
-  });
-});
-
-// 5. Excel Backup Download
-app.get('/api/admin/backup', (req, res) => {
-  const token = req.query.token;
-  if (!token) return res.status(401).send('No token provided');
-  
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err || user.role !== 'DOCTOR') return res.status(403).send('Access denied. Admin only.');
-    
-    const wb = xlsx.utils.book_new();
-    
-    db.serialize(() => {
-      let pending = 5;
-      let hasError = false;
-
-      const checkDone = () => {
-        pending--;
-        if (pending === 0 && !hasError) {
-          try {
-            const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
-            res.setHeader('Content-Disposition', `attachment; filename="Skinssence_Backup_${new Date().toISOString().split('T')[0]}.xlsx"`);
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.send(buffer);
-          } catch (e) {
-            res.status(500).send('Error generating Excel file');
-          }
-        }
-      };
-
-      db.all('SELECT * FROM patients', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Patients");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT * FROM inventory', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Inventory");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT * FROM expenses', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Expenses");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT v.id, v.created_at as visit_date, p.first_name, p.last_name, p.mobile, u.name as staff_name FROM visits v JOIN patients p ON v.patient_id = p.id JOIN users u ON v.staff_id = u.id', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Visits");
-        else hasError = true;
-        checkDone();
-      });
-
-      db.all('SELECT p.visit_id, p.name as procedure_name, p.amount as procedure_amount, m.name as medicine_name, m.amount as medicine_amount, pay.mode, pay.amount_received FROM procedures p LEFT JOIN medicines m ON p.visit_id = m.visit_id LEFT JOIN payments pay ON p.visit_id = pay.visit_id', [], (err, rows) => {
-        if (!err) xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(rows || []), "Sales_Details");
-        else hasError = true;
-        checkDone();
-      });
-    });
-  });
-});
-
-// --- FREQUENT PROCEDURES STATS ---
-app.get('/api/reports/procedures', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
-    const period = req.query.period || 'all'; // 'monthly', 'yearly', 'all'
-    let sql = `SELECT name, COUNT(*) as frequency, SUM(amount) as revenue FROM procedures`;
-    
-    if (period === 'monthly') {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue, strftime('%Y-%m', v.visit_date) as period
-        FROM procedures p
-        JOIN visits v ON p.visit_id = v.id
-        GROUP BY name, period
-        ORDER BY period DESC, frequency DESC
-        LIMIT 50
-      `;
-    } else if (period === 'yearly') {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue, strftime('%Y', v.visit_date) as period
-        FROM procedures p
-        JOIN visits v ON p.visit_id = v.id
-        GROUP BY name, period
-        ORDER BY period DESC, frequency DESC
-        LIMIT 50
-      `;
-    } else {
-      sql = `
-        SELECT name, COUNT(*) as frequency, SUM(amount) as revenue 
-        FROM procedures 
-        GROUP BY name 
-        ORDER BY frequency DESC 
-        LIMIT 20
-      `;
-    }
-
-    db.all(sql, [], (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    });
-  });
-
-// --- WALLET BALANCE ENDPOINTS ---
-app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
-  const patientId = req.params.id;
-  const { amount, type, description, mode } = req.body; 
-  const staffId = req.user.id;
-
-  db.run(
-    `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patientId, amount, type, description, mode || 'CASH', staffId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const balanceChange = type === 'CREDIT' ? amount : -amount;
-      db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ message: 'Wallet updated successfully' });
-      });
-    }
-  );
-});
-
-// --- PACKAGES ---
-app.get('/api/patients/:id/packages', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM patient_packages WHERE patient_id = ? ORDER BY created_at DESC', [req.params.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
-
-app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
-  const patient_id = req.params.id;
-  const staff_id = req.user.id;
-  const { package_name, total_sessions, price_paid, mode } = req.body;
-  
-  db.run(
-    `INSERT INTO patient_packages (patient_id, package_name, total_sessions, price_paid, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patient_id, package_name, total_sessions, price_paid, mode || 'CASH', staff_id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Package added successfully' });
-    }
-  );
-});
-
-
-// --- FESTIVAL GREETINGS ---
-app.get('/api/events/festival/:religion', authenticateToken, (req, res) => {
-  const religion = req.params.religion;
-  db.all('SELECT * FROM patients', [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    
-    const muslimKeywords = ['khan', 'syed', 'mohammed', 'mohd', 'abdul', 'shaikh', 'sheikh', 'ansari', 'qureshi', 'pathan', 'ali', 'hussain', 'hasan', 'begum', 'khatoon', 'bano', 'zoya', 'uzma', 'zainab', 'sana', 'tariq', 'imran', 'salman', 'shahrukh', 'aamir', 'nadeem', 'rizwan', 'irfan', 'fatima', 'ayesha', 'ahmed', 'sayyad', 'mirza', 'farooq', 'osman', 'umar', 'tahir', 'samina', 'yasmin', 'shabana', 'firdous', 'yusuf', 'ibrahim', 'mulla'];
-    const christianKeywords = ['dsouza', 'fernandes', 'john', 'peter', 'paul', 'mary', 'thomas', 'george', 'joseph', 'mathew', 'philip', 'dsilva', 'gomes', 'lobo', 'pereira', 'pinto', 'rodrigues', 'costa', 'dcosta', 'baptista', 'anthony'];
-
-    const festivalPatients = rows.filter(p => {
-      const fullName = ((p.first_name || '') + ' ' + (p.last_name || '')).toLowerCase();
-      
-      const isMuslim = muslimKeywords.some(kw => fullName.includes(kw));
-      const isChristian = christianKeywords.some(kw => fullName.includes(kw));
-
-      if (religion === 'muslim') {
-        return isMuslim;
-      } else if (religion === 'hindu') {
-        return !isMuslim && !isChristian;
-      }
-      return false;
-    });
-    
-    res.json(festivalPatients);
   });
 });
 
