@@ -176,7 +176,7 @@ app.delete('/api/patients/:id', authenticateToken, (req, res) => {
 
 // Search Patient
 app.get('/api/patients/search', authenticateToken, (req, res) => {
-  const { query } = req.query; // search by id, mobile, or name
+  const query = req.query.query || req.query.q || ''; 
   const sql = `SELECT * FROM patients WHERE skinssence_id LIKE ? OR mobile LIKE ? OR first_name LIKE ? OR last_name LIKE ? LIMIT 50`;
   const likeQuery = `%${query}%`;
   
@@ -427,6 +427,9 @@ app.post('/api/inventory', authenticateToken, (req, res) => {
 });
 
 app.put('/api/inventory/:id', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Only Admin or Doctor can modify inventory' });
+  }
   const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '' } = req.body;
   db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=? WHERE id=?',
     [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, req.params.id], function(err) {
@@ -495,19 +498,33 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
       inventoryRows.forEach(item => {
         // Expiry Logic
         if (item.expiry_date) {
-          const expDate = new Date(item.expiry_date);
-          const monthsUntilExpiry = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
-          
-          if (monthsUntilExpiry < 0 || expDate < now) {
-            result.expiring.expired.push(item);
-          } else if (monthsUntilExpiry <= 3) {
-            result.expiring.in3Months.push(item);
-          } else if (monthsUntilExpiry <= 6) {
-            result.expiring.in6Months.push(item);
-          } else if (monthsUntilExpiry <= 9) {
-            result.expiring.in9Months.push(item);
-          } else if (monthsUntilExpiry <= 12) {
-            result.expiring.in12Months.push(item);
+          const parts = item.expiry_date.split('/');
+          if (parts.length === 2) {
+            const expMonth = parseInt(parts[0], 10) - 1; // 0-based
+            const expYear = parseInt(parts[1], 10);
+            const expDate = new Date(expYear, expMonth, 1);
+            
+            if (!isNaN(expDate.getTime())) {
+              const monthsUntilExpiry = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
+              
+              if (monthsUntilExpiry < 0 || expDate < now) {
+                result.expiring.expired.push(item);
+              } else if (monthsUntilExpiry <= 3) {
+                result.expiring.in3Months.push(item);
+              } else if (monthsUntilExpiry <= 6) {
+                result.expiring.in6Months.push(item);
+              } else if (monthsUntilExpiry <= 9) {
+                result.expiring.in9Months.push(item);
+              } else if (monthsUntilExpiry <= 12) {
+                result.expiring.in12Months.push(item);
+              }
+              
+              const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+              if (expDate <= nextMonth) {
+                if (!result.expiringSoon) result.expiringSoon = [];
+                result.expiringSoon.push({ name: item.medicine_name, expiry: item.expiry_date, qty: item.quantity });
+              }
+            }
           }
         }
 
@@ -591,11 +608,11 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
 
   db.all(
-    `SELECT v.id as visit_id, v.created_at, v.planned_procedures, u.name as doctor_name
+    `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, u.name as doctor_name
      FROM visits v
      JOIN users u ON v.staff_id = u.id
      WHERE v.patient_id = ?
-     ORDER BY v.created_at DESC`,
+     ORDER BY v.visit_date DESC`,
     [patient_id],
     (err, visits) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -735,6 +752,19 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
 });
 
 // 4. Upcoming Events (Next 10 Days)
+
+app.get('/api/dashboard/today', authenticateToken, (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  db.get(
+    `SELECT COUNT(DISTINCT patient_id) as patients, SUM(amount) as collection FROM payments WHERE payment_date LIKE ?`,
+    [today + '%'],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ patients: row.patients || 0, collection: row.collection || 0 });
+    }
+  );
+});
+
 app.get('/api/events/upcoming', authenticateToken, (req, res) => {
   db.all(
     `SELECT p.skinssence_id, p.first_name, p.last_name, p.mobile, p.dob, c.event_date 
@@ -848,16 +878,19 @@ app.get('/api/appointments/reminders', authenticateToken, (req, res) => {
   const today = new Date();
   const tmrw = new Date(today);
   tmrw.setDate(tmrw.getDate() + 1);
+  const dayAfter = new Date(today);
+  dayAfter.setDate(dayAfter.getDate() + 2);
 
   const todayStr = today.toISOString().split('T')[0];
   const tmrwStr = tmrw.toISOString().split('T')[0];
+  const dayAfterStr = dayAfter.toISOString().split('T')[0];
 
   db.all(
     `SELECT * FROM appointments 
-     WHERE (appointment_date = ? OR appointment_date = ?) 
+     WHERE (appointment_date = ? OR appointment_date = ? OR appointment_date = ?) 
      AND status IN ('SCHEDULED', 'CONFIRMED')
      ORDER BY appointment_date ASC, appointment_time ASC`,
-    [todayStr, tmrwStr],
+    [todayStr, tmrwStr, dayAfterStr],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
