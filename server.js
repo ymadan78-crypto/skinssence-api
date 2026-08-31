@@ -379,8 +379,9 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
       let hasError = false;
 
       medicines_sold.forEach(med => {
-        db.run('INSERT INTO medicines (visit_id, name, quantity, amount) VALUES (?, ?, ?, ?)', 
-          [visit_id, med.medicine_name, med.quantity, med.amount], (err1) => {
+        const detailsString = `${med.medicine_name} (Qty: ${med.quantity})`;
+        db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
+          [visit_id, detailsString, med.amount], (err1) => {
             if (err1) hasError = true;
             
             db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
