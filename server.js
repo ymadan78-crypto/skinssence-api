@@ -755,12 +755,29 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
 
 app.get('/api/dashboard/today', authenticateToken, (req, res) => {
   const today = new Date().toISOString().split('T')[0];
+  
+  // Get unique patients count
   db.get(
-    `SELECT COUNT(DISTINCT patient_id) as patients, SUM(amount) as collection FROM payments WHERE payment_date LIKE ?`,
-    [today + '%'],
-    (err, row) => {
+    `SELECT COUNT(DISTINCT patient_id) as patients FROM visits WHERE date(visit_date) = ?`,
+    [today],
+    (err, patRow) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ patients: row.patients || 0, collection: row.collection || 0 });
+      
+      // Get total collection across all payments, packages, and wallet recharges
+      db.get(
+        `SELECT SUM(amount) as collection FROM (
+          SELECT amount_received as amount FROM payments WHERE date(payment_date) = ?
+          UNION ALL
+          SELECT amount FROM wallet_transactions WHERE date(created_at) = ? AND type = 'CREDIT'
+          UNION ALL
+          SELECT price_paid as amount FROM patient_packages WHERE date(created_at) = ?
+        )`,
+        [today, today, today],
+        (err, colRow) => {
+          if (err) return res.status(500).json({ error: err.message });
+          res.json({ patients: patRow?.patients || 0, collection: colRow?.collection || 0 });
+        }
+      );
     }
   );
 });
