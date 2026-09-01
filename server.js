@@ -17,6 +17,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_for_local_tes
 db.run("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'", () => {});
 // Add prepaid package balance
 db.run("ALTER TABLE patients ADD COLUMN wallet_balance REAL DEFAULT 0", () => {});
+// Add default_instructions to inventory
+db.run("ALTER TABLE inventory ADD COLUMN default_instructions TEXT DEFAULT ''", () => {});
 db.run(`CREATE TABLE IF NOT EXISTS wallet_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER,
@@ -382,10 +384,16 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
         const detailsString = `${med.medicine_name} (Qty: ${med.quantity})`;
         db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
           [visit_id, detailsString, med.amount], (err1) => {
-            if (err1) hasError = true;
+            if (err1) {
+              console.error("ERR1:", err1);
+              hasError = true;
+            }
             
             db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
-              if (err2) hasError = true;
+              if (err2) {
+                console.error("ERR2:", err2);
+                hasError = true;
+              }
               pending--;
               if (pending === 0) finalize();
             });
@@ -418,10 +426,10 @@ app.get('/api/inventory/all', authenticateToken, (req, res) => {
 });
 
 app.post('/api/inventory', authenticateToken, (req, res) => {
-  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '' } = req.body;
+  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '' } = req.body;
   if (!medicine_name) return res.status(400).json({ error: 'Medicine name required' });
-  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date) VALUES (?, ?, ?, ?, ?)',
-    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date], function(err) {
+  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions) VALUES (?, ?, ?, ?, ?, ?)',
+    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, default_instructions], function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID });
   });
@@ -431,9 +439,9 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Only Admin or Doctor can modify inventory' });
   }
-  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '' } = req.body;
-  db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=? WHERE id=?',
-    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, req.params.id], function(err) {
+  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '' } = req.body;
+  db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=? WHERE id=?',
+    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, default_instructions, req.params.id], function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Updated' });
   });
@@ -454,6 +462,19 @@ app.get('/api/inventory', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
+});
+
+// Get last visit date for a patient (for consultation fee calculation)
+app.get('/api/patients/:id/last-visit', authenticateToken, (req, res) => {
+  const patient_id = req.params.id;
+  db.get(
+    `SELECT visit_date FROM visits WHERE patient_id = ? AND planned_procedures != 'PHARMACY SALE' ORDER BY visit_date DESC LIMIT 1`,
+    [patient_id],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ last_visit_date: row ? row.visit_date : null });
+    }
+  );
 });
 
 app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
