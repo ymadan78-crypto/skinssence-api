@@ -593,8 +593,60 @@ app.get('/api/patients/:id/last-visit', authenticateToken, (req, res) => {
   );
 });
 
+// Robust Expiry Date Parser
+function parseExpiryDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const s = dateStr.trim();
+  if (!s) return null;
+
+  // 1. ISO or YYYY-MM-DD
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(s)) {
+    const parts = s.split('T')[0].split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dt = new Date(y, m, d);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // 2. YYYY-MM
+  if (/^\d{4}-\d{1,2}$/.test(s)) {
+    const parts = s.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const dt = new Date(y, m, 0); // last day of month
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // 3. MM/YYYY or MM/YY or MM-YYYY or MM-YY
+  if (/^\d{1,2}[\/\-]\d{2,4}$/.test(s)) {
+    const parts = s.split(/[\/\-]/);
+    const m = parseInt(parts[0], 10);
+    let y = parseInt(parts[1], 10);
+    if (y < 100) y = 2000 + y;
+    if (m >= 1 && m <= 12) {
+      const dt = new Date(y, m, 0); // last day of expiry month
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+  }
+
+  // 4. DD/MM/YYYY or DD-MM-YYYY
+  if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) {
+    const parts = s.split(/[\/\-]/);
+    const d = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    let y = parseInt(parts[2], 10);
+    if (y < 100) y = 2000 + y;
+    const dt = new Date(y, m, d);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  const fallback = new Date(s);
+  return isNaN(fallback.getTime()) ? null : fallback;
+}
+
 app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM inventory WHERE quantity > 0', [], (err, inventoryRows) => {
+  db.all('SELECT * FROM inventory', [], (err, inventoryRows) => {
     if (err) return res.status(500).json({ error: err.message });
     
     const salesQuery = `
@@ -615,78 +667,169 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
       }
 
       const now = new Date();
-      const result = {
-        deadStock: {
-          notSold7Days: [],
-          notSold1Month: [],
-          notSold3Months: [],
-          notSold6Months: [],
-          notSold9Months: [],
-          notSold1Year: []
-        },
-        expiring: {
-          expired: [],
-          in3Months: [],
-          in6Months: [],
-          in9Months: [],
-          in12Months: []
-        }
+      now.setHours(0, 0, 0, 0);
+
+      const byCategory = {
+        expired: [],
+        in3Months: [],
+        in3To6Months: [],
+        in6To12Months: [],
+        over12Months: [],
+        invalidDate: []
       };
 
-      inventoryRows.forEach(item => {
-        // Expiry Logic
-        if (item.expiry_date) {
-          const parts = item.expiry_date.split('/');
-          if (parts.length === 2) {
-            const expMonth = parseInt(parts[0], 10) - 1; // 0-based
-            const expYear = parseInt(parts[1], 10);
-            const expDate = new Date(expYear, expMonth, 1);
-            
-            if (!isNaN(expDate.getTime())) {
-              const monthsUntilExpiry = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
-              
-              if (monthsUntilExpiry < 0 || expDate < now) {
-                result.expiring.expired.push(item);
-              } else if (monthsUntilExpiry <= 3) {
-                result.expiring.in3Months.push(item);
-              } else if (monthsUntilExpiry <= 6) {
-                result.expiring.in6Months.push(item);
-              } else if (monthsUntilExpiry <= 9) {
-                result.expiring.in9Months.push(item);
-              } else if (monthsUntilExpiry <= 12) {
-                result.expiring.in12Months.push(item);
-              }
-              
-              const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
-              if (expDate <= nextMonth) {
-                if (!result.expiringSoon) result.expiringSoon = [];
-                result.expiringSoon.push({ name: item.medicine_name, expiry: item.expiry_date, qty: item.quantity });
-              }
-            }
-          }
+      const expiringSoonAlarm = [];
+      const deadStock = {
+        notSold7Days: [],
+        notSold1Month: [],
+        notSold3Months: [],
+        notSold6Months: [],
+        notSold9Months: [],
+        notSold1Year: []
+      };
+
+      const processedItems = (inventoryRows || []).map(item => {
+        const expDate = parseExpiryDate(item.expiry_date);
+        
+        if (!expDate) {
+          const itemObj = {
+            ...item,
+            status: 'INVALID_DATE',
+            statusLabel: 'MISSING / INVALID DATE',
+            daysRemaining: null,
+            color: '#6b7280',
+            bgColor: '#f3f4f6',
+            borderColor: '#d1d5db',
+            formattedExpiry: item.expiry_date || 'Not Set'
+          };
+          byCategory.invalidDate.push(itemObj);
+          return itemObj;
         }
 
-        // Dead Stock Logic
+        expDate.setHours(23, 59, 59, 999);
+        const diffTime = expDate.getTime() - now.getTime();
+        const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        let status = 'VALID_OVER_12M';
+        let statusLabel = 'VALID (> 12 MONTHS)';
+        let color = '#16a34a'; // Green
+        let bgColor = '#f0fdf4';
+        let borderColor = '#86efac';
+
+        if (daysRemaining < 0) {
+          status = 'EXPIRED';
+          statusLabel = 'EXPIRED';
+          color = '#7f1d1d'; // Dark Red
+          bgColor = '#fee2e2';
+          borderColor = '#ef4444';
+        } else if (daysRemaining <= 90) {
+          status = 'EXPIRING_SOON';
+          statusLabel = 'EXPIRING SOON (≤ 3M)';
+          color = '#dc2626'; // Red
+          bgColor = '#fef2f2';
+          borderColor = '#fca5a5';
+        } else if (daysRemaining <= 180) {
+          status = 'EXPIRING_3_6M';
+          statusLabel = 'EXPIRING (3–6M)';
+          color = '#d97706'; // Orange
+          bgColor = '#fffbeb';
+          borderColor = '#fcd34d';
+        } else if (daysRemaining <= 365) {
+          status = 'VALID_6_12M';
+          statusLabel = 'VALID (6–12M)';
+          color = '#2563eb'; // Blue
+          bgColor = '#eff6ff';
+          borderColor = '#93c5fd';
+        }
+
+        const formattedExpiry = expDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const itemObj = {
+          ...item,
+          status,
+          statusLabel,
+          daysRemaining,
+          color,
+          bgColor,
+          borderColor,
+          formattedExpiry
+        };
+
+        if (status === 'EXPIRED') byCategory.expired.push(itemObj);
+        else if (status === 'EXPIRING_SOON') byCategory.in3Months.push(itemObj);
+        else if (status === 'EXPIRING_3_6M') byCategory.in3To6Months.push(itemObj);
+        else if (status === 'VALID_6_12M') byCategory.in6To12Months.push(itemObj);
+        else byCategory.over12Months.push(itemObj);
+
+        // Add to alarm list if expired or <= 3 months
+        if (daysRemaining <= 90) {
+          expiringSoonAlarm.push({
+            id: item.id,
+            name: item.medicine_name,
+            batch: item.batch_number || 'N/A',
+            qty: item.quantity,
+            expiry: item.expiry_date,
+            formattedExpiry,
+            daysRemaining,
+            status,
+            statusLabel,
+            color
+          });
+        }
+
+        // Dead Stock Calculation
         const itemName = item.medicine_name ? item.medicine_name.toLowerCase().trim() : '';
         const lastSale = salesMap[itemName];
         const daysSinceSale = lastSale ? (now - lastSale) / (1000 * 60 * 60 * 24) : Infinity;
 
-        if (daysSinceSale > 365) {
-          result.deadStock.notSold1Year.push(item);
-        } else if (daysSinceSale > 270) {
-          result.deadStock.notSold9Months.push(item);
-        } else if (daysSinceSale > 180) {
-          result.deadStock.notSold6Months.push(item);
-        } else if (daysSinceSale > 90) {
-          result.deadStock.notSold3Months.push(item);
-        } else if (daysSinceSale > 30) {
-          result.deadStock.notSold1Month.push(item);
-        } else if (daysSinceSale > 7) {
-          result.deadStock.notSold7Days.push(item);
-        }
+        if (daysSinceSale > 365) deadStock.notSold1Year.push(item);
+        else if (daysSinceSale > 270) deadStock.notSold9Months.push(item);
+        else if (daysSinceSale > 180) deadStock.notSold6Months.push(item);
+        else if (daysSinceSale > 90) deadStock.notSold3Months.push(item);
+        else if (daysSinceSale > 30) deadStock.notSold1Month.push(item);
+        else if (daysSinceSale > 7) deadStock.notSold7Days.push(item);
+
+        return itemObj;
       });
 
-      res.json(result);
+      // Sort nearest expiry first
+      const validSorted = processedItems
+        .filter(i => i.daysRemaining !== null)
+        .sort((a, b) => a.daysRemaining - b.daysRemaining);
+      const invalidList = processedItems.filter(i => i.daysRemaining === null);
+      const allSorted = [...validSorted, ...invalidList];
+
+      // Sort each category by nearest expiry
+      Object.keys(byCategory).forEach(cat => {
+        if (cat !== 'invalidDate') {
+          byCategory[cat].sort((a, b) => a.daysRemaining - b.daysRemaining);
+        }
+      });
+      expiringSoonAlarm.sort((a, b) => a.daysRemaining - b.daysRemaining);
+
+      const summary = {
+        expiredCount: byCategory.expired.length,
+        in3MonthsCount: byCategory.in3Months.length,
+        in3To6MonthsCount: byCategory.in3To6Months.length,
+        in6To12MonthsCount: byCategory.in6To12Months.length,
+        over12MonthsCount: byCategory.over12Months.length,
+        invalidCount: byCategory.invalidDate.length,
+        totalMedicines: processedItems.length
+      };
+
+      res.json({
+        summary,
+        allSorted,
+        expiringSoon: expiringSoonAlarm,
+        byCategory,
+        deadStock,
+        expiring: {
+          expired: byCategory.expired,
+          in3Months: byCategory.in3Months,
+          in6Months: byCategory.in3To6Months,
+          in9Months: byCategory.in6To12Months,
+          in12Months: byCategory.in6To12Months
+        }
+      });
     });
   });
 });
@@ -849,106 +992,280 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
 });
 
 // --- REPORTS & COLLECTIONS ROUTES ---
+// Helper for IST Date (UTC + 5:30)
+const getISTDate = () => {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  return new Date(now.getTime() + istOffset).toISOString().split('T')[0];
+};
 
 // 1. Staff: Today's Collection
 app.get('/api/staff/collection/today', authenticateToken, (req, res) => {
-    const staff_id = req.user.id;
-    const today = new Date().toISOString().split('T')[0];
-  
-    const query = `
-      SELECT mode, SUM(amount) as total FROM (
-        SELECT mode, amount_received as amount FROM payments WHERE visit_id IN (SELECT id FROM visits WHERE staff_id = ?) AND date(payment_date) = ?
-        UNION ALL
-        SELECT mode, amount FROM wallet_transactions WHERE staff_id = ? AND date(created_at) = ? AND type = 'CREDIT'
-        UNION ALL
-        SELECT mode, price_paid as amount FROM patient_packages WHERE staff_id = ? AND date(created_at) = ?
-      ) WHERE mode IS NOT NULL GROUP BY mode
-    `;
-  
-    db.all(query, [staff_id, today, staff_id, today, staff_id, today], (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    });
+  const today = req.query.date || getISTDate();
+
+  const query = `
+    SELECT mode, SUM(amount) as total, COUNT(*) as count FROM (
+      SELECT mode, amount_received as amount FROM payments WHERE date(payment_date) = ?
+      UNION ALL
+      SELECT mode, amount FROM wallet_transactions WHERE date(created_at) = ? AND type = 'CREDIT'
+      UNION ALL
+      SELECT mode, price_paid as amount FROM patient_packages WHERE date(created_at) = ?
+    ) WHERE mode IS NOT NULL GROUP BY mode
+  `;
+
+  db.all(query, [today, today, today], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
   });
+});
 
-// 2. Admin: Income vs Expenses Report
-app.get('/api/admin/reports', authenticateToken, (req, res) => {
-  if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
-
-  const summary = { 
-    today: { clinic_points: 0, medicine_points: 0, expense: 0 }, 
-    months: {}, 
-    years: {},
-    procedure_stats: { months: {}, years: {} }
-  };
+// Helper to parse clean medicine name, quantity, batch
+function parseMedicineDetails(details) {
+  if (!details || typeof details !== 'string') return { name: 'Unknown', qty: 1, batch: '' };
   
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  let name = details;
+  let batch = '';
+  let qty = 1;
 
-  const processRow = (rowDate, amount, type) => {
-    const d = rowDate || todayStr;
-    const monthStr = d.substring(0, 7); // "YYYY-MM"
-    const yearStr = d.substring(0, 4);  // "YYYY"
+  const qtyMatch = details.match(/\(Qty:\s*(\d+)\)/i);
+  if (qtyMatch) qty = parseInt(qtyMatch[1], 10) || 1;
 
-    if (d === todayStr) summary.today[type] += amount;
+  const batchMatch = details.match(/\[Batch:\s*([^\]]+)\]/i);
+  if (batchMatch) batch = batchMatch[1].trim();
 
-    if (!summary.months[monthStr]) summary.months[monthStr] = { clinic_points: 0, medicine_points: 0, expense: 0 };
-    summary.months[monthStr][type] += amount;
+  name = details.split('[')[0].split('(Qty:')[0].split('|')[0].trim();
+  return { name: name || details, qty, batch };
+}
 
-    if (!summary.years[yearStr]) summary.years[yearStr] = { clinic_points: 0, medicine_points: 0, expense: 0 };
-    summary.years[yearStr][type] += amount;
-  };
+const formatMonthLabel = (monthKey) => {
+  const [year, month] = monthKey.split('-');
+  const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+  return date.toLocaleString('en-IN', { month: 'short', year: 'numeric' });
+};
 
-  db.serialize(() => {
-    let pending = 3;
-    const checkDone = () => {
-      pending--;
-      if (pending === 0) res.json(summary);
-    };
+const formatFullMonthLabel = (monthKey) => {
+  const [year, month] = monthKey.split('-');
+  const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+  return date.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+};
 
-    // 1. Clinic Income (Procedures) & Statistics
-    db.all(`SELECT date(v.created_at) as date, p.name, p.amount FROM procedures p JOIN visits v ON p.visit_id = v.id`, [], (err, rows) => {
-      if (!err && rows) {
-        rows.forEach(r => {
-          processRow(r.date, r.amount, 'clinic_points');
-          
-          const d = r.date || todayStr;
-          const monthStr = d.substring(0, 7);
-          const yearStr = d.substring(0, 4);
-          const pName = r.name ? r.name.trim().toUpperCase() : 'UNKNOWN';
+// 2. Comprehensive Clinic Sales & Revenue Analytics Report
+app.get('/api/admin/reports', authenticateToken, (req, res) => {
+  const todayStr = getISTDate();
+  const currMonthKey = todayStr.substring(0, 7); // "YYYY-MM"
 
-          if (!summary.procedure_stats.months[monthStr]) summary.procedure_stats.months[monthStr] = {};
-          if (!summary.procedure_stats.months[monthStr][pName]) summary.procedure_stats.months[monthStr][pName] = { count: 0, amount: 0 };
-          summary.procedure_stats.months[monthStr][pName].count += 1;
-          summary.procedure_stats.months[monthStr][pName].amount += r.amount;
+  // Previous Month Key
+  const d = new Date(parseInt(currMonthKey.split('-')[0], 10), parseInt(currMonthKey.split('-')[1], 10) - 2, 1);
+  const prevMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-          if (!summary.procedure_stats.years[yearStr]) summary.procedure_stats.years[yearStr] = {};
-          if (!summary.procedure_stats.years[yearStr][pName]) summary.procedure_stats.years[yearStr][pName] = { count: 0, amount: 0 };
-          summary.procedure_stats.years[yearStr][pName].count += 1;
-          summary.procedure_stats.years[yearStr][pName].amount += r.amount;
-        });
-      }
-      checkDone();
-    });
+  db.all(`
+    SELECT p.id, p.name, p.amount, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
+    FROM procedures p
+    JOIN visits v ON p.visit_id = v.id
+  `, [], (err, procRows) => {
+    if (err) return res.status(500).json({ error: err.message });
 
-    // 2. Medicine Income (Medicines)
-    db.all(`SELECT date(v.created_at) as date, m.amount FROM medicines m JOIN visits v ON m.visit_id = v.id`, [], (err, rows) => {
-      if (!err && rows) rows.forEach(r => processRow(r.date, r.amount, 'medicine_points'));
-      checkDone();
-    });
+    db.all(`
+      SELECT m.id, m.details, m.amount, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
+      FROM medicines m
+      JOIN visits v ON m.visit_id = v.id
+    `, [], (err2, medRows) => {
+      if (err2) return res.status(500).json({ error: err2.message });
 
-    // 3. Expenses
-    db.all(`SELECT date(expense_date) as date, amount FROM expenses`, [], (err, rows) => {
-      if (!err && rows) rows.forEach(r => processRow(r.date, r.amount, 'expense'));
-      checkDone();
+      const procs = procRows || [];
+      const meds = medRows || [];
+
+      // 1. TODAY STATS
+      const todayProcs = procs.filter(p => p.visit_date === todayStr);
+      const todayMeds = meds.filter(m => m.visit_date === todayStr);
+      
+      const todayProcRevenue = todayProcs.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      const todayProcSessions = todayProcs.length;
+      const todayMedRevenue = todayMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+      const todayMedTransactions = todayMeds.length;
+      const todayMedUnitsSold = todayMeds.reduce((s, m) => s + parseMedicineDetails(m.details).qty, 0);
+      const todayTotalClinicSale = todayProcRevenue + todayMedRevenue;
+
+      const todayStats = {
+        totalClinicSale: todayTotalClinicSale,
+        procedureRevenue: todayProcRevenue,
+        procedureSessions: todayProcSessions,
+        medicineRevenue: todayMedRevenue,
+        medicineTransactions: todayMedTransactions,
+        medicineUnitsSold: todayMedUnitsSold
+      };
+
+      // 2. MONTHS MAP
+      const monthsMap = {};
+
+      const getOrInitMonth = (mKey) => {
+        if (!monthsMap[mKey]) {
+          monthsMap[mKey] = {
+            monthKey: mKey,
+            monthLabel: formatMonthLabel(mKey),
+            fullMonthLabel: formatFullMonthLabel(mKey),
+            procedureRevenue: 0,
+            procedureSessions: 0,
+            medicineRevenue: 0,
+            medicineTransactions: 0,
+            medicineUnitsSold: 0,
+            totalClinicSale: 0,
+            procedures: {},
+            medicines: {},
+            dailyMap: {}
+          };
+        }
+        return monthsMap[mKey];
+      };
+
+      // Ensure current & prev months are initialized
+      getOrInitMonth(currMonthKey);
+      getOrInitMonth(prevMonthKey);
+
+      // Process Procedures
+      procs.forEach(p => {
+        const mKey = p.month_key || currMonthKey;
+        const mObj = getOrInitMonth(mKey);
+        const amt = parseFloat(p.amount) || 0;
+        mObj.procedureRevenue += amt;
+        mObj.procedureSessions += 1;
+
+        const pName = p.name ? p.name.trim() : 'Consultation / General Procedure';
+        if (!mObj.procedures[pName]) mObj.procedures[pName] = { name: pName, sessions: 0, revenue: 0 };
+        mObj.procedures[pName].sessions += 1;
+        mObj.procedures[pName].revenue += amt;
+
+        const dKey = p.visit_date;
+        if (dKey) {
+          if (!mObj.dailyMap[dKey]) mObj.dailyMap[dKey] = { date: dKey, procedureSale: 0, medicineSale: 0, totalSale: 0 };
+          mObj.dailyMap[dKey].procedureSale += amt;
+          mObj.dailyMap[dKey].totalSale += amt;
+        }
+      });
+
+      // Process Medicines
+      meds.forEach(m => {
+        const mKey = m.month_key || currMonthKey;
+        const mObj = getOrInitMonth(mKey);
+        const amt = parseFloat(m.amount) || 0;
+        const parsed = parseMedicineDetails(m.details);
+        mObj.medicineRevenue += amt;
+        mObj.medicineTransactions += 1;
+        mObj.medicineUnitsSold += parsed.qty;
+
+        const mName = parsed.name;
+        if (!mObj.medicines[mName]) mObj.medicines[mName] = { name: mName, unitsSold: 0, revenue: 0, transactions: 0 };
+        mObj.medicines[mName].unitsSold += parsed.qty;
+        mObj.medicines[mName].revenue += amt;
+        mObj.medicines[mName].transactions += 1;
+
+        const dKey = m.visit_date;
+        if (dKey) {
+          if (!mObj.dailyMap[dKey]) mObj.dailyMap[dKey] = { date: dKey, procedureSale: 0, medicineSale: 0, totalSale: 0 };
+          mObj.dailyMap[dKey].medicineSale += amt;
+          mObj.dailyMap[dKey].totalSale += amt;
+        }
+      });
+
+      // Finalize totals and rankings for all months
+      const allMonthsKeys = Object.keys(monthsMap).sort().reverse();
+      const monthWiseSales = allMonthsKeys.map(mKey => {
+        const mObj = monthsMap[mKey];
+        mObj.totalSale = mObj.procedureRevenue + mObj.medicineRevenue;
+        mObj.totalClinicSale = mObj.totalSale;
+        mObj.avgMedicineSale = mObj.medicineTransactions > 0 ? (mObj.medicineRevenue / mObj.medicineTransactions) : 0;
+
+        // Procedure Rankings
+        const procList = Object.values(mObj.procedures).map(p => ({
+          ...p,
+          avgRevenuePerSession: p.sessions > 0 ? (p.revenue / p.sessions) : 0
+        }));
+        mObj.topProceduresBySessions = [...procList]
+          .sort((a, b) => b.sessions - a.sessions)
+          .map((p, idx) => ({ rank: idx + 1, ...p }));
+        
+        mObj.topProceduresByRevenue = [...procList]
+          .sort((a, b) => b.revenue - a.revenue)
+          .map((p, idx) => ({ rank: idx + 1, ...p }));
+
+        // Medicine Rankings
+        const medList = Object.values(mObj.medicines);
+        mObj.topMedicinesByQty = [...medList]
+          .sort((a, b) => b.unitsSold - a.unitsSold)
+          .map((m, idx) => ({ rank: idx + 1, ...m }));
+        
+        mObj.topMedicinesByRevenue = [...medList]
+          .sort((a, b) => b.revenue - a.revenue)
+          .map((m, idx) => ({ rank: idx + 1, ...m }));
+
+        // Daily List
+        mObj.dailySalesList = Object.values(mObj.dailyMap)
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .map(dItem => {
+            const parts = dItem.date.split('-');
+            const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            const dateLabel = dObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+            return { ...dItem, dateLabel };
+          });
+
+        return mObj;
+      });
+
+      const currMonthObj = monthsMap[currMonthKey];
+      const prevMonthObj = monthsMap[prevMonthKey];
+
+      // Monthly Comparison (Current vs Previous)
+      const calcChange = (curr, prev) => {
+        const diff = curr - prev;
+        const pct = prev > 0 ? ((diff / prev) * 100).toFixed(1) : 'N/A';
+        return { diff, pct };
+      };
+
+      const comparison = {
+        totalSale: { curr: currMonthObj.totalClinicSale, prev: prevMonthObj.totalClinicSale, ...calcChange(currMonthObj.totalClinicSale, prevMonthObj.totalClinicSale) },
+        procedureRevenue: { curr: currMonthObj.procedureRevenue, prev: prevMonthObj.procedureRevenue, ...calcChange(currMonthObj.procedureRevenue, prevMonthObj.procedureRevenue) },
+        medicineRevenue: { curr: currMonthObj.medicineRevenue, prev: prevMonthObj.medicineRevenue, ...calcChange(currMonthObj.medicineRevenue, prevMonthObj.medicineRevenue) },
+        procedureSessions: { curr: currMonthObj.procedureSessions, prev: prevMonthObj.procedureSessions, ...calcChange(currMonthObj.procedureSessions, prevMonthObj.procedureSessions) },
+        medicineTransactions: { curr: currMonthObj.medicineTransactions, prev: prevMonthObj.medicineTransactions, ...calcChange(currMonthObj.medicineTransactions, prevMonthObj.medicineTransactions) }
+      };
+
+      const availableMonths = allMonthsKeys.map(k => ({
+        key: k,
+        label: monthsMap[k].fullMonthLabel
+      }));
+
+      res.json({
+        today: todayStats,
+        currentMonth: currMonthObj,
+        previousMonth: prevMonthObj,
+        comparison,
+        monthWiseSales,
+        availableMonths,
+        // Legacy fields for backwards compatibility
+        todayLegacy: { clinic_points: todayProcRevenue, medicine_points: todayMedRevenue, expense: 0 },
+        months: {},
+        years: {}
+      });
     });
   });
 });
 
-// 4. Upcoming Events (Next 10 Days)
+app.get('/api/reports/procedures', authenticateToken, (req, res) => {
+  db.all(`
+    SELECT p.name, COUNT(*) as frequency, SUM(p.amount) as revenue
+    FROM procedures p
+    GROUP BY p.name
+    ORDER BY frequency DESC
+    LIMIT 30
+  `, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
 
+// 4. Upcoming Events (Next 10 Days)
 app.get('/api/dashboard/today', authenticateToken, (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = req.query.date || getISTDate();
   
   // Get unique patients count
   db.get(
@@ -1086,25 +1403,19 @@ app.get('/api/appointments', authenticateToken, (req, res) => {
 });
 
 app.get('/api/appointments/reminders', authenticateToken, (req, res) => {
-  const today = new Date();
-  const tmrw = new Date(today);
-  tmrw.setDate(tmrw.getDate() + 1);
-  const dayAfter = new Date(today);
-  dayAfter.setDate(dayAfter.getDate() + 2);
-
-  const todayStr = today.toISOString().split('T')[0];
-  const tmrwStr = tmrw.toISOString().split('T')[0];
-  const dayAfterStr = dayAfter.toISOString().split('T')[0];
+  const istDateStr = getISTDate();
+  const past7Days = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+  const next14Days = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
 
   db.all(
     `SELECT * FROM appointments 
-     WHERE (appointment_date = ? OR appointment_date = ? OR appointment_date = ?) 
-     AND status IN ('SCHEDULED', 'CONFIRMED')
+     WHERE appointment_date >= ? AND appointment_date <= ?
+     AND (status IS NULL OR status IN ('SCHEDULED', 'CONFIRMED', 'PENDING_REMINDER', 'FOLLOW_UP_DUE'))
      ORDER BY appointment_date ASC, appointment_time ASC`,
-    [todayStr, tmrwStr, dayAfterStr],
+    [past7Days, next14Days],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
+      res.json(rows || []);
     }
   );
 });
