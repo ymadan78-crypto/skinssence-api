@@ -423,7 +423,7 @@ app.delete('/api/visits/:id', authenticateToken, (req, res) => {
 });
 
 app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
-  const { patient_id, medicines_sold, payment_mode, amount_received } = req.body;
+  const { patient_id, medicines_sold, payment_mode, amount_received, visit_date } = req.body;
   const staff_id = req.user.id;
 
   if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'No medicines selected' });
@@ -431,7 +431,14 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
 
-    db.run('INSERT INTO visits (patient_id, staff_id, planned_procedures) VALUES (?, ?, ?)', [patient_id, staff_id, 'PHARMACY SALE'], function(err) {
+    let insertVisitSql = 'INSERT INTO visits (patient_id, staff_id, planned_procedures) VALUES (?, ?, ?)';
+    let insertVisitParams = [patient_id, staff_id, 'PHARMACY SALE'];
+    if (visit_date) {
+      insertVisitSql = 'INSERT INTO visits (patient_id, staff_id, planned_procedures, visit_date) VALUES (?, ?, ?, ?)';
+      insertVisitParams = [patient_id, staff_id, 'PHARMACY SALE', visit_date];
+    }
+
+    db.run(insertVisitSql, insertVisitParams, function(err) {
       if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
       const visit_id = this.lastID;
 
@@ -439,7 +446,14 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
       let hasError = false;
 
       medicines_sold.forEach(med => {
-        const detailsString = `${med.medicine_name} (Qty: ${med.quantity})`;
+        const batchInfo = med.batch_number ? `Batch: ${med.batch_number}` : '';
+        const expInfo = med.expiry_date ? `Exp: ${med.expiry_date}` : '';
+        const instrInfo = med.instruction ? `Inst: ${med.instruction}` : '';
+        const metaParts = [batchInfo, expInfo, instrInfo].filter(Boolean).join(', ');
+        const detailsString = metaParts 
+          ? `${med.medicine_name} [${metaParts}] (Qty: ${med.quantity})`
+          : `${med.medicine_name} (Qty: ${med.quantity})`;
+
         db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
           [visit_id, detailsString, med.amount], (err1) => {
             if (err1) {
@@ -473,6 +487,50 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
       };
     });
   });
+});
+
+// Get Pharmacy Bill / Medicines for a patient on a specific date (for auto-sync in Visit Entry)
+app.get('/api/patients/:id/pharmacy-by-date', authenticateToken, (req, res) => {
+  const patient_id = req.params.id;
+  const targetDate = req.query.date || new Date().toISOString().split('T')[0];
+
+  db.all(
+    `SELECT v.id as visit_id, v.visit_date, v.planned_procedures
+     FROM visits v
+     WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE' AND date(v.visit_date) = date(?)
+     ORDER BY v.id DESC`,
+    [patient_id, targetDate],
+    (err, visits) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!visits || visits.length === 0) {
+        return res.json({ found: false, medicines: [], total_amount: 0, amount_paid: 0, payments: [] });
+      }
+
+      const visitIds = visits.map(v => v.visit_id).join(',');
+      db.all(`SELECT * FROM medicines WHERE visit_id IN (${visitIds})`, [], (errM, meds) => {
+        if (errM) return res.status(500).json({ error: errM.message });
+
+        db.all(`SELECT * FROM payments WHERE visit_id IN (${visitIds})`, [], (errP, pays) => {
+          if (errP) return res.status(500).json({ error: errP.message });
+
+          const medicines = meds || [];
+          const payments = pays || [];
+          const total_amount = medicines.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+          const amount_paid = payments.reduce((sum, p) => sum + (parseFloat(p.amount_received) || 0), 0);
+
+          res.json({
+            found: true,
+            date: targetDate,
+            visits,
+            medicines,
+            total_amount,
+            amount_paid,
+            payments
+          });
+        });
+      });
+    }
+  );
 });
 
 // --- INVENTORY MANAGEMENT ROUTES ---
@@ -691,45 +749,101 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
     `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, u.name as doctor_name
      FROM visits v
      JOIN users u ON v.staff_id = u.id
-     WHERE v.patient_id = ?
+     WHERE v.patient_id = ? AND (v.planned_procedures IS NULL OR v.planned_procedures != 'PHARMACY SALE')
      ORDER BY v.visit_date DESC`,
     [patient_id],
     (err, visits) => {
       if (err) return res.status(500).json({ error: err.message });
-      if (visits.length === 0) return res.json([]);
 
-      // Fetch procedures, medicines, and payments for these visits
-      const visitIds = visits.map(v => v.visit_id).join(',');
-      
-      let procedures = [], medicines = [], payments = [];
-      let pending = 3;
+      // Also get pharmacy-only visits for this patient separately
+      db.all(
+        `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, u.name as doctor_name
+         FROM visits v
+         JOIN users u ON v.staff_id = u.id
+         WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE'
+         ORDER BY v.visit_date DESC`,
+        [patient_id],
+        (err2, pharmacyVisits) => {
+          if (err2) pharmacyVisits = [];
 
-      const checkDone = () => {
-        pending--;
-        if (pending === 0) {
-          // Combine data
-          const fullHistory = visits.map(v => ({
-            ...v,
-            procedures: procedures.filter(p => p.visit_id === v.visit_id),
-            medicines: medicines.filter(m => m.visit_id === v.visit_id),
-            payments: payments.filter(p => p.visit_id === v.visit_id),
-          }));
-          res.json(fullHistory);
+          // Combine all visit IDs to fetch sub-records
+          const allVisits = [...visits, ...pharmacyVisits];
+          if (allVisits.length === 0) return res.json([]);
+
+          const allIds = allVisits.map(v => v.visit_id).join(',');
+          let procedures = [], medicines = [], payments = [];
+          let pending = 3;
+
+          const checkDone = () => {
+            pending--;
+            if (pending === 0) {
+              // Build clinical visit records
+              const fullHistory = visits.map(v => {
+                const visitDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
+
+                // Find same-day pharmacy visits and merge their medicines/payments
+                const sameDayPharmacy = pharmacyVisits.filter(pv => {
+                  const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
+                  return pvDate === visitDate;
+                });
+                const sameDayPharmacyIds = sameDayPharmacy.map(pv => pv.visit_id);
+
+                const visitMeds = medicines.filter(m => m.visit_id === v.visit_id);
+                const pharmMeds = medicines.filter(m => sameDayPharmacyIds.includes(m.visit_id));
+                const visitPays = payments.filter(p => p.visit_id === v.visit_id);
+                const pharmPays = payments.filter(p => sameDayPharmacyIds.includes(p.visit_id));
+                const pharmTotal = pharmMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+
+                return {
+                  ...v,
+                  procedures: procedures.filter(p => p.visit_id === v.visit_id),
+                  medicines: [...visitMeds, ...pharmMeds],
+                  payments: [...visitPays, ...pharmPays],
+                  pharmacy_total: pharmTotal,
+                  has_pharmacy: sameDayPharmacy.length > 0
+                };
+              });
+
+              // Also add standalone pharmacy visits that have NO same-day clinical visit
+              const standalonePharmaVisits = pharmacyVisits.filter(pv => {
+                const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
+                return !visits.some(v => {
+                  const vDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
+                  return vDate === pvDate;
+                });
+              });
+
+              const standaloneHistory = standalonePharmaVisits.map(pv => ({
+                ...pv,
+                procedures: [],
+                medicines: medicines.filter(m => m.visit_id === pv.visit_id),
+                payments: payments.filter(p => p.visit_id === pv.visit_id),
+                pharmacy_total: medicines.filter(m => m.visit_id === pv.visit_id).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0),
+                has_pharmacy: true
+              }));
+
+              // Merge and sort by date descending
+              const combined = [...fullHistory, ...standaloneHistory].sort((a, b) =>
+                new Date(b.created_at) - new Date(a.created_at)
+              );
+              res.json(combined);
+            }
+          };
+
+          db.all(`SELECT * FROM procedures WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+            if (!err) procedures = rows;
+            checkDone();
+          });
+          db.all(`SELECT * FROM medicines WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+            if (!err) medicines = rows;
+            checkDone();
+          });
+          db.all(`SELECT * FROM payments WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+            if (!err) payments = rows;
+            checkDone();
+          });
         }
-      };
-
-      db.all(`SELECT * FROM procedures WHERE visit_id IN (${visitIds})`, [], (err, rows) => {
-        if (!err) procedures = rows;
-        checkDone();
-      });
-      db.all(`SELECT * FROM medicines WHERE visit_id IN (${visitIds})`, [], (err, rows) => {
-        if (!err) medicines = rows;
-        checkDone();
-      });
-      db.all(`SELECT * FROM payments WHERE visit_id IN (${visitIds})`, [], (err, rows) => {
-        if (!err) payments = rows;
-        checkDone();
-      });
+      );
     }
   );
 });
