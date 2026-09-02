@@ -19,14 +19,72 @@ db.run("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'", () => {});
 db.run("ALTER TABLE patients ADD COLUMN wallet_balance REAL DEFAULT 0", () => {});
 // Add default_instructions to inventory
 db.run("ALTER TABLE inventory ADD COLUMN default_instructions TEXT DEFAULT ''", () => {});
+db.run("ALTER TABLE wallet_transactions ADD COLUMN mode TEXT DEFAULT 'CASH'", () => {});
+db.run("ALTER TABLE wallet_transactions ADD COLUMN staff_id INTEGER", () => {});
+db.run("ALTER TABLE visits ADD COLUMN consultation_fee REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE payments ADD COLUMN patient_id INTEGER", () => {});
+db.run("ALTER TABLE payments ADD COLUMN purpose TEXT DEFAULT 'VISIT'", () => {});
+
 db.run(`CREATE TABLE IF NOT EXISTS wallet_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id INTEGER,
     amount REAL,
     type TEXT,
     description TEXT,
+    mode TEXT DEFAULT 'CASH',
+    staff_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`, () => {});
+
+// Invoice entity — stores every generated bill permanently
+db.run(`CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number TEXT UNIQUE,
+    patient_id INTEGER NOT NULL,
+    visit_id INTEGER,
+    items_json TEXT,
+    subtotal REAL DEFAULT 0,
+    discount REAL DEFAULT 0,
+    grand_total REAL DEFAULT 0,
+    payment_mode TEXT,
+    amount_paid REAL DEFAULT 0,
+    status TEXT DEFAULT 'PAID',
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+
+// Append-only audit log
+db.run(`CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT,
+    action TEXT,
+    entity TEXT,
+    entity_id TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+
+// Consultation fee rules — admin configurable
+db.run(`CREATE TABLE IF NOT EXISTS consultation_fee_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    min_days INTEGER NOT NULL,
+    max_days INTEGER,
+    fee REAL NOT NULL,
+    label TEXT,
+    active INTEGER DEFAULT 1
+)`, () => {});
+
+// Seed default fee rules if table is empty
+db.get('SELECT COUNT(*) as cnt FROM consultation_fee_rules', [], (err, row) => {
+  if (!err && row && row.cnt === 0) {
+    db.run("INSERT INTO consultation_fee_rules (min_days, max_days, fee, label) VALUES (0, 7, 0, 'Follow-up within 7 days')");
+    db.run("INSERT INTO consultation_fee_rules (min_days, max_days, fee, label) VALUES (8, 14, 200, 'Return visit 8-14 days')");
+    db.run("INSERT INTO consultation_fee_rules (min_days, max_days, fee, label) VALUES (15, NULL, 400, 'New consultation (>14 days)')");
+  }
+});
 
 // Middleware for authentication
 const authenticateToken = (req, res, next) => {
@@ -1593,6 +1651,158 @@ app.get('/api/events/festival/:religion', authenticateToken, (req, res) => {
 });
 
 // --- BASIC SERVER START ---
+// ============================================================
+// INVOICE ROUTES
+// ============================================================
+app.post('/api/invoices', authenticateToken, (req, res) => {
+  const { patient_id, visit_id, items_json, subtotal, discount, grand_total, payment_mode, amount_paid } = req.body;
+  const created_by = req.user.id;
+
+  // Generate invoice number: SKN-YYYYMMDD-XXXX
+  const today = new Date();
+  const dateStr = today.toISOString().split('T')[0].replace(/-/g, '');
+  db.get("SELECT COUNT(*) as cnt FROM invoices WHERE date(created_at) = date('now')", [], (err, row) => {
+    const seq = (row ? row.cnt + 1 : 1).toString().padStart(4, '0');
+    const invoice_number = `SKN-${dateStr}-${seq}`;
+
+    db.run(
+      `INSERT INTO invoices (invoice_number, patient_id, visit_id, items_json, subtotal, discount, grand_total, payment_mode, amount_paid, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [invoice_number, patient_id, visit_id || null, JSON.stringify(items_json), subtotal || 0, discount || 0, grand_total || 0, payment_mode, amount_paid || 0, created_by],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ id: this.lastID, invoice_number });
+      }
+    );
+  });
+});
+
+app.get('/api/invoices/patient/:patient_id', authenticateToken, (req, res) => {
+  db.all('SELECT * FROM invoices WHERE patient_id = ? ORDER BY created_at DESC', [req.params.patient_id], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+app.get('/api/invoices/:id', authenticateToken, (req, res) => {
+  db.get('SELECT * FROM invoices WHERE id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(row);
+  });
+});
+
+// ============================================================
+// CONSULTATION FEE RULES (Admin Configurable)
+// ============================================================
+app.get('/api/consultation-fee-rules', authenticateToken, (req, res) => {
+  db.all('SELECT * FROM consultation_fee_rules WHERE active = 1 ORDER BY min_days ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+app.post('/api/consultation-fee-rules', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Admin only' });
+  }
+  const { min_days, max_days, fee, label } = req.body;
+  db.run(
+    'INSERT INTO consultation_fee_rules (min_days, max_days, fee, label) VALUES (?, ?, ?, ?)',
+    [min_days, max_days || null, fee, label],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID });
+    }
+  );
+});
+
+app.put('/api/consultation-fee-rules/:id', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Admin only' });
+  }
+  const { min_days, max_days, fee, label, active } = req.body;
+  db.run(
+    'UPDATE consultation_fee_rules SET min_days=?, max_days=?, fee=?, label=?, active=? WHERE id=?',
+    [min_days, max_days || null, fee, label, active !== undefined ? active : 1, req.params.id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'Updated' });
+    }
+  );
+});
+
+app.delete('/api/consultation-fee-rules/:id', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Admin only' });
+  }
+  db.run('UPDATE consultation_fee_rules SET active = 0 WHERE id = ?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: 'Deactivated' });
+  });
+});
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+app.get('/api/audit-log', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Admin only' });
+  }
+  db.all('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// Helper: Write audit entry (called internally from routes)
+const writeAudit = (user, action, entity, entityId, oldVal, newVal, reason) => {
+  db.run(
+    'INSERT INTO audit_log (user_id, username, action, entity, entity_id, old_value, new_value, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [user.id, user.username, action, entity, String(entityId), oldVal ? JSON.stringify(oldVal) : null, newVal ? JSON.stringify(newVal) : null, reason || null]
+  );
+};
+
+// Expose writeAudit for use in routes (attach to app)
+app.locals.writeAudit = writeAudit;
+
+// ============================================================
+// MASTER PROCEDURE — Add price/category (Phase 4)
+// ============================================================
+db.run("ALTER TABLE master_procedures ADD COLUMN category TEXT DEFAULT 'General'", () => {});
+db.run("ALTER TABLE master_procedures ADD COLUMN standard_price REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE master_procedures ADD COLUMN duration_mins INTEGER DEFAULT 30", () => {});
+db.run("ALTER TABLE master_procedures ADD COLUMN active INTEGER DEFAULT 1", () => {});
+
+app.put('/api/procedures/master/:id', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') return res.status(403).json({ error: 'Unauthorized' });
+  const { name, category, standard_price, duration_mins } = req.body;
+  db.run(
+    'UPDATE master_procedures SET name=?, category=?, standard_price=?, duration_mins=? WHERE id=?',
+    [name, category || 'General', standard_price || 0, duration_mins || 30, req.params.id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'Updated' });
+    }
+  );
+});
+
+app.delete('/api/procedures/master/:id', authenticateToken, (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') return res.status(403).json({ error: 'Unauthorized' });
+  db.run('UPDATE master_procedures SET active = 0 WHERE id = ?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: 'Deactivated' });
+  });
+});
+
+// Return only active procedures with prices
+app.get('/api/procedures/master', authenticateToken, (req, res) => {
+  db.all('SELECT * FROM master_procedures WHERE active = 1 OR active IS NULL ORDER BY name ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Skinssence API running on http://localhost:${PORT}`);
 });
