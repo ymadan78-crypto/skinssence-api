@@ -307,29 +307,28 @@ app.post('/api/visits', authenticateToken, (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     
-    // 1. Create Visit (Support backdating if visit_date is provided)
-    let q = 'INSERT INTO visits (patient_id, staff_id, planned_procedures) VALUES (?, ?, ?)';
-    let params = [patient_id, staff_id, planned_procedures];
-    if (req.body.visit_date) {
-      q = 'INSERT INTO visits (patient_id, staff_id, planned_procedures, visit_date) VALUES (?, ?, ?, ?)';
-      params = [patient_id, staff_id, planned_procedures, req.body.visit_date];
-    }
+    const consultation_fee = parseFloat(req.body.consultation_fee) || 0;
+    const finalVisitDate = req.body.visit_date || new Date().toISOString();
+
+    // 1. Create Visit with explicit consultation_fee and visit_date
+    const q = 'INSERT INTO visits (patient_id, staff_id, planned_procedures, consultation_fee, visit_date) VALUES (?, ?, ?, ?, ?)';
+    const params = [patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate];
     
     db.run(q, params, function(err) {
       if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
       const visit_id = this.lastID;
       
-      // 2. Add Procedures (array) or single
+      // 2. Add Procedures (array) - Only real procedures, NEVER fake consultation procedures
       if (req.body.procedures && Array.isArray(req.body.procedures)) {
         req.body.procedures.forEach(p => {
-          if (p.name) {
+          if (p.name && p.name.trim() !== '') {
             db.run('INSERT INTO procedures (visit_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?)', 
-              [visit_id, p.name, notes, p.amount || 0, p.area || '']);
+              [visit_id, p.name.trim(), notes || '', parseFloat(p.amount) || 0, p.area || '']);
           }
         });
-      } else if (req.body.procedure_name) {
+      } else if (req.body.procedure_name && req.body.procedure_name.trim() !== '') {
         db.run('INSERT INTO procedures (visit_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?)', 
-          [visit_id, req.body.procedure_name, notes, req.body.procedure_amount || 0, req.body.area || '']);
+          [visit_id, req.body.procedure_name.trim(), notes || '', parseFloat(req.body.procedure_amount) || 0, req.body.area || '']);
       }
       
       // 3. Package Redeemed? Update usage count
@@ -339,10 +338,8 @@ app.post('/api/visits', authenticateToken, (req, res) => {
 
       // 4. Package Sold? Register as procedure for income, and create package row
       if (package_sold) {
-        // Generate income
         db.run('INSERT INTO procedures (visit_id, name, notes, amount) VALUES (?, ?, ?, ?)', 
           [visit_id, `[Package Sold] ${package_sold.name}`, 'Prepaid Package', package_sold.amount]);
-        // Create tracker
         db.run('INSERT INTO packages (patient_id, package_name, total_sessions) VALUES (?, ?, ?)',
           [patient_id, package_sold.name, package_sold.total_sessions]);
       }
@@ -350,22 +347,20 @@ app.post('/api/visits', authenticateToken, (req, res) => {
       // 5. Add Medicine (if any)
       if (medicine_details) {
         db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
-          [visit_id, medicine_details, medicine_amount]);
+          [visit_id, medicine_details, parseFloat(medicine_amount) || 0]);
       }
       
-      // 6. Add Payment (if any)
+      // 6. Add Payment (if any) - Match payment_date strictly with finalVisitDate so past visits never contaminate today
       if (amount_received && amount_received > 0) {
-        // If they use a package, we don't log a payment in 'payments' because it was prepaid.
         if (payment_mode !== 'PACKAGE_REDEMPTION') {
-          db.run('INSERT INTO payments (visit_id, mode, amount_received) VALUES (?, ?, ?)', 
-            [visit_id, payment_mode, amount_received]);
+          db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
+            [visit_id, patient_id, payment_mode, parseFloat(amount_received) || 0, finalVisitDate, 'VISIT']);
         }
           
         if (payment_mode === 'PREPAID_WALLET') {
           db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [amount_received, patient_id]);
-          // Note: using default staff_id and mode for backward compat on DEBITs.
-          db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)',
-            [patient_id, amount_received, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id]);
+          db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [patient_id, amount_received, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
         }
       }
       
@@ -570,6 +565,10 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
 });
 
 app.delete('/api/inventory/:id', authenticateToken, (req, res) => {
+  const role = req.user.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can delete stock items.' });
+  }
   const id = req.params.id;
   db.run('DELETE FROM inventory WHERE id = ?', [id], function(err) {
     if (err) return res.status(500).json({ error: err.message });
@@ -896,7 +895,7 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
 
   db.all(
-    `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, u.name as doctor_name
+    `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee, u.name as doctor_name
      FROM visits v
      JOIN users u ON v.staff_id = u.id
      WHERE v.patient_id = ? AND (v.planned_procedures IS NULL OR v.planned_procedures != 'PHARMACY SALE')
@@ -907,7 +906,7 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
 
       // Also get pharmacy-only visits for this patient separately
       db.all(
-        `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, u.name as doctor_name
+        `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee, u.name as doctor_name
          FROM visits v
          JOIN users u ON v.staff_id = u.id
          WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE'
