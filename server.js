@@ -650,19 +650,22 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     
     const salesQuery = `
-      SELECT m.name, MAX(v.visit_date) as last_sale_date
+      SELECT m.details, MAX(v.visit_date) as last_sale_date
       FROM medicines m
       JOIN visits v ON m.visit_id = v.id
-      GROUP BY m.name
+      GROUP BY m.details
     `;
     
     db.all(salesQuery, [], (err, salesRows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      
       const salesMap = {};
-      if (salesRows && salesRows.length > 0) {
+      if (!err && salesRows && salesRows.length > 0) {
         salesRows.forEach(row => {
-          if (row.name) salesMap[row.name.toLowerCase().trim()] = new Date(row.last_sale_date);
+          if (row.details) {
+            const parsed = parseMedicineDetails(row.details);
+            if (parsed && parsed.name) {
+              salesMap[parsed.name.toLowerCase().trim()] = new Date(row.last_sale_date);
+            }
+          }
         });
       }
 
