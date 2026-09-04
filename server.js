@@ -1449,8 +1449,13 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                     has_pharmacy: true
                   }));
 
+                  // Filter out packageHistory entries that already exist as [Package Sold] visits to prevent duplicates
+                  const filteredPackageHistory = packageHistory.filter(pkgItem => {
+                    return !fullHistory.some(v => (v.procedures || []).some(p => p.name && p.name.includes('[Package Sold]') && p.name.includes(pkgItem.package_name)));
+                  });
+
                   // Merge visits and package bookings, and sort by date descending
-                  const combined = [...fullHistory, ...standaloneHistory, ...packageHistory].sort((a, b) =>
+                  const combined = [...fullHistory, ...standaloneHistory, ...filteredPackageHistory].sort((a, b) =>
                     new Date(b.created_at) - new Date(a.created_at)
                   );
                   res.json(combined);
