@@ -854,6 +854,164 @@ app.get('/api/inventory', authenticateToken, (req, res) => {
   });
 });
 
+// --- LIVE STOCK RECONCILIATION ROUTES ---
+const fs = require('fs');
+const path = require('path');
+const { findDefaultStockFile, parseStockFile, generatePreview } = require('./stockReconciliation.js');
+
+app.get('/api/inventory/reconciliation/preview', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can preview stock reconciliation.' });
+  }
+
+  const filePath = req.query.file || findDefaultStockFile();
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Stock summary file not found on server.' });
+  }
+
+  try {
+    const fileItems = parseStockFile(filePath);
+    db.all('SELECT * FROM inventory', [], (err, currentInv) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const preview = generatePreview(fileItems, currentInv || []);
+      res.json({
+        file_name: path.basename(filePath),
+        file_path: filePath,
+        summary: preview.summary,
+        comparison: preview.comparison
+      });
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/inventory/reconciliation/apply', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can apply stock reconciliation.' });
+  }
+
+  const filePath = req.body?.file_path || findDefaultStockFile();
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Stock summary file not found.' });
+  }
+
+  try {
+    const fileItems = parseStockFile(filePath);
+    db.all('SELECT * FROM inventory', [], (err, currentInv) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      const { summary, comparison } = generatePreview(fileItems, currentInv || []);
+      const recCode = `REC-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`;
+      const fileName = path.basename(filePath);
+      const importedBy = req.user?.name || req.user?.username || 'Doctor / Admin';
+
+      db.run(
+        `INSERT INTO stock_reconciliations (reconciliation_code, file_name, total_items_in_file, items_replaced, items_added, items_zeroed, items_unchanged, total_stock_count, imported_by, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          recCode,
+          fileName,
+          summary.total_items_in_file,
+          summary.items_replaced,
+          summary.items_added,
+          summary.items_zeroed,
+          summary.items_unchanged,
+          summary.total_stock_count,
+          importedBy,
+          'Live actual stock replacement override'
+        ],
+        function (errRec) {
+          if (errRec) return res.status(500).json({ error: errRec.message });
+          const reconciliationId = this.lastID;
+
+          let pending = comparison.length;
+          if (pending === 0) {
+            return res.json({ message: 'No changes needed', summary });
+          }
+
+          const onDone = () => {
+            res.json({
+              message: 'Live stock reconciliation applied successfully! Current stock overridden to match Excel balance.',
+              reconciliation_id: reconciliationId,
+              reconciliation_code: recCode,
+              summary
+            });
+          };
+
+          comparison.forEach(item => {
+            if (item.action === 'Replace') {
+              db.run(
+                `UPDATE inventory SET quantity = ?, mrp = CASE WHEN ? > 0 THEN ? ELSE mrp END, expiry_date = CASE WHEN ? != '' THEN ? ELSE expiry_date END WHERE id = ?`,
+                [item.final_stock, item.mrp || 0, item.mrp || 0, item.expiry_date || '', item.expiry_date || '', item.db_id],
+                () => {
+                  db.run(
+                    `INSERT INTO stock_adjustments (reconciliation_id, inventory_id, medicine_name, batch_number, previous_stock, new_stock, adjustment, action, reason, source, imported_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'REPLACE', 'Live Stock Reconciliation', ?, ?)`,
+                    [reconciliationId, item.db_id, item.medicine, item.batch, item.existing_stock, item.final_stock, item.adjustment, fileName, importedBy]
+                  );
+                  pending--;
+                  if (pending === 0) onDone();
+                }
+              );
+            } else if (item.action === 'Add') {
+              db.run(
+                `INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date) VALUES (?, ?, ?, ?, ?)`,
+                [item.medicine, item.batch === '-' ? '' : item.batch, item.mrp || 0, item.final_stock, item.expiry_date || ''],
+                function () {
+                  const newId = this ? this.lastID : null;
+                  db.run(
+                    `INSERT INTO stock_adjustments (reconciliation_id, inventory_id, medicine_name, batch_number, previous_stock, new_stock, adjustment, action, reason, source, imported_by)
+                     VALUES (?, ?, ?, ?, 0, ?, ?, 'ADD', 'Live Stock Reconciliation', ?, ?)`,
+                    [reconciliationId, newId, item.medicine, item.batch, item.final_stock, item.adjustment, fileName, importedBy]
+                  );
+                  pending--;
+                  if (pending === 0) onDone();
+                }
+              );
+            } else if (item.action.startsWith('Set to 0')) {
+              db.run(
+                `UPDATE inventory SET quantity = 0 WHERE id = ?`,
+                [item.db_id],
+                () => {
+                  db.run(
+                    `INSERT INTO stock_adjustments (reconciliation_id, inventory_id, medicine_name, batch_number, previous_stock, new_stock, adjustment, action, reason, source, imported_by)
+                     VALUES (?, ?, ?, ?, ?, 0, ?, 'SET_ZERO', 'Live Stock Reconciliation', ?, ?)`,
+                    [reconciliationId, item.db_id, item.medicine, item.batch, item.existing_stock, item.adjustment, fileName, importedBy]
+                  );
+                  pending--;
+                  if (pending === 0) onDone();
+                }
+              );
+            } else {
+              pending--;
+              if (pending === 0) onDone();
+            }
+          });
+        }
+      );
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/inventory/reconciliation/history', authenticateToken, (req, res) => {
+  db.all('SELECT * FROM stock_reconciliations ORDER BY created_at DESC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
+app.get('/api/inventory/reconciliation/:id/details', authenticateToken, (req, res) => {
+  db.all('SELECT * FROM stock_adjustments WHERE reconciliation_id = ? ORDER BY id ASC', [req.params.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
 // Get last visit date for a patient (for consultation fee calculation)
 app.get('/api/patients/:id/last-visit', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
