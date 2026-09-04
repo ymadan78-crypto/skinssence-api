@@ -1797,6 +1797,375 @@ app.get('/api/reports/procedures', authenticateToken, (req, res) => {
   });
 });
 
+
+// ============================================================
+// DAILY DIARY / DAY BOOK (Day-Wise Complete Activity View)
+// ============================================================
+app.get('/api/admin/diary', authenticateToken, (req, res) => {
+  const targetDate = req.query.date || getISTDate();
+
+  // Helper for IST time formatting
+  const formatISTTime = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // 1. Visits for targetDate
+  const visitsSql = `
+    SELECT v.id as visit_id, v.patient_id, v.visit_date, v.consultation_fee, v.planned_procedures,
+           p.first_name, p.last_name, p.skinssence_id, p.mobile,
+           u.name as staff_name
+    FROM visits v
+    JOIN patients p ON v.patient_id = p.id
+    LEFT JOIN users u ON v.staff_id = u.id
+    WHERE date(v.visit_date) = date(?) OR v.visit_date LIKE ?
+    ORDER BY v.visit_date ASC, v.id ASC
+  `;
+
+  db.all(visitsSql, [targetDate, `${targetDate}%`], (errV, visits = []) => {
+    if (errV) return res.status(500).json({ error: errV.message });
+
+    const vIds = visits.map(v => v.visit_id);
+    const inClause = vIds.length > 0 ? vIds.join(',') : '0';
+
+    // 2. Procedures for visits
+    db.all(`SELECT * FROM procedures WHERE visit_id IN (${inClause})`, [], (errP, procs = []) => {
+      if (errP) return res.status(500).json({ error: errP.message });
+
+      // 3. Medicines for visits
+      db.all(`SELECT * FROM medicines WHERE visit_id IN (${inClause})`, [], (errM, meds = []) => {
+        if (errM) return res.status(500).json({ error: errM.message });
+
+        // 4. Standalone Packages booked on this date
+        const packSql = `
+          SELECT pp.*, p.first_name, p.last_name, p.skinssence_id, p.mobile, u.name as staff_name
+          FROM patient_packages pp
+          JOIN patients p ON pp.patient_id = p.id
+          LEFT JOIN users u ON pp.staff_id = u.id
+          WHERE date(pp.created_at) = date(?) OR pp.created_at LIKE ?
+          ORDER BY pp.created_at ASC, pp.id ASC
+        `;
+        db.all(packSql, [targetDate, `${targetDate}%`], (errPack, packages = []) => {
+          if (errPack) return res.status(500).json({ error: errPack.message });
+
+          // 5. Payments received on this date (actual payment date)
+          const paySql = `
+            SELECT pay.*, p.first_name, p.last_name, p.skinssence_id, p.mobile
+            FROM payments pay
+            LEFT JOIN patients p ON pay.patient_id = p.id
+            WHERE date(pay.payment_date) = date(?) OR pay.payment_date LIKE ?
+            ORDER BY pay.payment_date ASC, pay.id ASC
+          `;
+          db.all(paySql, [targetDate, `${targetDate}%`], (errPay, payments = []) => {
+            if (errPay) return res.status(500).json({ error: errPay.message });
+
+            // 6. Expenses on this date (actual expense date)
+            const expSql = `
+              SELECT e.*, u.name as staff_name
+              FROM expenses e
+              LEFT JOIN users u ON e.staff_id = u.id
+              WHERE (COALESCE(NULLIF(e.expense_date, ''), date(e.created_at), substr(e.created_at, 1, 10)) = date(?)
+                     OR e.expense_date LIKE ?
+                     OR ((e.expense_date IS NULL OR e.expense_date = '') AND e.created_at LIKE ?))
+              ORDER BY e.id ASC
+            `;
+            db.all(expSql, [targetDate, `${targetDate}%`, `${targetDate}%`], (errExp, expenses = []) => {
+              if (errExp) return res.status(500).json({ error: errExp.message });
+
+              // 7. Appointments on this date
+              const apptSql = `
+                SELECT a.*, p.skinssence_id
+                FROM appointments a
+                LEFT JOIN patients p ON (a.patient_id = p.id OR a.patient_id = p.skinssence_id OR a.mobile = p.mobile)
+                WHERE a.appointment_date = ? OR a.appointment_date LIKE ?
+                ORDER BY a.appointment_time ASC, a.id ASC
+              `;
+              db.all(apptSql, [targetDate, `${targetDate}%`], (errAppt, appts = []) => {
+                if (errAppt) return res.status(500).json({ error: errAppt.message });
+
+                // --- FINANCIAL SUMMARY & AGGREGATIONS ---
+                const distinctPatients = new Set(visits.map(v => v.patient_id));
+                const totalVisitsCount = distinctPatients.size;
+
+                const consultationRevenue = visits.reduce((sum, v) => sum + (parseFloat(v.consultation_fee) || 0), 0);
+
+                let procedureRevenue = 0;
+                let packageRevenue = 0;
+                const standardProcedures = [];
+                const packageSessionsRedeemed = [];
+                const packagesSold = [];
+
+                procs.forEach(p => {
+                  const amt = parseFloat(p.amount) || 0;
+                  const nameUpper = (p.name || '').toUpperCase();
+                  if (nameUpper.includes('[PACKAGE SOLD]') || (p.notes && p.notes.includes('Prepaid Package'))) {
+                    packageRevenue += amt;
+                    packagesSold.push(p);
+                  } else if (nameUpper.includes('[REDEEMED SESSION') || amt === 0) {
+                    packageSessionsRedeemed.push(p);
+                  } else {
+                    procedureRevenue += amt;
+                    standardProcedures.push(p);
+                  }
+                });
+
+                // Also include standalone packages if any that aren't already captured in visit procedures
+                packages.forEach(pkg => {
+                  const alreadyCounted = packagesSold.some(ps => ps.name && ps.name.includes(pkg.package_name) && Math.abs(ps.amount - pkg.price_paid) < 1);
+                  if (!alreadyCounted) {
+                    packageRevenue += (parseFloat(pkg.price_paid) || 0);
+                    packagesSold.push({
+                      id: `pkg-${pkg.id}`,
+                      name: `[Package Sold] ${pkg.package_name}`,
+                      amount: pkg.price_paid,
+                      patient_id: pkg.patient_id,
+                      notes: `${pkg.total_sessions} Sessions`
+                    });
+                  }
+                });
+
+                const medicineRevenue = meds.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+                const totalSales = consultationRevenue + procedureRevenue + medicineRevenue + packageRevenue;
+
+                // Collections
+                const collectionByMode = {};
+                let totalCollection = 0;
+
+                payments.forEach(pay => {
+                  const amt = parseFloat(pay.amount_received) || 0;
+                  const mode = (pay.mode || 'CASH').toUpperCase();
+                  collectionByMode[mode] = (collectionByMode[mode] || 0) + amt;
+                  totalCollection += amt;
+                });
+
+                // Expenses
+                const expensesByCategory = {};
+                let totalExpenses = 0;
+
+                expenses.forEach(e => {
+                  const amt = parseFloat(e.amount) || 0;
+                  const cat = (e.category || 'OTHER').toUpperCase();
+                  expensesByCategory[cat] = (expensesByCategory[cat] || 0) + amt;
+                  totalExpenses += amt;
+                });
+
+                const netBalance = totalCollection - totalExpenses;
+
+                // --- UNIFIED TIMELINE ENTRIES ---
+                const timeline = [];
+
+                // 1. Consultations
+                visits.forEach(v => {
+                  const pName = `${v.first_name || ''} ${v.last_name || ''}`.trim();
+                  const pId = v.skinssence_id || `S-${v.patient_id}`;
+                  const time = formatISTTime(v.visit_date);
+
+                  if ((parseFloat(v.consultation_fee) || 0) > 0) {
+                    timeline.push({
+                      id: `cons-${v.visit_id}`,
+                      category: 'CONSULTATION',
+                      category_label: 'Consultation Fee',
+                      title: `${pName} (${pId})`,
+                      subtitle: `Doctor Consultation • Staff: ${v.staff_name || 'Clinic'}`,
+                      amount: parseFloat(v.consultation_fee),
+                      is_debit: false,
+                      badge: 'CONSULTATION',
+                      badge_color: '#3b82f6',
+                      time: time,
+                      patient_id: v.patient_id,
+                      visit_id: v.visit_id
+                    });
+                  }
+                });
+
+                // 2. Procedures & Packages
+                procs.forEach(p => {
+                  const v = visits.find(v => v.visit_id === p.visit_id);
+                  const pName = v ? `${v.first_name || ''} ${v.last_name || ''}`.trim() : 'Patient';
+                  const pId = v ? (v.skinssence_id || `S-${v.patient_id}`) : '';
+                  const time = v ? formatISTTime(v.visit_date) : '';
+                  const amt = parseFloat(p.amount) || 0;
+                  const nameUpper = (p.name || '').toUpperCase();
+
+                  if (nameUpper.includes('[PACKAGE SOLD]')) {
+                    timeline.push({
+                      id: `procpkg-${p.id}`,
+                      category: 'PACKAGES',
+                      category_label: 'Package Sale',
+                      title: `${pName} (${pId}) — ${p.name.replace(/\[Package Sold\]/i, '').trim()}`,
+                      subtitle: `Prepaid Package Booked • ₹${amt.toFixed(2)}`,
+                      amount: amt,
+                      is_debit: false,
+                      badge: 'PACKAGE BOOKED',
+                      badge_color: '#8b5cf6',
+                      time: time,
+                      patient_id: v ? v.patient_id : null,
+                      visit_id: p.visit_id
+                    });
+                  } else if (nameUpper.includes('[REDEEMED SESSION') || amt === 0) {
+                    timeline.push({
+                      id: `procred-${p.id}`,
+                      category: 'PACKAGES',
+                      category_label: 'Package Session Redemption',
+                      title: `${pName} (${pId}) — ${p.name}`,
+                      subtitle: 'Package Session Consumed • Zero Payment (Prepaid)',
+                      amount: 0,
+                      is_debit: false,
+                      badge: 'SESSION USED (₹0)',
+                      badge_color: '#059669',
+                      time: time,
+                      patient_id: v ? v.patient_id : null,
+                      visit_id: p.visit_id
+                    });
+                  } else {
+                    timeline.push({
+                      id: `proc-${p.id}`,
+                      category: 'PROCEDURES',
+                      category_label: 'Procedure / Treatment',
+                      title: `${pName} (${pId}) — ${p.name}`,
+                      subtitle: `${p.area ? 'Area: ' + p.area + ' | ' : ''}Billed: ₹${amt.toFixed(2)} ${p.notes ? '• ' + p.notes : ''}`,
+                      amount: amt,
+                      is_debit: false,
+                      badge: 'PROCEDURE',
+                      badge_color: '#0284c7',
+                      time: time,
+                      patient_id: v ? v.patient_id : null,
+                      visit_id: p.visit_id
+                    });
+                  }
+                });
+
+                // 3. Medicines
+                meds.forEach(m => {
+                  const v = visits.find(v => v.visit_id === m.visit_id);
+                  const pName = v ? `${v.first_name || ''} ${v.last_name || ''}`.trim() : 'Patient';
+                  const pId = v ? (v.skinssence_id || `S-${v.patient_id}`) : '';
+                  const time = v ? formatISTTime(v.visit_date) : '';
+                  const amt = parseFloat(m.amount) || 0;
+
+                  timeline.push({
+                    id: `med-${m.id}`,
+                    category: 'MEDICINES',
+                    category_label: 'Pharmacy Sale',
+                    title: `${pName} (${pId}) — ${m.details}`,
+                    subtitle: `Medicine Dispensed • ₹${amt.toFixed(2)}`,
+                    amount: amt,
+                    is_debit: false,
+                    badge: 'MEDICINE',
+                    badge_color: '#d97706',
+                    time: time,
+                    patient_id: v ? v.patient_id : null,
+                    visit_id: m.visit_id
+                  });
+                });
+
+                // 4. Payments
+                payments.forEach(pay => {
+                  const pName = `${pay.first_name || ''} ${pay.last_name || ''}`.trim() || 'Patient';
+                  const pId = pay.skinssence_id || (pay.patient_id ? `S-${pay.patient_id}` : '');
+                  const time = formatISTTime(pay.payment_date);
+                  const amt = parseFloat(pay.amount_received) || 0;
+                  const mode = (pay.mode || 'CASH').toUpperCase();
+
+                  timeline.push({
+                    id: `pay-${pay.id}`,
+                    category: 'PAYMENTS',
+                    category_label: 'Payment Received',
+                    title: `₹${amt.toFixed(2)} Received via ${mode}`,
+                    subtitle: `From: ${pName} (${pId}) ${pay.purpose ? '• Purpose: ' + pay.purpose : ''} • Visit #${pay.visit_id || 'Direct'}`,
+                    amount: amt,
+                    is_debit: false,
+                    badge: `PAID (${mode})`,
+                    badge_color: '#16a34a',
+                    time: time,
+                    patient_id: pay.patient_id,
+                    visit_id: pay.visit_id
+                  });
+                });
+
+                // 5. Expenses
+                expenses.forEach(e => {
+                  const amt = parseFloat(e.amount) || 0;
+                  const cat = e.category || 'EXPENSE';
+
+                  timeline.push({
+                    id: `exp-${e.id}`,
+                    category: 'EXPENSES',
+                    category_label: 'Expense / Debit',
+                    title: `₹${amt.toFixed(2)} — ${e.vendor || cat}`,
+                    subtitle: `Category: ${cat} ${e.notes ? '• ' + e.notes : ''} ${e.staff_name ? '• Logged by: ' + e.staff_name : ''}`,
+                    amount: amt,
+                    is_debit: true,
+                    badge: `EXPENSE (${cat})`,
+                    badge_color: '#dc2626',
+                    time: '',
+                    patient_id: null,
+                    expense_id: e.id
+                  });
+                });
+
+                // 6. Appointments
+                appts.forEach(a => {
+                  const pId = a.skinssence_id || a.patient_id || '';
+                  const status = (a.status || 'SCHEDULED').toUpperCase();
+
+                  timeline.push({
+                    id: `appt-${a.id}`,
+                    category: 'APPOINTMENTS',
+                    category_label: 'Appointment Booking',
+                    title: `${a.patient_name} (${pId || 'Appt #' + a.id})`,
+                    subtitle: `Time: ${a.appointment_time || 'Not Set'} • Mobile: ${a.mobile || 'N/A'} ${a.notes ? '• Notes: ' + a.notes : ''}`,
+                    amount: null,
+                    is_debit: false,
+                    badge: status,
+                    badge_color: status === 'COMPLETED' ? '#16a34a' : (status === 'CANCELLED' || status === 'NO-SHOW' ? '#dc2626' : '#f59e0b'),
+                    time: a.appointment_time || '',
+                    patient_id: a.patient_id,
+                    appointment_id: a.id
+                  });
+                });
+
+                res.json({
+                  date: targetDate,
+                  summary: {
+                    total_visits: totalVisitsCount,
+                    consultation_revenue: consultationRevenue,
+                    procedure_revenue: procedureRevenue,
+                    medicine_revenue: medicineRevenue,
+                    package_revenue: packageRevenue,
+                    total_sales: totalSales,
+                    total_collection: totalCollection,
+                    collection_by_mode: collectionByMode,
+                    total_expenses: totalExpenses,
+                    expenses_by_category: expensesByCategory,
+                    net_balance: netBalance,
+                    appointments_count: appts.length
+                  },
+                  visits,
+                  procedures: procs,
+                  medicines: meds,
+                  packages: packagesSold,
+                  payments,
+                  expenses,
+                  appointments: appts,
+                  timeline
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
+
 // 4. Upcoming Events (Next 10 Days)
 app.get('/api/dashboard/today', authenticateToken, (req, res) => {
   const today = req.query.date || getISTDate();
