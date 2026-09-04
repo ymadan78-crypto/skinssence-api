@@ -596,6 +596,8 @@ app.post('/api/visits', authenticateToken, (req, res) => {
           [visit_id, `[Package Sold] ${package_sold.name}`, 'Prepaid Package', package_sold.amount]);
         db.run('INSERT INTO packages (patient_id, package_name, total_sessions) VALUES (?, ?, ?)',
           [patient_id, package_sold.name, package_sold.total_sessions]);
+        db.run('INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)',
+          [patient_id, package_sold.name, package_sold.total_sessions, package_sold.amount, payment_mode || 'CASH', staff_id, finalVisitDate]);
       }
       
       // 5. Add Medicine (if any)
@@ -1184,82 +1186,133 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
         (err2, pharmacyVisits) => {
           if (err2) pharmacyVisits = [];
 
-          // Combine all visit IDs to fetch sub-records
-          const allVisits = [...visits, ...pharmacyVisits];
-          if (allVisits.length === 0) return res.json([]);
+          // Also fetch package purchases for this patient to include in visit history
+          db.all(
+            `SELECT p.*, u.name as staff_name
+             FROM patient_packages p
+             LEFT JOIN users u ON p.staff_id = u.id
+             WHERE p.patient_id = ?
+             ORDER BY p.created_at DESC`,
+            [patient_id],
+            (errPkg, pkgRows) => {
+              if (errPkg) pkgRows = [];
 
-          const allIds = allVisits.map(v => v.visit_id).join(',');
-          let procedures = [], medicines = [], payments = [];
-          let pending = 3;
-
-          const checkDone = () => {
-            pending--;
-            if (pending === 0) {
-              // Build clinical visit records
-              const fullHistory = visits.map(v => {
-                const visitDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
-
-                // Find same-day pharmacy visits and merge their medicines/payments
-                const sameDayPharmacy = pharmacyVisits.filter(pv => {
-                  const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
-                  return pvDate === visitDate;
-                });
-                const sameDayPharmacyIds = sameDayPharmacy.map(pv => pv.visit_id);
-
-                const visitMeds = medicines.filter(m => m.visit_id === v.visit_id);
-                const pharmMeds = medicines.filter(m => sameDayPharmacyIds.includes(m.visit_id));
-                const visitPays = payments.filter(p => p.visit_id === v.visit_id);
-                const pharmPays = payments.filter(p => sameDayPharmacyIds.includes(p.visit_id));
-                const pharmTotal = pharmMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-
-                return {
-                  ...v,
-                  procedures: procedures.filter(p => p.visit_id === v.visit_id),
-                  medicines: [...visitMeds, ...pharmMeds],
-                  payments: [...visitPays, ...pharmPays],
-                  pharmacy_total: pharmTotal,
-                  has_pharmacy: sameDayPharmacy.length > 0
-                };
-              });
-
-              // Also add standalone pharmacy visits that have NO same-day clinical visit
-              const standalonePharmaVisits = pharmacyVisits.filter(pv => {
-                const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
-                return !visits.some(v => {
-                  const vDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
-                  return vDate === pvDate;
-                });
-              });
-
-              const standaloneHistory = standalonePharmaVisits.map(pv => ({
-                ...pv,
-                procedures: [],
-                medicines: medicines.filter(m => m.visit_id === pv.visit_id),
-                payments: payments.filter(p => p.visit_id === pv.visit_id),
-                pharmacy_total: medicines.filter(m => m.visit_id === pv.visit_id).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0),
-                has_pharmacy: true
+              const packageHistory = (pkgRows || []).map(pkg => ({
+                visit_id: `pkg_${pkg.id}`,
+                is_package: true,
+                package_id: pkg.id,
+                created_at: pkg.created_at,
+                doctor_name: pkg.staff_name || 'Front Desk / Clinic',
+                package_name: pkg.package_name,
+                total_sessions: pkg.total_sessions,
+                sessions_used: pkg.sessions_used || 0,
+                price_paid: pkg.price_paid,
+                mode: pkg.mode || 'CASH',
+                consultation_fee: 0,
+                planned_procedures: `Package: ${pkg.package_name} (${pkg.total_sessions} sessions)`,
+                procedures: [
+                  {
+                    id: `pkg_proc_${pkg.id}`,
+                    visit_id: `pkg_${pkg.id}`,
+                    name: `🎁 Package Booked: ${pkg.package_name} (${pkg.total_sessions} Sessions)`,
+                    notes: `Mode: ${pkg.mode || 'CASH'} • Remaining: ${(pkg.total_sessions || 0) - (pkg.sessions_used || 0)} sessions`,
+                    amount: pkg.price_paid,
+                    area: ''
+                  }
+                ],
+                medicines: [],
+                payments: [
+                  {
+                    id: `pkg_pay_${pkg.id}`,
+                    visit_id: `pkg_${pkg.id}`,
+                    mode: pkg.mode || 'CASH',
+                    amount_received: pkg.price_paid
+                  }
+                ],
+                pharmacy_total: 0,
+                has_pharmacy: false
               }));
 
-              // Merge and sort by date descending
-              const combined = [...fullHistory, ...standaloneHistory].sort((a, b) =>
-                new Date(b.created_at) - new Date(a.created_at)
-              );
-              res.json(combined);
-            }
-          };
+              // Combine all visit IDs to fetch sub-records
+              const allVisits = [...visits, ...pharmacyVisits];
+              if (allVisits.length === 0) {
+                return res.json(packageHistory);
+              }
 
-          db.all(`SELECT * FROM procedures WHERE visit_id IN (${allIds})`, [], (err, rows) => {
-            if (!err) procedures = rows;
-            checkDone();
-          });
-          db.all(`SELECT * FROM medicines WHERE visit_id IN (${allIds})`, [], (err, rows) => {
-            if (!err) medicines = rows;
-            checkDone();
-          });
-          db.all(`SELECT * FROM payments WHERE visit_id IN (${allIds})`, [], (err, rows) => {
-            if (!err) payments = rows;
-            checkDone();
-          });
+              const allIds = allVisits.map(v => v.visit_id).join(',');
+              let procedures = [], medicines = [], payments = [];
+              let pending = 3;
+
+              const checkDone = () => {
+                pending--;
+                if (pending === 0) {
+                  // Build clinical visit records
+                  const fullHistory = visits.map(v => {
+                    const visitDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
+
+                    // Find same-day pharmacy visits and merge their medicines/payments
+                    const sameDayPharmacy = pharmacyVisits.filter(pv => {
+                      const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
+                      return pvDate === visitDate;
+                    });
+                    const sameDayPharmacyIds = sameDayPharmacy.map(pv => pv.visit_id);
+
+                    const visitMeds = medicines.filter(m => m.visit_id === v.visit_id);
+                    const pharmMeds = medicines.filter(m => sameDayPharmacyIds.includes(m.visit_id));
+                    const visitPays = payments.filter(p => p.visit_id === v.visit_id);
+                    const pharmPays = payments.filter(p => sameDayPharmacyIds.includes(p.visit_id));
+                    const pharmTotal = pharmMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+
+                    return {
+                      ...v,
+                      procedures: procedures.filter(p => p.visit_id === v.visit_id),
+                      medicines: [...visitMeds, ...pharmMeds],
+                      payments: [...visitPays, ...pharmPays],
+                      pharmacy_total: pharmTotal,
+                      has_pharmacy: sameDayPharmacy.length > 0
+                    };
+                  });
+
+                  // Also add standalone pharmacy visits that have NO same-day clinical visit
+                  const standalonePharmaVisits = pharmacyVisits.filter(pv => {
+                    const pvDate = pv.created_at ? pv.created_at.split('T')[0] : pv.created_at;
+                    return !visits.some(v => {
+                      const vDate = v.created_at ? v.created_at.split('T')[0] : v.created_at;
+                      return vDate === pvDate;
+                    });
+                  });
+
+                  const standaloneHistory = standalonePharmaVisits.map(pv => ({
+                    ...pv,
+                    procedures: [],
+                    medicines: medicines.filter(m => m.visit_id === pv.visit_id),
+                    payments: payments.filter(p => p.visit_id === pv.visit_id),
+                    pharmacy_total: medicines.filter(m => m.visit_id === pv.visit_id).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0),
+                    has_pharmacy: true
+                  }));
+
+                  // Merge visits and package bookings, and sort by date descending
+                  const combined = [...fullHistory, ...standaloneHistory, ...packageHistory].sort((a, b) =>
+                    new Date(b.created_at) - new Date(a.created_at)
+                  );
+                  res.json(combined);
+                }
+              };
+
+              db.all(`SELECT * FROM procedures WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+                if (!err) procedures = rows;
+                checkDone();
+              });
+              db.all(`SELECT * FROM medicines WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+                if (!err) medicines = rows;
+                checkDone();
+              });
+              db.all(`SELECT * FROM payments WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+                if (!err) payments = rows;
+                checkDone();
+              });
+            }
+          );
         }
       );
     }
@@ -2448,15 +2501,40 @@ app.get('/api/patients/:id/packages', authenticateToken, (req, res) => {
 
 app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
-  const staff_id = req.user.id;
-  const { package_name, total_sessions, price_paid, mode } = req.body;
+  const staff_id = req.user?.id || 1;
+  const { package_name, total_sessions, price_paid, mode, booking_date, sessions_used } = req.body;
+  
+  let createdAtVal = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  if (booking_date && typeof booking_date === 'string' && booking_date.trim()) {
+    const trimmed = booking_date.trim();
+    if (trimmed.length === 10) {
+      createdAtVal = `${trimmed} 12:00:00`;
+    } else {
+      createdAtVal = trimmed;
+    }
+  }
+
+  const used = parseInt(sessions_used, 10) || 0;
   
   db.run(
-    `INSERT INTO patient_packages (patient_id, package_name, total_sessions, price_paid, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patient_id, package_name, total_sessions, price_paid, mode || 'CASH', staff_id],
+    `INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [patient_id, package_name, parseInt(total_sessions, 10), used, parseFloat(price_paid) || 0, mode || 'CASH', staff_id, createdAtVal],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Package added successfully' });
+      res.json({ message: 'Package added successfully', id: this.lastID });
+    }
+  );
+});
+
+app.delete('/api/patients/:patient_id/packages/:package_id', authenticateToken, (req, res) => {
+  const { patient_id, package_id } = req.params;
+  db.run(
+    `DELETE FROM patient_packages WHERE id = ? AND patient_id = ?`,
+    [package_id, patient_id],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Package not found' });
+      res.json({ message: 'Package deleted successfully' });
     }
   );
 });
