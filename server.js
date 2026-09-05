@@ -22,8 +22,19 @@ db.run("ALTER TABLE inventory ADD COLUMN default_instructions TEXT DEFAULT ''", 
 db.run("ALTER TABLE wallet_transactions ADD COLUMN mode TEXT DEFAULT 'CASH'", () => {});
 db.run("ALTER TABLE wallet_transactions ADD COLUMN staff_id INTEGER", () => {});
 db.run("ALTER TABLE visits ADD COLUMN consultation_fee REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE visits ADD COLUMN subtotal REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE visits ADD COLUMN discount_type TEXT DEFAULT 'NONE'", () => {});
+db.run("ALTER TABLE visits ADD COLUMN discount_value REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE visits ADD COLUMN discount_amount REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE visits ADD COLUMN net_payable REAL DEFAULT 0", () => {});
+
 db.run("ALTER TABLE payments ADD COLUMN patient_id INTEGER", () => {});
 db.run("ALTER TABLE payments ADD COLUMN purpose TEXT DEFAULT 'VISIT'", () => {});
+
+db.run("ALTER TABLE invoices ADD COLUMN discount_type TEXT DEFAULT 'NONE'", () => {});
+db.run("ALTER TABLE invoices ADD COLUMN discount_value REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE invoices ADD COLUMN discount_amount REAL DEFAULT 0", () => {});
+db.run("ALTER TABLE invoices ADD COLUMN net_payable REAL DEFAULT 0", () => {});
 
 db.run(`CREATE TABLE IF NOT EXISTS wallet_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -557,6 +568,13 @@ app.post('/api/procedures/master/merge', authenticateToken, (req, res) => {
 app.post('/api/visits', authenticateToken, (req, res) => {
   const { patient_id, procedure_name, notes, procedure_amount, medicine_details, medicine_amount, payment_mode, amount_received, planned_procedures, package_sold, package_redeemed_id } = req.body;
   const staff_id = req.user.id;
+  const { 
+    subtotal: rawSubtotal, 
+    discount_type, 
+    discount_value, 
+    discount_amount, 
+    net_payable: rawNetPayable 
+  } = req.body;
 
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
@@ -564,9 +582,35 @@ app.post('/api/visits', authenticateToken, (req, res) => {
     const consultation_fee = parseFloat(req.body.consultation_fee) || 0;
     const finalVisitDate = req.body.visit_date || new Date().toISOString();
 
-    // 1. Create Visit with explicit consultation_fee and visit_date
-    const q = 'INSERT INTO visits (patient_id, staff_id, planned_procedures, consultation_fee, visit_date) VALUES (?, ?, ?, ?, ?)';
-    const params = [patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate];
+    // Calculate subtotal if not passed
+    let procSum = 0;
+    if (req.body.procedures && Array.isArray(req.body.procedures)) {
+      procSum = req.body.procedures.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    } else if (req.body.procedure_amount) {
+      procSum = parseFloat(req.body.procedure_amount) || 0;
+    }
+    const medSum = parseFloat(req.body.medicine_amount) || 0;
+    const calculatedSubtotal = consultation_fee + procSum + medSum;
+    const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null ? (parseFloat(rawSubtotal) || 0) : calculatedSubtotal;
+
+    const finalDiscType = (discount_type || 'NONE').toUpperCase();
+    const finalDiscVal = parseFloat(discount_value) || 0;
+    const finalDiscAmt = parseFloat(discount_amount) || 0;
+    const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
+      ? (parseFloat(rawNetPayable) || 0) 
+      : Math.max(0, finalSubtotal - finalDiscAmt);
+
+    // 1. Create Visit with consultation_fee, visit_date, and discount fields
+    const q = `
+      INSERT INTO visits (
+        patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
+        subtotal, discount_type, discount_value, discount_amount, net_payable
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const params = [
+      patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate,
+      finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
+    ];
     
     db.run(q, params, function(err) {
       if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
@@ -606,23 +650,30 @@ app.post('/api/visits', authenticateToken, (req, res) => {
           [visit_id, medicine_details, parseFloat(medicine_amount) || 0]);
       }
       
-      // 6. Add Payment (if any) - Match payment_date strictly with finalVisitDate so past visits never contaminate today
-      if (amount_received && amount_received > 0) {
+      // 6. Add Payment (if any) - Strictly records Net Payable received, matching finalVisitDate
+      const payAmount = parseFloat(amount_received) || 0;
+      if (payAmount > 0) {
         if (payment_mode !== 'PACKAGE_REDEMPTION') {
           db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
-            [visit_id, patient_id, payment_mode, parseFloat(amount_received) || 0, finalVisitDate, 'VISIT']);
+            [visit_id, patient_id, payment_mode, payAmount, finalVisitDate, 'VISIT']);
         }
           
         if (payment_mode === 'PREPAID_WALLET') {
-          db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [amount_received, patient_id]);
+          db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [payAmount, patient_id]);
           db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [patient_id, amount_received, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
+            [patient_id, payAmount, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
         }
       }
       
       db.run('COMMIT', (err) => {
         if (err) return res.status(500).json({ error: 'Commit failed' });
-        res.json({ message: 'Visit recorded successfully!', visit_id });
+        res.json({ 
+          message: 'Visit recorded successfully!', 
+          visit_id,
+          subtotal: finalSubtotal,
+          discount_amount: finalDiscAmt,
+          net_payable: finalNetPayable
+        });
       });
     });
   });
@@ -680,85 +731,171 @@ app.delete('/api/visits/:id', authenticateToken, (req, res) => {
 });
 
 app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
-  const { patient_id, medicines_sold, payment_mode, amount_received, visit_date, existing_visit_id } = req.body;
+  const { 
+    patient_id, 
+    medicines_sold, 
+    payment_mode, 
+    amount_received, 
+    visit_date, 
+    existing_visit_id,
+    subtotal: rawSubtotal,
+    discount_type,
+    discount_value,
+    discount_amount,
+    net_payable: rawNetPayable
+  } = req.body;
   const staff_id = req.user.id;
   const finalVisitDate = visit_date || new Date().toISOString();
 
   if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'No medicines selected' });
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
+  // Calculate items subtotal and net payable
+  const itemsSubtotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null ? (parseFloat(rawSubtotal) || 0) : itemsSubtotal;
+  const finalDiscType = (discount_type || 'NONE').toUpperCase();
+  const finalDiscVal = parseFloat(discount_value) || 0;
+  const finalDiscAmt = parseFloat(discount_amount) || 0;
+  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
+    ? (parseFloat(rawNetPayable) || 0) 
+    : Math.max(0, finalSubtotal - finalDiscAmt);
 
-    const processItemsWithVisitId = (visit_id) => {
-      let pending = medicines_sold.length;
-      let hasError = false;
-
-      medicines_sold.forEach(med => {
-        const batchInfo = med.batch_number ? `Batch: ${med.batch_number}` : '';
-        const expInfo = med.expiry_date ? `Exp: ${med.expiry_date}` : '';
-        const instrInfo = med.instruction ? `Inst: ${med.instruction}` : '';
-        const metaParts = [batchInfo, expInfo, instrInfo].filter(Boolean).join(', ');
-        const detailsString = metaParts 
-          ? `${med.medicine_name} [${metaParts}] (Qty: ${med.quantity})`
-          : `${med.medicine_name} (Qty: ${med.quantity})`;
-
-        db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
-          [visit_id, detailsString, parseFloat(med.amount) || 0], (err1) => {
-            if (err1) {
-              console.error("ERR1:", err1);
-              hasError = true;
-            }
-            
-            db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
-              if (err2) {
-                console.error("ERR2:", err2);
-                hasError = true;
-              }
-              pending--;
-              if (pending === 0) finalize(visit_id);
-            });
-        });
-      });
-    };
-
-    const finalize = (visit_id) => {
-      if (hasError) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed to process inventory' }));
-      
-      const payAmount = parseFloat(amount_received) || 0;
-      if (payAmount > 0) {
-        db.run(
-          'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
-          [visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY'], 
-          (err3) => {
-            if (err3) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed payment' }));
-            
-            db.run('COMMIT', (err4) => {
-              if (err4) return res.status(500).json({ error: 'Failed commit' });
-              res.json({ message: 'Pharmacy sale recorded successfully!', visit_id });
+  // Rapid duplicate submission protection (if exact sale for patient was created in last 45s)
+  const fortyFiveSecsAgo = new Date(Date.now() - 45 * 1000).toISOString();
+  db.get(
+    `SELECT v.id as visit_id FROM visits v
+     WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE'
+       AND v.visit_date >= ?
+     ORDER BY v.id DESC LIMIT 1`,
+    [patient_id, fortyFiveSecsAgo],
+    (errDup, dupVisit) => {
+      if (dupVisit && !existing_visit_id) {
+        db.all(`SELECT id, amount FROM medicines WHERE visit_id = ?`, [dupVisit.visit_id], (errM, recentMeds) => {
+          const recentTotal = (recentMeds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+          const reqTotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+          if (recentMeds && recentMeds.length === medicines_sold.length && Math.abs(recentTotal - reqTotal) < 1) {
+            console.log(`[Deduplication] Blocked duplicate pharmacy sale for patient ${patient_id}. Returning existing visit #${dupVisit.visit_id}`);
+            return res.json({
+              message: 'Pharmacy sale already recorded successfully!',
+              visit_id: dupVisit.visit_id,
+              duplicate_prevented: true,
+              subtotal: finalSubtotal,
+              discount_amount: finalDiscAmt,
+              net_payable: finalNetPayable
             });
           }
+          executeSale();
+        });
+      } else {
+        executeSale();
+      }
+    }
+  );
+
+  const executeSale = () => {
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+
+      let hasError = false;
+
+      const finalize = (visit_id) => {
+        if (hasError) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed to process inventory' }));
+        
+        // Net payable collected
+        const payAmount = (amount_received !== undefined && amount_received !== null) 
+          ? (parseFloat(amount_received) || 0) 
+          : finalNetPayable;
+
+        if (payAmount > 0) {
+          db.run(
+            'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
+            [visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY'], 
+            (err3) => {
+              if (err3) return db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed payment' }));
+              
+              db.run('COMMIT', (err4) => {
+                if (err4) return res.status(500).json({ error: 'Failed commit' });
+                res.json({ 
+                  message: 'Pharmacy sale recorded successfully!', 
+                  visit_id,
+                  subtotal: finalSubtotal,
+                  discount_amount: finalDiscAmt,
+                  net_payable: finalNetPayable
+                });
+              });
+            }
+          );
+        } else {
+          db.run('COMMIT', (err4) => {
+            if (err4) return res.status(500).json({ error: 'Failed commit' });
+            res.json({ 
+              message: 'Pharmacy sale recorded!', 
+              visit_id,
+              subtotal: finalSubtotal,
+              discount_amount: finalDiscAmt,
+              net_payable: finalNetPayable
+            });
+          });
+        }
+      };
+
+      const processItemsWithVisitId = (visit_id) => {
+        let pending = medicines_sold.length;
+
+        medicines_sold.forEach(med => {
+          const batchInfo = med.batch_number ? `Batch: ${med.batch_number}` : '';
+          const expInfo = med.expiry_date ? `Exp: ${med.expiry_date}` : '';
+          const instrInfo = med.instruction ? `Inst: ${med.instruction}` : '';
+          const metaParts = [batchInfo, expInfo, instrInfo].filter(Boolean).join(', ');
+          const detailsString = metaParts 
+            ? `${med.medicine_name} [${metaParts}] (Qty: ${med.quantity})`
+            : `${med.medicine_name} (Qty: ${med.quantity})`;
+
+          db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
+            [visit_id, detailsString, parseFloat(med.amount) || 0], (err1) => {
+              if (err1) {
+                console.error("ERR1:", err1);
+                hasError = true;
+              }
+              
+              db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
+                if (err2) {
+                  console.error("ERR2:", err2);
+                  hasError = true;
+                }
+                pending--;
+                if (pending === 0) finalize(visit_id);
+              });
+          });
+        });
+      };
+
+      if (existing_visit_id) {
+        // Update existing visit record with discount fields
+        db.run(
+          `UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?`,
+          [finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable, existing_visit_id],
+          () => processItemsWithVisitId(existing_visit_id)
         );
       } else {
-        db.run('COMMIT', (err4) => {
-          if (err4) return res.status(500).json({ error: 'Failed commit' });
-          res.json({ message: 'Pharmacy sale recorded!', visit_id });
+        const insertVisitSql = `
+          INSERT INTO visits (
+            patient_id, staff_id, planned_procedures, visit_date,
+            subtotal, discount_type, discount_value, discount_amount, net_payable
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        const insertVisitParams = [
+          patient_id, staff_id, 'PHARMACY SALE', finalVisitDate,
+          finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
+        ];
+
+        db.run(insertVisitSql, insertVisitParams, function(err) {
+          if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
+          const visit_id = this.lastID;
+          processItemsWithVisitId(visit_id);
         });
       }
-    };
-
-    if (existing_visit_id) {
-      processItemsWithVisitId(existing_visit_id);
-    } else {
-      const insertVisitSql = 'INSERT INTO visits (patient_id, staff_id, planned_procedures, visit_date) VALUES (?, ?, ?, ?)';
-      const insertVisitParams = [patient_id, staff_id, 'PHARMACY SALE', finalVisitDate];
-
-      db.run(insertVisitSql, insertVisitParams, function(err) {
-        if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-        const visit_id = this.lastID;
-        processItemsWithVisitId(visit_id);
-      });
-    }
-  });
+    });
+  };
 });
 
 // Get Pharmacy Bill / Medicines for a patient on a specific date (for auto-sync in Visit Entry)
@@ -1324,7 +1461,9 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
 
   db.all(
-    `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee, u.name as doctor_name
+    `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee,
+            v.subtotal, v.discount_type, v.discount_value, v.discount_amount, v.net_payable,
+            u.name as doctor_name
      FROM visits v
      JOIN users u ON v.staff_id = u.id
      WHERE v.patient_id = ? AND (v.planned_procedures IS NULL OR v.planned_procedures != 'PHARMACY SALE')
@@ -1335,7 +1474,9 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
 
       // Also get pharmacy-only visits for this patient separately
       db.all(
-        `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee, u.name as doctor_name
+        `SELECT v.id as visit_id, v.visit_date as created_at, v.planned_procedures, v.consultation_fee,
+                v.subtotal, v.discount_type, v.discount_value, v.discount_amount, v.net_payable,
+                u.name as doctor_name
          FROM visits v
          JOIN users u ON v.staff_id = u.id
          WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE'
@@ -1490,23 +1631,109 @@ const getISTDate = () => {
   return new Date(now.getTime() + istOffset).toISOString().split('T')[0];
 };
 
+// Helper to compute daily collection breakdown (Procedure Collection vs Medicine/Pharmacy Collection vs Total Collection)
+function getDailyCollectionBreakdown(targetDate, callback) {
+  const sqlPayments = `
+    SELECT 
+      p.id as payment_id,
+      p.visit_id,
+      p.amount_received,
+      p.mode,
+      p.purpose,
+      p.payment_date,
+      v.planned_procedures,
+      (SELECT COALESCE(SUM(m.amount), 0) FROM medicines m WHERE m.visit_id = p.visit_id) as med_billed
+    FROM payments p
+    LEFT JOIN visits v ON p.visit_id = v.id
+    WHERE (date(p.payment_date) = ? OR p.payment_date LIKE ?)
+      AND p.amount_received > 0
+      AND (v.planned_procedures IS NULL OR (v.planned_procedures NOT LIKE '%CANCEL%' AND v.planned_procedures NOT LIKE '%VOID%'))
+  `;
+
+  const sqlPackages = `
+    SELECT id, price_paid, mode, created_at 
+    FROM patient_packages 
+    WHERE (date(created_at) = ? OR created_at LIKE ?) AND price_paid > 0
+  `;
+
+  const sqlWallet = `
+    SELECT id, amount, mode, created_at
+    FROM wallet_transactions
+    WHERE (date(created_at) = ? OR created_at LIKE ?) AND type = 'CREDIT' AND amount > 0
+  `;
+
+  db.all(sqlPayments, [targetDate, `${targetDate}%`], (err, payRows) => {
+    if (err) return callback(err);
+    db.all(sqlPackages, [targetDate, `${targetDate}%`], (errPkg, pkgRows) => {
+      if (errPkg) return callback(errPkg);
+      db.all(sqlWallet, [targetDate, `${targetDate}%`], (errWal, walRows) => {
+        if (errWal) return callback(errWal);
+
+        let procedure_collection = 0;
+        let medicine_collection = 0;
+        const modesMap = {};
+
+        (payRows || []).forEach(p => {
+          const amt = parseFloat(p.amount_received) || 0;
+          const mode = (p.mode || 'CASH').toUpperCase();
+          modesMap[mode] = (modesMap[mode] || 0) + amt;
+
+          const isPharm = (p.purpose === 'PHARMACY') || (p.planned_procedures === 'PHARMACY SALE');
+          if (isPharm) {
+            medicine_collection += amt;
+          } else {
+            const medBilled = parseFloat(p.med_billed) || 0;
+            if (medBilled > 0) {
+              const medShare = Math.min(medBilled, amt);
+              medicine_collection += medShare;
+              procedure_collection += (amt - medShare);
+            } else {
+              procedure_collection += amt;
+            }
+          }
+        });
+
+        (pkgRows || []).forEach(pkg => {
+          const amt = parseFloat(pkg.price_paid) || 0;
+          const mode = (pkg.mode || 'CASH').toUpperCase();
+          modesMap[mode] = (modesMap[mode] || 0) + amt;
+          procedure_collection += amt;
+        });
+
+        (walRows || []).forEach(w => {
+          const amt = parseFloat(w.amount) || 0;
+          const mode = (w.mode || 'CASH').toUpperCase();
+          modesMap[mode] = (modesMap[mode] || 0) + amt;
+          procedure_collection += amt;
+        });
+
+        const total_collection = procedure_collection + medicine_collection;
+        const modes = Object.keys(modesMap).map(m => ({ mode: m, total: modesMap[m] }));
+
+        callback(null, {
+          procedure_collection,
+          medicine_collection,
+          total_collection,
+          modes
+        });
+      });
+    });
+  });
+}
+
 // 1. Staff: Today's Collection
 app.get('/api/staff/collection/today', authenticateToken, (req, res) => {
   const today = req.query.date || getISTDate();
+  const wantBreakdown = req.query.breakdown === 'true' || req.query.breakdown === '1';
 
-  const query = `
-    SELECT mode, SUM(amount) as total, COUNT(*) as count FROM (
-      SELECT mode, amount_received as amount FROM payments WHERE date(payment_date) = ?
-      UNION ALL
-      SELECT mode, amount FROM wallet_transactions WHERE date(created_at) = ? AND type = 'CREDIT'
-      UNION ALL
-      SELECT mode, price_paid as amount FROM patient_packages WHERE date(created_at) = ?
-    ) WHERE mode IS NOT NULL GROUP BY mode
-  `;
-
-  db.all(query, [today, today, today], (err, rows) => {
+  getDailyCollectionBreakdown(today, (err, data) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows || []);
+    if (wantBreakdown) {
+      res.json(data);
+    } else {
+      // Return modes array for backward compatibility with older client builds
+      res.json(data.modes || []);
+    }
   });
 });
 
@@ -1819,6 +2046,7 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
   // 1. Visits for targetDate
   const visitsSql = `
     SELECT v.id as visit_id, v.patient_id, v.visit_date, v.consultation_fee, v.planned_procedures,
+           v.subtotal, v.discount_type, v.discount_value, v.discount_amount, v.net_payable,
            p.first_name, p.last_name, p.skinssence_id, p.mobile,
            u.name as staff_name
     FROM visits v
@@ -1931,7 +2159,10 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                 });
 
                 const medicineRevenue = meds.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
-                const totalSales = consultationRevenue + procedureRevenue + medicineRevenue + packageRevenue;
+                const totalDiscounts = visits.reduce((sum, v) => sum + (parseFloat(v.discount_amount) || 0), 0);
+                const grossSales = consultationRevenue + procedureRevenue + medicineRevenue + packageRevenue;
+                const netSales = Math.max(0, grossSales - totalDiscounts);
+                const totalSales = netSales;
 
                 // Collections
                 const collectionByMode = {};
@@ -2061,7 +2292,8 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                     badge_color: '#d97706',
                     time: time,
                     patient_id: v ? v.patient_id : null,
-                    visit_id: m.visit_id
+                    visit_id: m.visit_id,
+                    medicine_id: m.id
                   });
                 });
 
@@ -2085,7 +2317,9 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                     badge_color: '#16a34a',
                     time: time,
                     patient_id: pay.patient_id,
-                    visit_id: pay.visit_id
+                    visit_id: pay.visit_id,
+                    payment_id: pay.id,
+                    payment_mode: mode
                   });
                 });
 
@@ -2139,6 +2373,9 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                     procedure_revenue: procedureRevenue,
                     medicine_revenue: medicineRevenue,
                     package_revenue: packageRevenue,
+                    gross_sales: grossSales,
+                    total_discounts: totalDiscounts,
+                    net_sales: netSales,
                     total_sales: totalSales,
                     total_collection: totalCollection,
                     collection_by_mode: collectionByMode,
@@ -2166,32 +2403,31 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
 });
 
 
-// 4. Upcoming Events (Next 10 Days)
+// 4. Dashboard: Today's Metrics (Patients & Collection Breakdown)
 app.get('/api/dashboard/today', authenticateToken, (req, res) => {
   const today = req.query.date || getISTDate();
   
-  // Get unique patients count for today
+  // Get unique non-cancelled patients count for today
   db.get(
-    `SELECT COUNT(DISTINCT patient_id) as patients FROM visits WHERE date(visit_date) = ? OR visit_date LIKE ?`,
+    `SELECT COUNT(DISTINCT patient_id) as patients FROM visits 
+     WHERE (date(visit_date) = ? OR visit_date LIKE ?)
+       AND (planned_procedures IS NULL OR (planned_procedures NOT LIKE '%CANCEL%' AND planned_procedures NOT LIKE '%VOID%'))`,
     [today, `${today}%`],
     (err, patRow) => {
       if (err) return res.status(500).json({ error: err.message });
       
-      // Get total collection across all payments, packages, and wallet recharges
-      db.get(
-        `SELECT SUM(amount) as collection FROM (
-          SELECT amount_received as amount FROM payments WHERE date(payment_date) = ? OR payment_date LIKE ?
-          UNION ALL
-          SELECT amount FROM wallet_transactions WHERE (date(created_at) = ? OR created_at LIKE ?) AND type = 'CREDIT'
-          UNION ALL
-          SELECT price_paid as amount FROM patient_packages WHERE date(created_at) = ? OR created_at LIKE ?
-        )`,
-        [today, `${today}%`, today, `${today}%`, today, `${today}%`],
-        (err, colRow) => {
-          if (err) return res.status(500).json({ error: err.message });
-          res.json({ patients: patRow?.patients || 0, collection: colRow?.collection || 0 });
-        }
-      );
+      getDailyCollectionBreakdown(today, (errCol, colData) => {
+        if (errCol) return res.status(500).json({ error: errCol.message });
+
+        res.json({
+          patients: patRow?.patients || 0,
+          collection: colData?.total_collection || 0,
+          total_collection: colData?.total_collection || 0,
+          procedure_collection: colData?.procedure_collection || 0,
+          medicine_collection: colData?.medicine_collection || 0,
+          modes: colData?.modes || []
+        });
+      });
     }
   );
 });
@@ -2402,35 +2638,62 @@ app.get('/api/appointments', authenticateToken, (req, res) => {
 });
 
 app.get('/api/appointments/reminders', authenticateToken, (req, res) => {
-  const istDateStr = getISTDate();
-  const past7Days = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-  const next14Days = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
-
   db.all(
-    `SELECT * FROM appointments 
-     WHERE appointment_date >= ? AND appointment_date <= ?
-     AND (status IS NULL OR status IN ('SCHEDULED', 'CONFIRMED', 'PENDING_REMINDER', 'FOLLOW_UP_DUE'))
-     ORDER BY appointment_date ASC, appointment_time ASC`,
-    [past7Days, next14Days],
+    `SELECT a.*, 
+            p.first_name, p.last_name, p.mobile as patient_mobile, p.skinssence_id
+     FROM appointments a
+     LEFT JOIN patients p ON a.patient_id = p.skinssence_id OR a.patient_id = CAST(p.id AS TEXT)
+     WHERE (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'COMPLETED'))
+     ORDER BY a.appointment_date ASC, a.appointment_time ASC`,
+    [],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json(rows || []);
+      const sanitized = (rows || []).map(r => {
+        const name = (r.patient_name || `${r.first_name || ''} ${r.last_name || ''}`).trim() || 'Valued Client';
+        const mobile = r.mobile || r.patient_mobile || '';
+        return {
+          ...r,
+          patient_name: name,
+          mobile: mobile
+        };
+      });
+      res.json(sanitized);
     }
   );
 });
 
 app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
-  const { status } = req.body;
+  const { status, notes, call_outcome } = req.body;
   const { id } = req.params;
 
-  db.run(
-    `UPDATE appointments SET status = ? WHERE id = ?`,
-    [status, id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Status updated' });
-    }
-  );
+  let noteUpdate = null;
+  if (call_outcome) {
+    noteUpdate = `[Call: ${call_outcome}]${notes ? ' ' + notes : ''}`;
+  } else if (notes) {
+    noteUpdate = notes;
+  }
+
+  if (noteUpdate) {
+    db.run(
+      `UPDATE appointments 
+       SET status = ?, notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || ' | ' || ? END 
+       WHERE id = ?`,
+      [status || 'SCHEDULED', noteUpdate, noteUpdate, id],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Status and notes updated successfully' });
+      }
+    );
+  } else {
+    db.run(
+      `UPDATE appointments SET status = ? WHERE id = ?`,
+      [status || 'SCHEDULED', id],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Status updated successfully' });
+      }
+    );
+  }
 });
 
 // --- USER & HR MANAGEMENT (ADMIN ONLY) ---
@@ -3104,7 +3367,20 @@ app.get('/api/events/festival/:religion', authenticateToken, (req, res) => {
 // INVOICE ROUTES
 // ============================================================
 app.post('/api/invoices', authenticateToken, (req, res) => {
-  const { patient_id, visit_id, items_json, subtotal, discount, grand_total, payment_mode, amount_paid } = req.body;
+  const { 
+    patient_id, 
+    visit_id, 
+    items_json, 
+    subtotal, 
+    discount, 
+    grand_total, 
+    payment_mode, 
+    amount_paid,
+    discount_type,
+    discount_value,
+    discount_amount,
+    net_payable
+  } = req.body;
   const created_by = req.user.id;
 
   // Generate invoice number: SKN-YYYYMMDD-XXXX
@@ -3114,15 +3390,124 @@ app.post('/api/invoices', authenticateToken, (req, res) => {
     const seq = (row ? row.cnt + 1 : 1).toString().padStart(4, '0');
     const invoice_number = `SKN-${dateStr}-${seq}`;
 
+    const finalSubtotal = parseFloat(subtotal) || 0;
+    const finalDiscAmt = parseFloat(discount_amount !== undefined && discount_amount !== null ? discount_amount : discount) || 0;
+    const finalDiscType = (discount_type || (finalDiscAmt > 0 ? 'FIXED' : 'NONE')).toUpperCase();
+    const finalDiscVal = parseFloat(discount_value) || finalDiscAmt;
+    const finalNetPayable = parseFloat(net_payable !== undefined && net_payable !== null ? net_payable : grand_total) || Math.max(0, finalSubtotal - finalDiscAmt);
+
     db.run(
-      `INSERT INTO invoices (invoice_number, patient_id, visit_id, items_json, subtotal, discount, grand_total, payment_mode, amount_paid, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [invoice_number, patient_id, visit_id || null, JSON.stringify(items_json), subtotal || 0, discount || 0, grand_total || 0, payment_mode, amount_paid || 0, created_by],
+      `INSERT INTO invoices (
+        invoice_number, patient_id, visit_id, items_json, 
+        subtotal, discount, grand_total, payment_mode, amount_paid, created_by,
+        discount_type, discount_value, discount_amount, net_payable
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoice_number, patient_id, visit_id || null, JSON.stringify(items_json), 
+        finalSubtotal, finalDiscAmt, finalNetPayable, payment_mode, amount_paid || finalNetPayable, created_by,
+        finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
+      ],
       function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID, invoice_number });
+        res.json({ id: this.lastID, invoice_number, subtotal: finalSubtotal, discount_amount: finalDiscAmt, net_payable: finalNetPayable });
       }
     );
+  });
+});
+
+// Admin / Doctor: Edit / Adjust discount on an existing visit/bill
+app.put('/api/visits/:id/discount', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can edit discounts.' });
+  }
+
+  const visitId = parseInt(req.params.id, 10);
+  const { discount_type, discount_value, discount_amount, reason } = req.body;
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  db.get('SELECT * FROM visits WHERE id = ?', [visitId], (errV, visit) => {
+    if (errV) return res.status(500).json({ error: errV.message });
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    db.all('SELECT amount FROM procedures WHERE visit_id = ?', [visitId], (errP, procs) => {
+      if (errP) return res.status(500).json({ error: errP.message });
+      db.all('SELECT amount FROM medicines WHERE visit_id = ?', [visitId], (errM, meds) => {
+        if (errM) return res.status(500).json({ error: errM.message });
+
+        const procTotal = (procs || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+        const medTotal = (meds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+        const cFee = parseFloat(visit.consultation_fee) || 0;
+        const subtotal = (visit.subtotal && parseFloat(visit.subtotal) > 0) ? parseFloat(visit.subtotal) : (procTotal + medTotal + cFee);
+
+        const dType = (discount_type || 'NONE').toUpperCase();
+        const dVal = parseFloat(discount_value) || 0;
+        let dAmt = 0;
+        if (dType === 'PERCENTAGE') {
+          dAmt = Math.round((subtotal * Math.min(100, Math.max(0, dVal))) / 100);
+        } else if (dType === 'FIXED') {
+          dAmt = Math.min(subtotal, Math.max(0, parseFloat(discount_amount !== undefined ? discount_amount : dVal) || 0));
+        }
+
+        const netPayable = Math.max(0, subtotal - dAmt);
+
+        db.serialize(() => {
+          db.run('BEGIN TRANSACTION');
+
+          // Update visits table
+          db.run(
+            `UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?`,
+            [subtotal, dType, dVal, dAmt, netPayable, visitId],
+            (errUpV) => {
+              if (errUpV) return db.run('ROLLBACK', () => res.status(500).json({ error: errUpV.message }));
+
+              // Update invoice if exists
+              db.run(
+                `UPDATE invoices SET subtotal = ?, discount = ?, discount_type = ?, discount_value = ?, discount_amount = ?, grand_total = ?, net_payable = ?, amount_paid = ? WHERE visit_id = ?`,
+                [subtotal, dAmt, dType, dVal, dAmt, netPayable, netPayable, netPayable, visitId],
+                () => {}
+              );
+
+              // Update existing payment amount without creating any duplicate records
+              db.run(
+                `UPDATE payments SET amount_received = ? WHERE visit_id = ?`,
+                [netPayable, visitId],
+                (errPay) => {
+                  if (errPay) return db.run('ROLLBACK', () => res.status(500).json({ error: errPay.message }));
+
+                  // Audit log
+                  const oldData = {
+                    discount_type: visit.discount_type,
+                    discount_value: visit.discount_value,
+                    discount_amount: visit.discount_amount,
+                    net_payable: visit.net_payable
+                  };
+                  const newData = {
+                    discount_type: dType,
+                    discount_value: dVal,
+                    discount_amount: dAmt,
+                    net_payable: netPayable
+                  };
+                  writeAudit(req.user, 'EDIT_DISCOUNT', 'VISIT', visitId, oldData, newData, reason || 'Discount modification');
+
+                  db.run('COMMIT', (errC) => {
+                    if (errC) return res.status(500).json({ error: 'Commit failed' });
+                    res.json({
+                      message: 'Discount updated successfully',
+                      subtotal,
+                      discount_type: dType,
+                      discount_value: dVal,
+                      discount_amount: dAmt,
+                      net_payable: netPayable
+                    });
+                  });
+                }
+              );
+            }
+          );
+        });
+      });
+    });
   });
 });
 
@@ -3214,6 +3599,269 @@ const writeAudit = (user, action, entity, entityId, oldVal, newVal, reason) => {
 
 // Expose writeAudit for use in routes (attach to app)
 app.locals.writeAudit = writeAudit;
+
+// ============================================================
+// ADMIN PHARMACY TRANSACTION CORRECTION / EDIT ENDPOINTS
+// ============================================================
+
+// 1. Get complete pharmacy sale details for inspection & modal
+app.get('/api/admin/pharmacy/sales/:visit_id', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied. Admin or Doctor role required.' });
+  }
+
+  const visitId = parseInt(req.params.visit_id, 10);
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  db.get(
+    `SELECT v.*, p.first_name, p.last_name, p.skinssence_id, p.mobile, u.username as staff_name
+     FROM visits v
+     LEFT JOIN patients p ON v.patient_id = p.id
+     LEFT JOIN users u ON v.staff_id = u.id
+     WHERE v.id = ?`,
+    [visitId],
+    (err, visit) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!visit) return res.status(404).json({ error: 'Sale / visit not found' });
+
+      db.all(`SELECT * FROM medicines WHERE visit_id = ? ORDER BY id ASC`, [visitId], (errMeds, medicines) => {
+        if (errMeds) return res.status(500).json({ error: errMeds.message });
+
+        db.all(`SELECT * FROM payments WHERE visit_id = ? ORDER BY id ASC`, [visitId], (errPay, payments) => {
+          if (errPay) return res.status(500).json({ error: errPay.message });
+
+          db.get(`SELECT * FROM invoices WHERE visit_id = ?`, [visitId], (errInv, invoice) => {
+            if (errInv) return res.status(500).json({ error: errInv.message });
+
+            // Annotate medicines with parsed details
+            const parsedMedicines = (medicines || []).map(m => {
+              const parsed = parseMedicineDetails(m.details);
+              return {
+                ...m,
+                parsed_name: parsed.name,
+                parsed_qty: parsed.qty,
+                parsed_batch: parsed.batch
+              };
+            });
+
+            res.json({
+              visit,
+              medicines: parsedMedicines,
+              payments: payments || [],
+              invoice: invoice || null
+            });
+          });
+        });
+      });
+    }
+  );
+});
+
+// 2. Change / Edit payment mode for a pharmacy sale
+app.put('/api/admin/pharmacy/sales/:visit_id/payment-mode', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied. Admin or Doctor role required.' });
+  }
+
+  const visitId = parseInt(req.params.visit_id, 10);
+  const { payment_mode, reason } = req.body;
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  const targetMode = (payment_mode || '').trim().toUpperCase();
+  const validModes = ['CASH', 'UPI', 'CARD', 'WALLET', 'BANK TRANSFER'];
+  if (!validModes.includes(targetMode)) {
+    return res.status(400).json({ error: `Invalid payment mode. Supported modes: ${validModes.join(', ')}` });
+  }
+
+  db.get(`SELECT * FROM visits WHERE id = ?`, [visitId], (errV, visit) => {
+    if (errV) return res.status(500).json({ error: errV.message });
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    // Fetch existing payment(s) for this visit
+    db.all(`SELECT * FROM payments WHERE visit_id = ?`, [visitId], (errP, existingPayments) => {
+      if (errP) return res.status(500).json({ error: errP.message });
+
+      if (existingPayments && existingPayments.length > 0) {
+        // Update existing payment rows
+        const oldModes = existingPayments.map(p => p.mode).join(', ');
+        db.run(
+          `UPDATE payments SET mode = ? WHERE visit_id = ?`,
+          [targetMode, visitId],
+          function(errUp) {
+            if (errUp) return res.status(500).json({ error: errUp.message });
+
+            // Also update invoice payment_mode if invoice exists
+            db.run(`UPDATE invoices SET payment_mode = ? WHERE visit_id = ?`, [targetMode, visitId], () => {});
+
+            // Record audit log
+            writeAudit(
+              req.user,
+              'PHARMACY_PAYMENT_MODE_EDIT',
+              'payments',
+              visitId,
+              { old_mode: oldModes, visit_id: visitId, patient_id: visit.patient_id },
+              { new_mode: targetMode, visit_id: visitId },
+              reason || 'Admin payment mode correction'
+            );
+
+            res.json({
+              success: true,
+              message: `Payment mode updated from ${oldModes} to ${targetMode}`,
+              visit_id: visitId,
+              payment_mode: targetMode
+            });
+          }
+        );
+      } else {
+        // No payment row existed yet (e.g. sale was recorded with amount_received=0 or missed payment)
+        db.get(`SELECT COALESCE(SUM(amount), 0) as med_total FROM medicines WHERE visit_id = ?`, [visitId], (errM, medRow) => {
+          const totalAmount = medRow?.med_total || visit.consultation_fee || 0;
+          const payDate = visit.visit_date || new Date().toISOString();
+
+          db.run(
+            `INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, 'PHARMACY')`,
+            [visitId, visit.patient_id, targetMode, totalAmount, payDate],
+            function(errIns) {
+              if (errIns) return res.status(500).json({ error: errIns.message });
+
+              db.run(`UPDATE invoices SET payment_mode = ? WHERE visit_id = ?`, [targetMode, visitId], () => {});
+
+              writeAudit(
+                req.user,
+                'PHARMACY_PAYMENT_MODE_EDIT',
+                'payments',
+                visitId,
+                { old_mode: 'NONE', amount: 0 },
+                { new_mode: targetMode, amount: totalAmount },
+                reason || 'Created missing payment record with specified mode'
+              );
+
+              res.json({
+                success: true,
+                message: `Payment recorded as ${targetMode} for ₹${totalAmount}`,
+                visit_id: visitId,
+                payment_mode: targetMode,
+                amount_received: totalAmount
+              });
+            }
+          );
+        });
+      }
+    });
+  });
+});
+
+// 3. Remove duplicate or accidental medicine line item from a pharmacy sale
+app.delete('/api/admin/pharmacy/sales/:visit_id/items/:medicine_id', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied. Admin or Doctor role required.' });
+  }
+
+  const visitId = parseInt(req.params.visit_id, 10);
+  const medicineId = parseInt(req.params.medicine_id, 10);
+  const restoreStock = req.body?.restore_stock !== false; // default true
+  const reason = req.body?.reason || 'Admin removed duplicate/accidental medicine line item';
+
+  if (!visitId || !medicineId) {
+    return res.status(400).json({ error: 'Invalid visit ID or medicine ID' });
+  }
+
+  // 1. Verify item exists for this visit
+  db.get(`SELECT * FROM medicines WHERE id = ? AND visit_id = ?`, [medicineId, visitId], (errMed, medItem) => {
+    if (errMed) return res.status(500).json({ error: errMed.message });
+    if (!medItem) return res.status(404).json({ error: 'Medicine line item not found for this sale' });
+
+    const parsed = parseMedicineDetails(medItem.details);
+    const itemAmount = parseFloat(medItem.amount) || 0;
+
+    // Helper to finish deletion after inventory update
+    const executeItemDeletion = () => {
+      // Delete from medicines table
+      db.run(`DELETE FROM medicines WHERE id = ?`, [medicineId], function(errDel) {
+        if (errDel) return res.status(500).json({ error: errDel.message });
+
+        // Recalculate remaining total for this visit
+        db.get(`SELECT COALESCE(SUM(amount), 0) as remaining_total, COUNT(*) as remaining_count FROM medicines WHERE visit_id = ?`, [visitId], (errTot, totRow) => {
+          const newTotal = totRow ? parseFloat(totRow.remaining_total) : 0;
+          const remainingCount = totRow ? parseInt(totRow.remaining_count, 10) : 0;
+
+          // Adjust payment amount
+          db.run(`UPDATE payments SET amount_received = ? WHERE visit_id = ?`, [newTotal, visitId], () => {
+            // Also adjust invoice if exists
+            db.get(`SELECT * FROM invoices WHERE visit_id = ?`, [visitId], (errInv, invoice) => {
+              if (invoice) {
+                let updatedItems = [];
+                try {
+                  const items = JSON.parse(invoice.items_json || '[]');
+                  let removed = false;
+                  updatedItems = items.filter(it => {
+                    if (!removed && (it.medicine_name === parsed.name || it.name === parsed.name)) {
+                      removed = true;
+                      return false;
+                    }
+                    return true;
+                  });
+                } catch (e) {
+                  updatedItems = [];
+                }
+                db.run(
+                  `UPDATE invoices SET grand_total = ?, subtotal = ?, items_json = ? WHERE id = ?`,
+                  [newTotal, newTotal, JSON.stringify(updatedItems), invoice.id],
+                  () => {}
+                );
+              }
+
+              // Record audit log
+              writeAudit(
+                req.user,
+                'PHARMACY_ITEM_REMOVE',
+                'medicines',
+                medicineId,
+                { visit_id: visitId, details: medItem.details, amount: itemAmount },
+                { restored_stock: restoreStock ? parsed.qty : 0, new_total: newTotal, remaining_count: remainingCount },
+                reason
+              );
+
+              res.json({
+                success: true,
+                message: `Removed "${parsed.name}" successfully.${restoreStock ? ` Restored ${parsed.qty} unit(s) to stock.` : ''}`,
+                deleted_medicine_id: medicineId,
+                restored_quantity: restoreStock ? parsed.qty : 0,
+                new_visit_total: newTotal,
+                remaining_items_count: remainingCount
+              });
+            });
+          });
+        });
+      });
+    };
+
+    // If restore_stock requested, increment inventory
+    if (restoreStock && parsed && parsed.name && parsed.qty > 0) {
+      db.get(
+        `SELECT id, quantity FROM inventory WHERE LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)) LIMIT 1`,
+        [parsed.name],
+        (errInvFind, invItem) => {
+          if (invItem) {
+            db.run(`UPDATE inventory SET quantity = quantity + ? WHERE id = ?`, [parsed.qty, invItem.id], (errUpd) => {
+              if (errUpd) console.error('Failed to update inventory:', errUpd.message);
+              executeItemDeletion();
+            });
+          } else {
+            db.run(`UPDATE inventory SET quantity = quantity + ? WHERE LOWER(TRIM(medicine_name)) = LOWER(TRIM(?))`, [parsed.qty, parsed.name], () => {
+              executeItemDeletion();
+            });
+          }
+        }
+      );
+    } else {
+      executeItemDeletion();
+    }
+  });
+});
 
 // Duplicate master procedure routes consolidated above
 
