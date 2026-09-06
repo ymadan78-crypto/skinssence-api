@@ -8,7 +8,9 @@ const db = require('./db');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+const smartCameraService = require('./services/smartCameraService');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_for_local_testing';
@@ -579,7 +581,10 @@ app.post('/api/visits', authenticateToken, (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     
-    const consultation_fee = parseFloat(req.body.consultation_fee) || 0;
+    let consultation_fee = parseFloat(req.body.consultation_fee) || 0;
+    if (package_redeemed_id) {
+      consultation_fee = 0;
+    }
     const finalVisitDate = req.body.visit_date || new Date().toISOString();
 
     // Calculate subtotal if not passed
@@ -898,6 +903,222 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
   };
 });
 
+// ==========================================
+// SKINSSENCE SMART PHARMACY CAMERA ENDPOINTS
+// ==========================================
+
+// 1. SMART CAMERA ANALYZE: Analyze handover image & return draft bill (NO STOCK DEDUCTION)
+app.post('/api/pharmacy/camera/analyze', authenticateToken, (req, res) => {
+  const { image_base64, raw_text } = req.body;
+  const staff_id = req.user.id;
+
+  if (!image_base64 && !raw_text) {
+    return res.status(400).json({ error: 'Please provide a handover photograph or text to analyze.' });
+  }
+
+  // Fetch all inventory products & batches
+  db.all('SELECT id, medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions FROM inventory', [], (errInv, inventoryRows) => {
+    if (errInv) return res.status(500).json({ error: 'Failed to query inventory catalogue: ' + errInv.message });
+
+    // Fetch active patients list
+    db.all("SELECT id, TRIM(first_name || ' ' || COALESCE(last_name, '')) AS name, mobile AS phone, skinssence_id AS patient_code FROM patients ORDER BY id DESC LIMIT 500", [], (errPts, patientsList) => {
+      if (errPts) return res.status(500).json({ error: 'Failed to query patient records: ' + errPts.message });
+
+      // Fetch learned product image references
+      db.all('SELECT product_name, label_keywords, reference_count FROM product_image_references ORDER BY reference_count DESC', [], async (errLrn, learnedRefs) => {
+        try {
+          const draftResult = await smartCameraService.createDraftFromImage({
+            imageBase64: image_base64,
+            rawText: raw_text,
+            inventoryRows: inventoryRows || [],
+            patientsList: patientsList || [],
+            learnedReferences: learnedRefs || []
+          });
+
+          // Insert into pharmacy_camera_drafts (status: DRAFT, zero financial or stock impact)
+          const insertDraftSql = `
+            INSERT INTO pharmacy_camera_drafts (
+              photo_uri, detected_patient_name, matched_patient_id, detected_raw_text,
+              recognized_items_json, subtotal, net_payable, status, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)
+          `;
+          const photoSnippet = image_base64 && image_base64.length > 300 ? image_base64.slice(0, 300) + '...' : (image_base64 || '');
+          const draftParams = [
+            photoSnippet,
+            draftResult.patient?.name || '',
+            draftResult.patient?.id || null,
+            draftResult.raw_ocr_text || '',
+            JSON.stringify(draftResult.items || []),
+            draftResult.subtotal || 0,
+            draftResult.subtotal || 0,
+            staff_id
+          ];
+
+          db.run(insertDraftSql, draftParams, function(errDraft) {
+            const draftId = this ? this.lastID : null;
+            return res.json({
+              draft_id: draftId,
+              ...draftResult
+            });
+          });
+        } catch (pipeErr) {
+          console.error('[SmartCamera] Pipeline error:', pipeErr);
+          return res.status(500).json({ error: 'Failed to analyze camera image: ' + pipeErr.message });
+        }
+      });
+    });
+  });
+});
+
+// 2. SMART CAMERA CONFIRM: Finalize verified bill, deduct stock, create payment & learn references
+app.post('/api/pharmacy/camera/confirm', authenticateToken, (req, res) => {
+  const {
+    draft_id,
+    patient_id,
+    payment_mode,
+    subtotal: rawSubtotal,
+    discount_type,
+    discount_value,
+    discount_amount,
+    net_payable: rawNetPayable,
+    amount_received,
+    medicines_sold,
+    photo_uri
+  } = req.body;
+  const staff_id = req.user.id;
+
+  if (!patient_id) return res.status(400).json({ error: 'Patient is required to finalize bill.' });
+  if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'Cart has no medicines.' });
+
+  const itemsSubtotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null ? (parseFloat(rawSubtotal) || 0) : itemsSubtotal;
+  const finalDiscType = (discount_type || 'NONE').toUpperCase();
+  const finalDiscVal = parseFloat(discount_value) || 0;
+  const finalDiscAmt = parseFloat(discount_amount) || 0;
+  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
+    ? (parseFloat(rawNetPayable) || 0) 
+    : Math.max(0, finalSubtotal - finalDiscAmt);
+  const finalVisitDate = new Date().toISOString();
+
+  // Create visit record with photo_uri
+  const insertVisitSql = `
+    INSERT INTO visits (
+      patient_id, staff_id, planned_procedures, visit_date,
+      subtotal, discount_type, discount_value, discount_amount, net_payable, photo_uri
+    ) VALUES (?, ?, 'PHARMACY SALE', ?, ?, ?, ?, ?, ?, ?)
+  `;
+  const insertVisitParams = [
+    patient_id, staff_id, finalVisitDate,
+    finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable, photo_uri || null
+  ];
+
+  db.run(insertVisitSql, insertVisitParams, function(errVisit) {
+    if (errVisit) return res.status(500).json({ error: 'Failed to create visit: ' + errVisit.message });
+    const visit_id = this.lastID;
+
+    let pending = medicines_sold.length;
+    let hasError = false;
+
+    const completeConfirmation = (vId) => {
+      // Mark draft as CONFIRMED if draft_id provided
+      if (draft_id) {
+        db.run(
+          `UPDATE pharmacy_camera_drafts 
+           SET status = 'CONFIRMED', visit_id = ?, confirmed_at = CURRENT_TIMESTAMP, 
+               confirmed_items_json = ? WHERE id = ?`,
+          [vId, JSON.stringify(medicines_sold), draft_id]
+        );
+      }
+
+      // Continuous Learning: Retain product names & confirmed keywords
+      medicines_sold.forEach(med => {
+        const prodName = med.medicine_name.split('[')[0].split('|')[0].trim();
+        db.get('SELECT id, reference_count FROM product_image_references WHERE LOWER(product_name) = LOWER(?)', [prodName], (errL, rowL) => {
+          if (rowL) {
+            db.run('UPDATE product_image_references SET reference_count = reference_count + 1, last_confirmed_at = CURRENT_TIMESTAMP WHERE id = ?', [rowL.id]);
+          } else {
+            db.run('INSERT INTO product_image_references (product_name, inventory_id, label_keywords, reference_count) VALUES (?, ?, ?, 1)', [prodName, med.id || null, prodName]);
+          }
+        });
+      });
+
+      return res.json({
+        message: 'Pharmacy sale confirmed and recorded successfully!',
+        visit_id: vId,
+        subtotal: finalSubtotal,
+        discount_amount: finalDiscAmt,
+        net_payable: finalNetPayable
+      });
+    };
+
+    const finalizeConfirmation = () => {
+      if (hasError) return res.status(500).json({ error: 'Failed to process inventory deduction.' });
+
+      const payAmount = (amount_received !== undefined && amount_received !== null)
+        ? (parseFloat(amount_received) || 0)
+        : finalNetPayable;
+
+      if (payAmount > 0) {
+        db.run(
+          'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+          [visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY'],
+          () => completeConfirmation(visit_id)
+        );
+      } else {
+        completeConfirmation(visit_id);
+      }
+    };
+
+    medicines_sold.forEach(med => {
+      const batchInfo = med.batch_number ? `Batch: ${med.batch_number}` : '';
+      const expInfo = med.expiry_date ? `Exp: ${med.expiry_date}` : '';
+      const instrInfo = med.instruction ? `Inst: ${med.instruction}` : '';
+      const metaParts = [batchInfo, expInfo, instrInfo].filter(Boolean).join(', ');
+      const detailsString = metaParts 
+        ? `${med.medicine_name} [${metaParts}] (Qty: ${med.quantity})`
+        : `${med.medicine_name} (Qty: ${med.quantity})`;
+
+      db.run(
+        'INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)',
+        [visit_id, detailsString, parseFloat(med.amount) || 0],
+        (errM) => {
+          if (errM) {
+            console.error('Error recording medicine item:', errM);
+            hasError = true;
+          }
+          // Deduct stock from specific batch
+          const invId = med.inventory_id || med.id;
+          db.run(
+            'UPDATE inventory SET quantity = quantity - ? WHERE id = ?',
+            [med.quantity, invId],
+            (errS) => {
+              if (errS) {
+                console.error('Error deducting stock:', errS);
+                hasError = true;
+              }
+              pending--;
+              if (pending === 0) finalizeConfirmation();
+            }
+          );
+        }
+      );
+    });
+  });
+});
+
+// 3. GET SAVED DRAFT
+app.get('/api/pharmacy/camera/drafts/:id', authenticateToken, (req, res) => {
+  db.get('SELECT * FROM pharmacy_camera_drafts WHERE id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Draft not found' });
+    try {
+      row.recognized_items = JSON.parse(row.recognized_items_json || '[]');
+      row.confirmed_items = JSON.parse(row.confirmed_items_json || '[]');
+    } catch (e) {}
+    res.json(row);
+  });
+});
+
 // Get Pharmacy Bill / Medicines for a patient on a specific date (for auto-sync in Visit Entry)
 app.get('/api/patients/:id/pharmacy-by-date', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
@@ -987,7 +1208,12 @@ app.delete('/api/inventory/:id', authenticateToken, (req, res) => {
 app.get('/api/inventory', authenticateToken, (req, res) => {
   db.all('SELECT * FROM inventory WHERE quantity > 0 ORDER BY medicine_name ASC', [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    // Remove expired items and zero quantity items for the purpose of billing
+    const activeForBilling = (rows || []).filter(item => {
+      if ((item.quantity || 0) <= 0) return false;
+      return !smartCameraService.isExpired(item.expiry_date);
+    });
+    res.json(activeForBilling);
   });
 });
 
@@ -1783,7 +2009,7 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
     if (errV) return res.status(500).json({ error: errV.message });
 
     db.all(`
-      SELECT p.id, p.name, p.amount, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
+      SELECT p.id, p.name, p.amount, p.visit_id, v.patient_id, v.package_redeemed_id, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
       FROM procedures p
       JOIN visits v ON p.visit_id = v.id
     `, [], (err, procRows) => {
@@ -1796,104 +2022,131 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
       `, [], (err2, medRows) => {
         if (err2) return res.status(500).json({ error: err2.message });
 
-        const visits = visitRows || [];
-        const procs = procRows || [];
-        const meds = medRows || [];
+        db.all(`SELECT id, patient_id, package_name, price_paid, total_sessions FROM patient_packages`, [], (errPkg, allPkgs = []) => {
+          const visits = visitRows || [];
+          const procs = procRows || [];
+          const meds = medRows || [];
 
-        // 1. TODAY STATS
-        const todayVisits = visits.filter(v => v.visit_date === todayStr);
-        const todayProcs = procs.filter(p => p.visit_date === todayStr);
-        const todayMeds = meds.filter(m => m.visit_date === todayStr);
-        
-        const todayConsultationRevenue = todayVisits.reduce((s, v) => s + (parseFloat(v.consultation_fee) || 0), 0);
-        const todayConsultationCount = todayVisits.filter(v => (parseFloat(v.consultation_fee) || 0) > 0).length;
-        const todayProcRevenue = todayProcs.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
-        const todayProcSessions = todayProcs.length;
-        const todayMedRevenue = todayMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-        const todayMedTransactions = todayMeds.length;
-        const todayMedUnitsSold = todayMeds.reduce((s, m) => s + parseMedicineDetails(m.details).qty, 0);
-        const todayTotalClinicSale = todayConsultationRevenue + todayProcRevenue + todayMedRevenue;
+          // Pre-calculate allocated value for each procedure (e.g. allocated package value for redeemed sessions)
+          procs.forEach(p => {
+            const isRedeemed = (p.name || '').includes('[Redeemed Session') || p.amount === 0;
+            if (isRedeemed) {
+              let matchedPkg = null;
+              if (p.package_redeemed_id) {
+                matchedPkg = allPkgs.find(pkg => pkg.id === p.package_redeemed_id);
+              }
+              if (!matchedPkg && p.patient_id) {
+                const match = (p.name || '').match(/\[Redeemed Session \d+ of \d+\]\s*(.*)/i);
+                const pName = match ? match[1].trim().toLowerCase() : '';
+                matchedPkg = allPkgs.find(pkg => pkg.patient_id === p.patient_id && (pName ? (pkg.package_name || '').toLowerCase().includes(pName) : true));
+              }
+              const sessionVal = (matchedPkg && matchedPkg.total_sessions > 0) ? ((parseFloat(matchedPkg.price_paid) || 0) / matchedPkg.total_sessions) : 0;
+              p.allocated_amount = sessionVal;
+            } else {
+              p.allocated_amount = parseFloat(p.amount) || 0;
+            }
+          });
 
-        const todayStats = {
-          totalClinicSale: todayTotalClinicSale,
-          consultationRevenue: todayConsultationRevenue,
-          consultationCount: todayConsultationCount,
-          procedureRevenue: todayProcRevenue,
-          procedureSessions: todayProcSessions,
-          medicineRevenue: todayMedRevenue,
-          medicineTransactions: todayMedTransactions,
-          medicineUnitsSold: todayMedUnitsSold
-        };
+          // 1. TODAY STATS
+          const todayVisits = visits.filter(v => v.visit_date === todayStr);
+          const todayProcs = procs.filter(p => p.visit_date === todayStr);
+          const todayMeds = meds.filter(m => m.visit_date === todayStr);
+          
+          const todayConsultationRevenue = todayVisits.reduce((s, v) => s + (parseFloat(v.consultation_fee) || 0), 0);
+          const todayConsultationCount = todayVisits.filter(v => (parseFloat(v.consultation_fee) || 0) > 0).length;
+          const todayProcRevenue = todayProcs.reduce((s, p) => s + (parseFloat(p.allocated_amount) || 0), 0);
+          const todayProcSessions = todayProcs.length;
+          const todayRedeemedSessionsValue = todayProcs.filter(p => (p.name || '').includes('[Redeemed Session')).reduce((s, p) => s + (parseFloat(p.allocated_amount) || 0), 0);
+          const todayMedRevenue = todayMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+          const todayMedTransactions = todayMeds.length;
+          const todayMedUnitsSold = todayMeds.reduce((s, m) => s + parseMedicineDetails(m.details).qty, 0);
+          const todayTotalClinicSale = todayConsultationRevenue + todayProcRevenue + todayMedRevenue;
 
-        // 2. MONTHS MAP
-        const monthsMap = {};
+          const todayStats = {
+            totalClinicSale: todayTotalClinicSale,
+            packageRedemptionValue: todayRedeemedSessionsValue,
+            consultationRevenue: todayConsultationRevenue,
+            consultationCount: todayConsultationCount,
+            procedureRevenue: todayProcRevenue,
+            procedureSessions: todayProcSessions,
+            medicineRevenue: todayMedRevenue,
+            medicineTransactions: todayMedTransactions,
+            medicineUnitsSold: todayMedUnitsSold
+          };
 
-        const getOrInitMonth = (mKey) => {
-          if (!monthsMap[mKey]) {
-            monthsMap[mKey] = {
-              monthKey: mKey,
-              monthLabel: formatMonthLabel(mKey),
-              fullMonthLabel: formatFullMonthLabel(mKey),
-              consultationRevenue: 0,
-              consultationCount: 0,
-              procedureRevenue: 0,
-              procedureSessions: 0,
-              medicineRevenue: 0,
-              medicineTransactions: 0,
-              medicineUnitsSold: 0,
-              totalClinicSale: 0,
-              procedures: {},
-              medicines: {},
-              dailyMap: {}
-            };
-          }
-          return monthsMap[mKey];
-        };
+          // 2. MONTHS MAP
+          const monthsMap = {};
 
-        // Ensure current & prev months are initialized
-        getOrInitMonth(currMonthKey);
-        getOrInitMonth(prevMonthKey);
+          const getOrInitMonth = (mKey) => {
+            if (!monthsMap[mKey]) {
+              monthsMap[mKey] = {
+                monthKey: mKey,
+                monthLabel: formatMonthLabel(mKey),
+                fullMonthLabel: formatFullMonthLabel(mKey),
+                consultationRevenue: 0,
+                consultationCount: 0,
+                procedureRevenue: 0,
+                procedureSessions: 0,
+                medicineRevenue: 0,
+                medicineTransactions: 0,
+                medicineUnitsSold: 0,
+                totalClinicSale: 0,
+                procedures: {},
+                medicines: {},
+                dailyMap: {}
+              };
+            }
+            return monthsMap[mKey];
+          };
 
-        // Process Consultations
-        visits.forEach(v => {
-          const mKey = v.month_key || currMonthKey;
-          const mObj = getOrInitMonth(mKey);
-          const cFee = parseFloat(v.consultation_fee) || 0;
-          if (cFee > 0) {
-            mObj.consultationRevenue += cFee;
-            mObj.consultationCount += 1;
-            mObj.totalClinicSale += cFee;
+          // Ensure current & prev months are initialized
+          getOrInitMonth(currMonthKey);
+          getOrInitMonth(prevMonthKey);
 
-            const dKey = v.visit_date;
+          // Process Consultations
+          visits.forEach(v => {
+            const mKey = v.month_key || currMonthKey;
+            const mObj = getOrInitMonth(mKey);
+            const cFee = parseFloat(v.consultation_fee) || 0;
+            if (cFee > 0) {
+              mObj.consultationRevenue += cFee;
+              mObj.consultationCount += 1;
+              mObj.totalClinicSale += cFee;
+
+              const dKey = v.visit_date;
+              if (dKey) {
+                if (!mObj.dailyMap[dKey]) mObj.dailyMap[dKey] = { date: dKey, consultationSale: 0, procedureSale: 0, medicineSale: 0, totalSale: 0 };
+                mObj.dailyMap[dKey].consultationSale = (mObj.dailyMap[dKey].consultationSale || 0) + cFee;
+                mObj.dailyMap[dKey].totalSale += cFee;
+              }
+            }
+          });
+
+          // Process Procedures
+          procs.forEach(p => {
+            const mKey = p.month_key || currMonthKey;
+            const mObj = getOrInitMonth(mKey);
+            const amt = parseFloat(p.allocated_amount) || 0;
+            mObj.procedureRevenue += amt;
+            mObj.procedureSessions += 1;
+            mObj.totalClinicSale += amt;
+
+            let pName = p.name ? p.name.trim() : 'General Procedure';
+            if (pName.includes('[Redeemed Session')) {
+              const match = pName.match(/\[Redeemed Session \d+ of \d+\]\s*(.*)/i);
+              if (match && match[1]) pName = `${match[1].trim()} (Redeemed Session)`;
+            }
+            if (!mObj.procedures[pName]) mObj.procedures[pName] = { name: pName, sessions: 0, revenue: 0 };
+            mObj.procedures[pName].sessions += 1;
+            mObj.procedures[pName].revenue += amt;
+
+            const dKey = p.visit_date;
             if (dKey) {
               if (!mObj.dailyMap[dKey]) mObj.dailyMap[dKey] = { date: dKey, consultationSale: 0, procedureSale: 0, medicineSale: 0, totalSale: 0 };
-              mObj.dailyMap[dKey].consultationSale = (mObj.dailyMap[dKey].consultationSale || 0) + cFee;
-              mObj.dailyMap[dKey].totalSale += cFee;
+              mObj.dailyMap[dKey].procedureSale += amt;
+              mObj.dailyMap[dKey].totalSale += amt;
             }
-          }
-        });
-
-        // Process Procedures
-        procs.forEach(p => {
-          const mKey = p.month_key || currMonthKey;
-          const mObj = getOrInitMonth(mKey);
-          const amt = parseFloat(p.amount) || 0;
-          mObj.procedureRevenue += amt;
-          mObj.procedureSessions += 1;
-          mObj.totalClinicSale += amt;
-
-          const pName = p.name ? p.name.trim() : 'General Procedure';
-          if (!mObj.procedures[pName]) mObj.procedures[pName] = { name: pName, sessions: 0, revenue: 0 };
-          mObj.procedures[pName].sessions += 1;
-          mObj.procedures[pName].revenue += amt;
-
-          const dKey = p.visit_date;
-          if (dKey) {
-            if (!mObj.dailyMap[dKey]) mObj.dailyMap[dKey] = { date: dKey, consultationSale: 0, procedureSale: 0, medicineSale: 0, totalSale: 0 };
-            mObj.dailyMap[dKey].procedureSale += amt;
-            mObj.dailyMap[dKey].totalSale += amt;
-          }
-        });
+          });
 
       // Process Medicines
       meds.forEach(m => {
@@ -2001,6 +2254,7 @@ app.get('/api/admin/reports', authenticateToken, (req, res) => {
     });
   });
   });
+});
 });
 
 app.get('/api/reports/procedures', authenticateToken, (req, res) => {
@@ -2125,6 +2379,7 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
 
                 let procedureRevenue = 0;
                 let packageRevenue = 0;
+                let redeemedPkgTotal = 0;
                 const standardProcedures = [];
                 const packageSessionsRedeemed = [];
                 const packagesSold = [];
@@ -2136,6 +2391,19 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                     packageRevenue += amt;
                     packagesSold.push(p);
                   } else if (nameUpper.includes('[REDEEMED SESSION') || amt === 0) {
+                    const v = visits.find(vr => vr.visit_id === p.visit_id);
+                    let matchedPkg = null;
+                    if (v && v.package_redeemed_id) {
+                      matchedPkg = packages.find(pkg => pkg.id === v.package_redeemed_id);
+                    }
+                    if (!matchedPkg && v) {
+                      const match = (p.name || '').match(/\[Redeemed Session \d+ of \d+\]\s*(.*)/i);
+                      const pName = match ? match[1].trim().toLowerCase() : '';
+                      matchedPkg = packages.find(pkg => pkg.patient_id === v.patient_id && (pName ? (pkg.package_name || '').toLowerCase().includes(pName) : true));
+                    }
+                    const sessionVal = (matchedPkg && matchedPkg.total_sessions > 0) ? ((parseFloat(matchedPkg.price_paid) || 0) / matchedPkg.total_sessions) : 0;
+                    p.allocated_value = sessionVal;
+                    redeemedPkgTotal += sessionVal;
                     packageSessionsRedeemed.push(p);
                   } else {
                     procedureRevenue += amt;
@@ -2163,6 +2431,7 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                 const grossSales = consultationRevenue + procedureRevenue + medicineRevenue + packageRevenue;
                 const netSales = Math.max(0, grossSales - totalDiscounts);
                 const totalSales = netSales;
+                const adminTotalSale = consultationRevenue + procedureRevenue + medicineRevenue + redeemedPkgTotal;
 
                 // Collections
                 const collectionByMode = {};
@@ -2240,15 +2509,16 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                       visit_id: p.visit_id
                     });
                   } else if (nameUpper.includes('[REDEEMED SESSION') || amt === 0) {
+                    const sessVal = p.allocated_value || 0;
                     timeline.push({
                       id: `procred-${p.id}`,
                       category: 'PACKAGES',
                       category_label: 'Package Session Redemption',
                       title: `${pName} (${pId}) — ${p.name}`,
-                      subtitle: 'Package Session Consumed • Zero Payment (Prepaid)',
-                      amount: 0,
+                      subtitle: `Prepaid Session Delivered • Value: ₹${sessVal.toLocaleString('en-IN', {minimumFractionDigits: 0})} • Cash Collected: ₹0`,
+                      amount: sessVal,
                       is_debit: false,
-                      badge: 'SESSION USED (₹0)',
+                      badge: `SESSION REDEEMED (₹${sessVal.toFixed(0)})`,
                       badge_color: '#059669',
                       time: time,
                       patient_id: v ? v.patient_id : null,
@@ -2377,6 +2647,8 @@ app.get('/api/admin/diary', authenticateToken, (req, res) => {
                     total_discounts: totalDiscounts,
                     net_sales: netSales,
                     total_sales: totalSales,
+                    admin_total_sale: adminTotalSale,
+                    package_redemption_value: redeemedPkgTotal,
                     total_collection: totalCollection,
                     collection_by_mode: collectionByMode,
                     total_expenses: totalExpenses,
@@ -2419,14 +2691,85 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
       getDailyCollectionBreakdown(today, (errCol, colData) => {
         if (errCol) return res.status(500).json({ error: errCol.message });
 
-        res.json({
-          patients: patRow?.patients || 0,
-          collection: colData?.total_collection || 0,
-          total_collection: colData?.total_collection || 0,
-          procedure_collection: colData?.procedure_collection || 0,
-          medicine_collection: colData?.medicine_collection || 0,
-          modes: colData?.modes || []
-        });
+        // Calculate Admin Total Sale (Delivered Service Value)
+        db.all(
+          `SELECT v.id as visit_id, v.patient_id, v.consultation_fee, v.package_redeemed_id
+           FROM visits v
+           WHERE (date(v.visit_date) = ? OR v.visit_date LIKE ?)
+             AND (v.planned_procedures IS NULL OR (v.planned_procedures NOT LIKE '%CANCEL%' AND v.planned_procedures NOT LIKE '%VOID%'))`,
+          [today, `${today}%`],
+          (errV, vRows = []) => {
+            if (errV) return res.status(500).json({ error: errV.message });
+
+            const vIds = vRows.map(v => v.visit_id);
+            const cFeeTotal = vRows.reduce((s, v) => s + (parseFloat(v.consultation_fee) || 0), 0);
+
+            if (vIds.length === 0) {
+              return res.json({
+                patients: patRow?.patients || 0,
+                total_sale: 0,
+                total_service_value: 0,
+                package_redemption_value: 0,
+                collection: colData?.total_collection || 0,
+                total_collection: colData?.total_collection || 0,
+                procedure_collection: colData?.procedure_collection || 0,
+                medicine_collection: colData?.medicine_collection || 0,
+                modes: colData?.modes || []
+              });
+            }
+
+            db.all(`SELECT * FROM procedures WHERE visit_id IN (${vIds.join(',')})`, [], (errP, pRows = []) => {
+              db.all(`SELECT * FROM medicines WHERE visit_id IN (${vIds.join(',')})`, [], (errM, mRows = []) => {
+                db.all(`SELECT id, patient_id, package_name, price_paid, total_sessions FROM patient_packages`, [], (errPkg, allPkgs = []) => {
+                  const medTotal = (mRows || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+                  let procTotal = 0;
+                  let redeemedPkgTotal = 0;
+
+                  (pRows || []).forEach(p => {
+                    const isRedeemed = (p.name || '').includes('[Redeemed Session') || p.amount === 0;
+                    const isSold = (p.name || '').includes('[Package Sold]');
+                    const v = vRows.find(vr => vr.visit_id === p.visit_id);
+
+                    if (isRedeemed) {
+                      let matchedPkg = null;
+                      if (v && v.package_redeemed_id) {
+                        matchedPkg = allPkgs.find(pkg => pkg.id === v.package_redeemed_id);
+                      }
+                      if (!matchedPkg && v) {
+                        const match = (p.name || '').match(/\[Redeemed Session \d+ of \d+\]\s*(.*)/i);
+                        const pName = match ? match[1].trim().toLowerCase() : '';
+                        matchedPkg = allPkgs.find(pkg => pkg.patient_id === v.patient_id && (pName ? (pkg.package_name || '').toLowerCase().includes(pName) : true));
+                      }
+                      if (matchedPkg && matchedPkg.total_sessions > 0) {
+                        const sessVal = (parseFloat(matchedPkg.price_paid) || 0) / matchedPkg.total_sessions;
+                        redeemedPkgTotal += sessVal;
+                      }
+                    } else if (!isSold) {
+                      procTotal += (parseFloat(p.amount) || 0);
+                    }
+                  });
+
+                  const adminTotalSale = cFeeTotal + procTotal + medTotal + redeemedPkgTotal;
+
+                  res.json({
+                    patients: patRow?.patients || 0,
+                    total_sale: adminTotalSale,
+                    total_service_value: adminTotalSale,
+                    package_redemption_value: redeemedPkgTotal,
+                    consultation_sale: cFeeTotal,
+                    procedure_sale: procTotal,
+                    medicine_sale: medTotal,
+                    collection: colData?.total_collection || 0,
+                    total_collection: colData?.total_collection || 0,
+                    procedure_collection: colData?.procedure_collection || 0,
+                    medicine_collection: colData?.medicine_collection || 0,
+                    modes: colData?.modes || []
+                  });
+                });
+              });
+            });
+          }
+        );
       });
     }
   );
@@ -3607,8 +3950,8 @@ app.locals.writeAudit = writeAudit;
 // 1. Get complete pharmacy sale details for inspection & modal
 app.get('/api/admin/pharmacy/sales/:visit_id', authenticateToken, (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
-  if (role !== 'ADMIN' && role !== 'DOCTOR') {
-    return res.status(403).json({ error: 'Access denied. Admin or Doctor role required.' });
+  if (!['ADMIN', 'DOCTOR', 'STAFF'].includes(role)) {
+    return res.status(403).json({ error: 'Access denied. Admin, Doctor, or Staff role required.' });
   }
 
   const visitId = parseInt(req.params.visit_id, 10);
@@ -3631,25 +3974,30 @@ app.get('/api/admin/pharmacy/sales/:visit_id', authenticateToken, (req, res) => 
         db.all(`SELECT * FROM payments WHERE visit_id = ? ORDER BY id ASC`, [visitId], (errPay, payments) => {
           if (errPay) return res.status(500).json({ error: errPay.message });
 
-          db.get(`SELECT * FROM invoices WHERE visit_id = ?`, [visitId], (errInv, invoice) => {
-            if (errInv) return res.status(500).json({ error: errInv.message });
+          db.all(`SELECT * FROM procedures WHERE visit_id = ? ORDER BY id ASC`, [visitId], (errProc, procedures) => {
+            if (errProc) return res.status(500).json({ error: errProc.message });
 
-            // Annotate medicines with parsed details
-            const parsedMedicines = (medicines || []).map(m => {
-              const parsed = parseMedicineDetails(m.details);
-              return {
-                ...m,
-                parsed_name: parsed.name,
-                parsed_qty: parsed.qty,
-                parsed_batch: parsed.batch
-              };
-            });
+            db.get(`SELECT * FROM invoices WHERE visit_id = ?`, [visitId], (errInv, invoice) => {
+              if (errInv) return res.status(500).json({ error: errInv.message });
 
-            res.json({
-              visit,
-              medicines: parsedMedicines,
-              payments: payments || [],
-              invoice: invoice || null
+              // Annotate medicines with parsed details
+              const parsedMedicines = (medicines || []).map(m => {
+                const parsed = parseMedicineDetails(m.details);
+                return {
+                  ...m,
+                  parsed_name: parsed.name,
+                  parsed_qty: parsed.qty,
+                  parsed_batch: parsed.batch
+                };
+              });
+
+              res.json({
+                visit,
+                medicines: parsedMedicines,
+                procedures: procedures || [],
+                payments: payments || [],
+                invoice: invoice || null
+              });
             });
           });
         });
@@ -3658,11 +4006,73 @@ app.get('/api/admin/pharmacy/sales/:visit_id', authenticateToken, (req, res) => 
   );
 });
 
+// 1b. Correct / Edit consultation fee for a visit (e.g. set to ₹0 when procedure is performed)
+app.put('/api/admin/pharmacy/sales/:visit_id/consultation-fee', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (!['ADMIN', 'DOCTOR', 'STAFF'].includes(role)) {
+    return res.status(403).json({ error: 'Access denied. Admin, Doctor, or Staff role required.' });
+  }
+
+  const visitId = parseInt(req.params.visit_id, 10);
+  const newFee = Math.max(0, parseFloat(req.body.consultation_fee) || 0);
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  db.get(`SELECT * FROM visits WHERE id = ?`, [visitId], (errV, visit) => {
+    if (errV) return res.status(500).json({ error: errV.message });
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    db.all(`SELECT * FROM procedures WHERE visit_id = ?`, [visitId], (errP, procs) => {
+      if (errP) return res.status(500).json({ error: errP.message });
+
+      db.all(`SELECT * FROM medicines WHERE visit_id = ?`, [visitId], (errM, meds) => {
+        if (errM) return res.status(500).json({ error: errM.message });
+
+        const procTotal = (procs || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+        const medTotal = (meds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+        const newSubtotal = newFee + procTotal + medTotal;
+        const discAmt = parseFloat(visit.discount_amount) || 0;
+        const newNetPayable = Math.max(0, newSubtotal - discAmt);
+
+        db.run(
+          `UPDATE visits SET consultation_fee = ?, subtotal = ?, net_payable = ? WHERE id = ?`,
+          [newFee, newSubtotal, newNetPayable, visitId],
+          function(errUp) {
+            if (errUp) return res.status(500).json({ error: errUp.message });
+
+            // If an invoice exists, update its subtotal, grand_total, net_payable
+            db.run(
+              `UPDATE invoices SET subtotal = ?, grand_total = ?, net_payable = ?, amount_paid = CASE WHEN status = 'PAID' THEN ? ELSE amount_paid END WHERE visit_id = ?`,
+              [newSubtotal, newNetPayable, newNetPayable, newNetPayable, visitId],
+              () => {}
+            );
+
+            writeAudit(req.user, 'UPDATE_CONSULTATION_FEE', {
+              visit_id: visitId,
+              old_fee: visit.consultation_fee,
+              new_fee: newFee,
+              new_subtotal: newSubtotal,
+              new_net_payable: newNetPayable,
+              patient_id: visit.patient_id
+            });
+
+            res.json({
+              message: `Consultation fee updated to ₹${newFee.toFixed(0)}`,
+              consultation_fee: newFee,
+              subtotal: newSubtotal,
+              net_payable: newNetPayable
+            });
+          }
+        );
+      });
+    });
+  });
+});
+
 // 2. Change / Edit payment mode for a pharmacy sale
 app.put('/api/admin/pharmacy/sales/:visit_id/payment-mode', authenticateToken, (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
-  if (role !== 'ADMIN' && role !== 'DOCTOR') {
-    return res.status(403).json({ error: 'Access denied. Admin or Doctor role required.' });
+  if (!['ADMIN', 'DOCTOR', 'STAFF'].includes(role)) {
+    return res.status(403).json({ error: 'Access denied. Admin, Doctor, or Staff role required.' });
   }
 
   const visitId = parseInt(req.params.visit_id, 10);
