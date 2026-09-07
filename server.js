@@ -29,6 +29,56 @@ const smartCameraService = (() => {
  * - Continuous learning from confirmed image references
  */
 
+const https = require('https');
+
+// Free Public OCR Endpoint Fallback (OCR.space Engine 2)
+function extractTextWithOcrSpace(imageBase64) {
+  if (!imageBase64) return Promise.resolve('');
+  return new Promise((resolve) => {
+    try {
+      const cleanB64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+      const postData = 'apikey=helloworld&isOverlayRequired=false&detectOrientation=true&scale=true&OCREngine=2&base64Image=' + encodeURIComponent('data:image/jpeg;base64,' + cleanB64);
+      
+      const req = https.request('https://api.ocr.space/parse/image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 18000
+      }, (res) => {
+        let buf = '';
+        res.on('data', (c) => buf += c);
+        res.on('end', () => {
+          try {
+            const j = JSON.parse(buf);
+            const parsed = j.ParsedResults?.[0]?.ParsedText || '';
+            resolve(parsed.trim());
+          } catch (e) {
+            resolve('');
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.warn('[SmartCamera OCR] Fallback network notice:', err.message);
+        resolve('');
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve('');
+      });
+
+      req.write(postData);
+      req.end();
+    } catch (err) {
+      console.warn('[SmartCamera OCR] Exception:', err.message);
+      resolve('');
+    }
+  });
+}
+
 // 1. Expiry Date Parser (FEFO helper)
 function parseExpiryDate(expStr) {
   if (!expStr || typeof expStr !== 'string') return 99999999;
@@ -120,6 +170,10 @@ function selectBestBatchFEFO(batches) {
 }
 
 // 3. String Normalization & Levenshtein / Token Distance for Fuzzy Matching
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\function normalizeText(str) {');
+}
+
 function normalizeText(str) {
   if (!str) return '';
   return str
@@ -160,10 +214,11 @@ function computeSimilarity(str1, str2) {
   if (norm1 === norm2) return 1.0;
   if (!norm1 || !norm2) return 0;
 
-  // Exact match or substring inclusion with spaces
+  // Exact match or substring inclusion with spaces (require minLen >= 3 to avoid single-letter false matches)
   if (norm1.includes(norm2) || norm2.includes(norm1)) {
     const minLen = Math.min(norm1.length, norm2.length);
     const maxLen = Math.max(norm1.length, norm2.length);
+    if (minLen < 3) return minLen / maxLen;
     return Math.max(0.85, minLen / maxLen);
   }
 
@@ -226,14 +281,14 @@ function matchProduct(detectedName, catalogueGrouped, learnedKeywords = []) {
     }
   }
 
-  if (highestScore >= 0.80) {
+  if (highestScore >= 0.72) {
     return {
       product: bestMatch.prodData,
       confidence: 'HIGH',
       similarity: highestScore,
       matchedName: bestMatch.prodName
     };
-  } else if (highestScore >= 0.52) {
+  } else if (highestScore >= 0.50) {
     return {
       product: bestMatch.prodData,
       confidence: 'MEDIUM',
@@ -257,14 +312,14 @@ function matchPatientFromText(detectedText, patientsList) {
   }
 
   const normText = normalizeText(detectedText);
-  const lines = detectedText.split('\n').map(l => normalizeText(l)).filter(Boolean);
+  const spacelessFullText = normText.replace(/\s+/g, '');
 
-  // Look for explicit prefix: patient / pt / name / mr / ms / mrs / dr
-  const namePrefixRegex = /(?:patient|pt|name|mr|ms|mrs)\s*[:\-\s]\s*([a-z\s]+)/i;
+  // Look for explicit prefix: patient / pt / name / mr / ms / mrs
+  const namePrefixRegex = /(?:patient|pt|name|mr|ms|mrs)\s*[:\-\s]\s*([^\n\r,;]+)/i;
   let extractedName = null;
   const matchPrefix = detectedText.match(namePrefixRegex);
   if (matchPrefix && matchPrefix[1]) {
-    extractedName = normalizeText(matchPrefix[1]).slice(0, 30);
+    extractedName = normalizeText(matchPrefix[1]).slice(0, 40);
   }
 
   let bestPatient = null;
@@ -273,10 +328,11 @@ function matchPatientFromText(detectedText, patientsList) {
 
   for (const pt of patientsList) {
     const ptNameNorm = normalizeText(pt.name);
+    if (!ptNameNorm || ptNameNorm.length < 3) continue;
     const ptCodeNorm = normalizeText(pt.patient_code || '');
     const ptPhone = (pt.phone || '').trim();
 
-    // Direct phone number match in text
+    // 1. Direct phone number match in text (100% confidence)
     if (ptPhone && ptPhone.length >= 7 && normText.includes(ptPhone)) {
       return {
         matched: pt,
@@ -285,7 +341,7 @@ function matchPatientFromText(detectedText, patientsList) {
       };
     }
 
-    // Direct Patient Code match (e.g. S2858)
+    // 2. Direct Patient Code match (e.g. S2858) (100% confidence)
     if (ptCodeNorm && ptCodeNorm.length >= 3 && normText.includes(ptCodeNorm)) {
       return {
         matched: pt,
@@ -294,29 +350,65 @@ function matchPatientFromText(detectedText, patientsList) {
       };
     }
 
-    // Name matching
-    let score = 0;
-    if (extractedName) {
-      score = computeSimilarity(extractedName, ptNameNorm);
-    } else {
-      for (const line of lines) {
-        const lineScore = computeSimilarity(line, ptNameNorm);
-        if (lineScore > score) score = lineScore;
+    // 3. Direct exact full patient name match in OCR text (98% confidence)
+    const ptSpaceless = ptNameNorm.replace(/\s+/g, '');
+    if (normText.includes(ptNameNorm) || (ptSpaceless.length >= 6 && spacelessFullText.includes(ptSpaceless))) {
+      candidates.push({ ...pt, matchScore: 0.98 });
+      if (0.98 > bestScore) {
+        bestScore = 0.98;
+        bestPatient = pt;
+      }
+      continue;
+    }
+
+    // 4. Multi-token match using word boundaries and fuzzy first-name prefix matching
+    const ptWords = ptNameNorm.split(' ').filter(w => w.length >= 2 && w !== 'dr' && w !== 'mr' && w !== 'ms' && w !== 'mrs');
+    if (ptWords.length >= 2) {
+      let matchedWordCount = 0;
+      let hasFuzzyFirst = false;
+
+      for (let i = 0; i < ptWords.length; i++) {
+        const w = ptWords[i];
+        const wordRegex = new RegExp('\\b' + escapeRegex(w) + '\\b', 'i');
+        if (wordRegex.test(normText)) {
+          matchedWordCount++;
+        } else if (i === 0 && extractedName) {
+          // Check if first name matches extracted name fuzzily (e.g. "as pita" vs "arpita")
+          const sim = computeSimilarity(extractedName.replace(/\s+/g, ''), w);
+          if (sim >= 0.70) {
+            hasFuzzyFirst = true;
+            matchedWordCount++;
+          }
+        }
+      }
+
+      if (matchedWordCount === ptWords.length) {
+        const tokenScore = hasFuzzyFirst ? 0.95 : 0.94;
+        candidates.push({ ...pt, matchScore: tokenScore });
+        if (tokenScore > bestScore) {
+          bestScore = tokenScore;
+          bestPatient = pt;
+        }
+        continue;
       }
     }
 
-    if (score > 0.6) {
-      candidates.push({ ...pt, matchScore: score });
-      if (score > bestScore) {
-        bestScore = score;
-        bestPatient = pt;
+    // 5. If explicit "Name: XYZ" was captured, match against that extracted name
+    if (extractedName) {
+      const score = computeSimilarity(extractedName, ptNameNorm);
+      if (score >= 0.65) {
+        candidates.push({ ...pt, matchScore: score });
+        if (score > bestScore) {
+          bestScore = score;
+          bestPatient = pt;
+        }
       }
     }
   }
 
   candidates.sort((a, b) => b.matchScore - a.matchScore);
 
-  if (bestScore >= 0.82) {
+  if (bestScore >= 0.72) {
     return {
       matched: bestPatient,
       confidence: 'HIGH',
@@ -439,14 +531,21 @@ async function createDraftFromImage({
 
   const catalogueNames = Object.keys(catalogueGrouped);
 
-  // Attempt Gemini Vision first if image provided
+  // 1. Attempt Gemini Vision first if image provided and key configured
   let visionResult = null;
   if (imageBase64 && process.env.GEMINI_API_KEY) {
     visionResult = await analyzeWithGemini(imageBase64, catalogueNames, patientsList);
   }
 
-  // Determine OCR / extracted text
-  const extractedOcrText = visionResult?.raw_ocr_text || rawText || '';
+  // 2. High-accuracy Zero-Config OCR Fallback (OCR.space free engine 2)
+  let extractedOcrText = visionResult?.raw_ocr_text || rawText || '';
+  if (!extractedOcrText && imageBase64) {
+    try {
+      extractedOcrText = await extractTextWithOcrSpace(imageBase64);
+    } catch (errOcr) {
+      console.warn('[SmartCamera] OCR fallback warning:', errOcr.message);
+    }
+  }
 
   // Patient Identification
   let patientMatch = null;
@@ -549,17 +648,85 @@ async function createDraftFromImage({
     }
   }
 
+  // Catalogue Brand Full-Text Scan Fallback
+  // If items are wrapped or multi-line in OCR, scan full text for all 148 catalogue items
+  if (extractedOcrText) {
+    const normFullText = normalizeText(extractedOcrText);
+    const spacelessFullText = normFullText.replace(/\s+/g, '');
+
+    for (const prodName of catalogueNames) {
+      const alreadyDrafted = draftItems.some(it => it.medicine_name.toLowerCase() === prodName.toLowerCase());
+      if (alreadyDrafted) continue;
+
+      const normPName = normalizeText(prodName);
+      if (!normPName || normPName.length < 4) continue;
+      const spacelessPName = normPName.replace(/\s+/g, '');
+      const words = normPName.split(' ').filter(w => w.length > 3);
+      const brandWord = words[0];
+
+      // Exclude generic packaging words from triggering brand scan
+      const genericWords = ['cream', 'gel', 'lotion', 'tablet', 'serum', 'shampoo', 'wash', 'face', 'mask', 'plus'];
+      const isGenericBrand = genericWords.includes(brandWord);
+
+      let isMatch = false;
+      if (normFullText.includes(normPName) || (spacelessPName.length >= 6 && spacelessFullText.includes(spacelessPName))) {
+        isMatch = true;
+      } else if (!isGenericBrand && brandWord && brandWord.length >= 5 && (normFullText.includes(brandWord) || spacelessFullText.includes(brandWord))) {
+        isMatch = true;
+      }
+
+      if (isMatch) {
+        const prod = catalogueGrouped[prodName];
+        const batchResult = selectBestBatchFEFO(prod.batches);
+        const selBatch = batchResult?.selectedBatch;
+
+        if (!selBatch || batchResult?.isOutOfStockOrExpired) {
+          const hasAnyQty = prod.batches.some(b => (b.quantity || 0) > 0);
+          if (!outOfStockItems.some(o => o.product_name.toLowerCase() === prod.medicine_name.toLowerCase())) {
+            outOfStockItems.push({
+              product_name: prod.medicine_name,
+              raw_detected_name: prod.medicine_name,
+              reason: hasAnyQty ? 'EXPIRED' : 'ZERO_QUANTITY'
+            });
+          }
+          continue;
+        }
+
+        const unitPrice = selBatch?.mrp || prod.mrp || 0;
+        const defaultInstr = prod.default_instructions 
+          ? prod.default_instructions.split(',')[0].trim() 
+          : (prod.medicine_name.toLowerCase().includes('piranid') ? 'Apply twice daily post-procedure' : '');
+
+        draftItems.push({
+          inventory_id: selBatch?.id || prod.batches[0]?.id,
+          medicine_name: prod.medicine_name,
+          quantity: 1,
+          mrp: unitPrice,
+          amount: unitPrice,
+          batch_number: selBatch?.batch_number || 'N/A',
+          expiry_date: selBatch?.expiry_date || 'N/A',
+          is_early_expiry: true,
+          available_batches: batchResult?.availableBatches || [],
+          default_instructions: defaultInstr,
+          instruction: defaultInstr,
+          confidence: 'HIGH',
+          similarity: 95
+        });
+      }
+    }
+  }
+
   const subtotal = draftItems.reduce((sum, it) => sum + (it.amount || 0), 0);
 
   return {
-    patient: patientMatch.matched ? {
+    patient: patientMatch?.matched ? {
       id: patientMatch.matched.id,
       name: patientMatch.matched.name,
       phone: patientMatch.matched.phone,
       patient_code: patientMatch.matched.patient_code,
       confidence: patientMatch.confidence
     } : null,
-    patient_candidates: patientMatch.candidates || [],
+    patient_candidates: patientMatch?.candidates || [],
     items: draftItems,
     unmatched_items: unmatchedDetections,
     out_of_stock_items: outOfStockItems,
@@ -568,8 +735,19 @@ async function createDraftFromImage({
   };
 }
 
+module.exports = {
+  extractTextWithOcrSpace,
+  parseExpiryDate,
+  isExpired,
+  selectBestBatchFEFO,
+  computeSimilarity,
+  matchProduct,
+  matchPatientFromText,
+  createDraftFromImage
+};
 
   return {
+    extractTextWithOcrSpace,
     parseExpiryDate,
     isExpired,
     selectBestBatchFEFO,
@@ -579,6 +757,11 @@ async function createDraftFromImage({
     createDraftFromImage
   };
 })();
+
+
+
+
+
 
 
 const PORT = process.env.PORT || 3000;
@@ -1751,21 +1934,37 @@ app.post('/api/inventory', authenticateToken, (req, res) => {
 });
 
 app.put('/api/inventory/:id', authenticateToken, (req, res) => {
-  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
-    return res.status(403).json({ error: 'Only Admin or Doctor can modify inventory' });
-  }
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  const id = req.params.id;
   const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '' } = req.body;
-  db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=? WHERE id=?',
-    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, default_instructions, req.params.id], function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Updated' });
+
+  db.get('SELECT * FROM inventory WHERE id = ?', [id], (errRow, existingRow) => {
+    if (errRow) return res.status(500).json({ error: errRow.message });
+    if (!existingRow) return res.status(404).json({ error: 'Inventory item not found.' });
+
+    const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
+    const newQty = parseInt(quantity, 10) || 0;
+    const existingQty = parseInt(existingRow.quantity, 10) || 0;
+
+    // Staff cannot reduce already entered stock quantity
+    if (!isPrivileged && newQty < existingQty) {
+      return res.status(403).json({
+        error: `Permission denied: Staff cannot reduce stock quantity (Current: ${existingQty}, Requested: ${newQty}). Staff can add stock or edit details, but only Admin or Doctor can reduce stock.`
+      });
+    }
+
+    db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=? WHERE id=?',
+      [medicine_name, batch_number, mrp || 0, newQty, expiry_date, default_instructions, id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Updated' });
+    });
   });
 });
 
 app.delete('/api/inventory/:id', authenticateToken, (req, res) => {
-  const role = req.user.role ? req.user.role.toUpperCase() : '';
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
   if (role !== 'ADMIN' && role !== 'DOCTOR') {
-    return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can delete stock items.' });
+    return res.status(403).json({ error: 'Access denied: Staff cannot delete stock items. Only Admin or Doctor can delete items.' });
   }
   const id = req.params.id;
   db.run('DELETE FROM inventory WHERE id = ?', [id], function(err) {
@@ -3562,15 +3761,34 @@ app.get('/api/appointments', authenticateToken, (req, res) => {
 app.get('/api/appointments/reminders', authenticateToken, (req, res) => {
   db.all(
     `SELECT a.*, 
-            p.first_name, p.last_name, p.mobile as patient_mobile, p.skinssence_id
+            p.first_name, p.last_name, p.mobile as patient_mobile, p.skinssence_id,
+            (SELECT COUNT(*) 
+             FROM visits v 
+             JOIN patients p2 ON v.patient_id = p2.id 
+             WHERE (p2.skinssence_id = a.patient_id OR CAST(p2.id AS TEXT) = a.patient_id OR v.patient_id = a.patient_id) 
+               AND date(v.visit_date) >= date(a.appointment_date)
+            ) as has_visited
      FROM appointments a
      LEFT JOIN patients p ON a.patient_id = p.skinssence_id OR a.patient_id = CAST(p.id AS TEXT)
-     WHERE (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'COMPLETED'))
+     WHERE (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'COMPLETED', 'VISITED', 'RESCHEDULED', 'RESPONSE_TAKEN', 'CONFIRMED', 'DONE'))
      ORDER BY a.appointment_date ASC, a.appointment_time ASC`,
     [],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      const sanitized = (rows || []).map(r => {
+      const filtered = (rows || []).filter(r => {
+        // 1. Do not show patients that already visited
+        if ((r.has_visited || 0) > 0) return false;
+
+        // 2. Do not show rescheduled or cancelled appointments
+        const st = (r.status || '').toUpperCase();
+        if (st.includes('RESCHEDULE') || st === 'CANCELLED' || st === 'COMPLETED' || st === 'VISITED') return false;
+
+        // 3. Do not show if staff marked response taken
+        if (['RESPONSE_TAKEN', 'CONFIRMED', 'DONE', 'CALLED'].includes(st)) return false;
+        if ((r.notes || '').includes('[Call: Spoke - Confirmed') || (r.notes || '').includes('[Call: Response Taken]')) return false;
+
+        return true;
+      }).map(r => {
         const name = (r.patient_name || `${r.first_name || ''} ${r.last_name || ''}`).trim() || 'Valued Client';
         const mobile = r.mobile || r.patient_mobile || '';
         return {
@@ -3579,7 +3797,7 @@ app.get('/api/appointments/reminders', authenticateToken, (req, res) => {
           mobile: mobile
         };
       });
-      res.json(sanitized);
+      res.json(filtered);
     }
   );
 });
