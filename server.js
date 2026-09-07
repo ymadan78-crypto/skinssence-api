@@ -945,7 +945,62 @@ app.post('/api/patients', authenticateToken, (req, res) => {
           [patientId, JSON.stringify(concerns || []), other_concern||null, upcoming_event ? 1 : 0, event_date||null, last_hair_procedure||null, last_hair_procedure_date||null],
           function (err2) {
             if (err2) return res.status(500).json({ error: err2.message });
-            res.json({ message: 'Patient Registered Successfully', skinssence_id: newSkinssenceId, patient_id: patientId });
+
+            const chargeConsultation = req.body.charge_consultation !== false && req.body.charge_consultation !== 'false';
+            const cFee = chargeConsultation ? (parseFloat(req.body.consultation_fee) !== undefined && !isNaN(parseFloat(req.body.consultation_fee)) ? parseFloat(req.body.consultation_fee) : 400) : 0;
+            const payMode = (req.body.consultation_payment_mode || 'CASH').toUpperCase();
+            const nowIso = new Date().toISOString();
+            const staffId = req.user?.id || 1;
+
+            if (cFee > 0) {
+              db.run(
+                `INSERT INTO visits (
+                  patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
+                  subtotal, discount_type, discount_value, discount_amount, net_payable
+                ) VALUES (?, ?, 'CONSULTATION', ?, ?, ?, 'NONE', 0, 0, ?)`,
+                [patientId, staffId, cFee, nowIso, cFee, cFee],
+                function(errVisit) {
+                  if (errVisit) return res.status(500).json({ error: errVisit.message });
+                  const visitId = this.lastID;
+
+                  db.run(
+                    `INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose)
+                     VALUES (?, ?, ?, ?, ?, 'VISIT')`,
+                    [visitId, patientId, payMode, cFee, nowIso],
+                    function(errPay) {
+                      if (errPay) return res.status(500).json({ error: errPay.message });
+                      res.json({
+                        message: 'Patient Registered Successfully',
+                        skinssence_id: newSkinssenceId,
+                        patient_id: patientId,
+                        visit_id: visitId,
+                        consultation_fee: cFee,
+                        payment_mode: payMode
+                      });
+                    }
+                  );
+                }
+              );
+            } else {
+              db.run(
+                `INSERT INTO visits (
+                  patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
+                  subtotal, discount_type, discount_value, discount_amount, net_payable
+                ) VALUES (?, ?, 'CONSULTATION (WAIVED)', 0, ?, 0, 'NONE', 0, 0, 0)`,
+                [patientId, staffId, nowIso],
+                function(errVisit) {
+                  if (errVisit) return res.status(500).json({ error: errVisit.message });
+                  res.json({
+                    message: 'Patient Registered Successfully',
+                    skinssence_id: newSkinssenceId,
+                    patient_id: patientId,
+                    visit_id: this.lastID,
+                    consultation_fee: 0,
+                    payment_mode: null
+                  });
+                }
+              );
+            }
           }
         );
     });
@@ -1320,7 +1375,7 @@ app.post('/api/procedures/master/merge', authenticateToken, (req, res) => {
 // --- VISIT ENTRY ROUTES ---
 
 app.post('/api/visits', authenticateToken, (req, res) => {
-  const { patient_id, procedure_name, notes, procedure_amount, medicine_details, medicine_amount, payment_mode, amount_received, planned_procedures, package_sold, package_redeemed_id } = req.body;
+  const { patient_id, procedure_name, notes, procedure_amount, medicine_details, medicine_amount, payment_mode, amount_received, planned_procedures, package_sold, package_redeemed_id, existing_visit_id } = req.body;
   const staff_id = req.user.id;
   const { 
     subtotal: rawSubtotal, 
@@ -1333,8 +1388,18 @@ app.post('/api/visits', authenticateToken, (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     
-    let consultation_fee = parseFloat(req.body.consultation_fee) || 0;
-    if (package_redeemed_id) {
+    let consultation_fee = parseFloat(req.body.consultation_fee);
+    if (isNaN(consultation_fee)) consultation_fee = 0;
+
+    // Clinic Rule: If any procedure is performed with fee, consultation fee is automatically zero
+    let hasProcWithFee = false;
+    if (req.body.procedures && Array.isArray(req.body.procedures)) {
+      hasProcWithFee = req.body.procedures.some(p => (parseFloat(p.amount) || 0) > 0);
+    } else if (parseFloat(req.body.procedure_amount) > 0) {
+      hasProcWithFee = true;
+    }
+
+    if (hasProcWithFee || package_redeemed_id) {
       consultation_fee = 0;
     }
     const finalVisitDate = req.body.visit_date || new Date().toISOString();
@@ -1357,23 +1422,8 @@ app.post('/api/visits', authenticateToken, (req, res) => {
       ? (parseFloat(rawNetPayable) || 0) 
       : Math.max(0, finalSubtotal - finalDiscAmt);
 
-    // 1. Create Visit with consultation_fee, visit_date, and discount fields
-    const q = `
-      INSERT INTO visits (
-        patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
-        subtotal, discount_type, discount_value, discount_amount, net_payable
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    const params = [
-      patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate,
-      finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
-    ];
-    
-    db.run(q, params, function(err) {
-      if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-      const visit_id = this.lastID;
-      
-      // 2. Add Procedures (array) - Only real procedures, NEVER fake consultation procedures
+    const onVisitReady = (visit_id) => {
+      // 2. Add Procedures (array)
       if (req.body.procedures && Array.isArray(req.body.procedures)) {
         req.body.procedures.forEach(p => {
           if (p.name && p.name.trim() !== '') {
@@ -1407,32 +1457,78 @@ app.post('/api/visits', authenticateToken, (req, res) => {
           [visit_id, medicine_details, parseFloat(medicine_amount) || 0]);
       }
       
-      // 6. Add Payment (if any) - Strictly records Net Payable received, matching finalVisitDate
+      // 6. Add Payment (if any)
       const payAmount = parseFloat(amount_received) || 0;
-      if (payAmount > 0) {
-        if (payment_mode !== 'PACKAGE_REDEMPTION') {
-          db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
-            [visit_id, patient_id, payment_mode, payAmount, finalVisitDate, 'VISIT']);
-        }
-          
-        if (payment_mode === 'PREPAID_WALLET') {
-          db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [payAmount, patient_id]);
-          db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [patient_id, payAmount, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
-        }
-      }
       
-      db.run('COMMIT', (err) => {
-        if (err) return res.status(500).json({ error: 'Commit failed' });
-        res.json({ 
-          message: 'Visit recorded successfully!', 
-          visit_id,
-          subtotal: finalSubtotal,
-          discount_amount: finalDiscAmt,
-          net_payable: finalNetPayable
+      // Check if previous payments exist for this visit (e.g. from registration)
+      db.get('SELECT COALESCE(SUM(amount_received), 0) as already_paid FROM payments WHERE visit_id = ?', [visit_id], (errPrev, prevRow) => {
+        const alreadyPaid = prevRow ? (parseFloat(prevRow.already_paid) || 0) : 0;
+        const netToRecord = payAmount - alreadyPaid;
+
+        if (netToRecord > 0 && payment_mode !== 'PACKAGE_REDEMPTION') {
+          db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
+            [visit_id, patient_id, payment_mode, netToRecord, finalVisitDate, 'VISIT']);
+            
+          if (payment_mode === 'PREPAID_WALLET') {
+            db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [netToRecord, patient_id]);
+            db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [patient_id, netToRecord, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
+          }
+        }
+
+        db.run('COMMIT', (err) => {
+          if (err) return res.status(500).json({ error: 'Commit failed' });
+          res.json({ 
+            message: 'Visit recorded successfully!', 
+            visit_id,
+            subtotal: finalSubtotal,
+            discount_amount: finalDiscAmt,
+            net_payable: finalNetPayable
+          });
         });
       });
-    });
+    };
+
+    if (existing_visit_id) {
+      // Update existing enrollment visit
+      const updateQ = `
+        UPDATE visits SET
+          staff_id = ?,
+          planned_procedures = ?,
+          consultation_fee = ?,
+          subtotal = ?,
+          discount_type = ?,
+          discount_value = ?,
+          discount_amount = ?,
+          net_payable = ?
+        WHERE id = ?
+      `;
+      db.run(updateQ, [
+        staff_id, planned_procedures || 'CONSULTATION', consultation_fee,
+        finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable,
+        existing_visit_id
+      ], function(errUp) {
+        if (errUp) return db.run('ROLLBACK', () => res.status(500).json({ error: errUp.message }));
+        onVisitReady(existing_visit_id);
+      });
+    } else {
+      // 1. Create Visit with consultation_fee, visit_date, and discount fields
+      const q = `
+        INSERT INTO visits (
+          patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
+          subtotal, discount_type, discount_value, discount_amount, net_payable
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      const params = [
+        patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate,
+        finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
+      ];
+      
+      db.run(q, params, function(err) {
+        if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
+        onVisitReady(this.lastID);
+      });
+    }
   });
 });
 
@@ -2157,11 +2253,35 @@ app.get('/api/inventory/reconciliation/:id/details', authenticateToken, (req, re
 app.get('/api/patients/:id/last-visit', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
   db.get(
-    `SELECT visit_date FROM visits WHERE patient_id = ? AND planned_procedures != 'PHARMACY SALE' ORDER BY visit_date DESC LIMIT 1`,
+    `SELECT v.id as visit_id, v.visit_date, v.consultation_fee, v.subtotal, v.net_payable, v.planned_procedures,
+            (SELECT GROUP_CONCAT(p.name) FROM procedures p WHERE p.visit_id = v.id) as proc_names,
+            (SELECT p.mode FROM payments p WHERE p.visit_id = v.id ORDER BY p.id DESC LIMIT 1) as payment_mode,
+            (SELECT SUM(p.amount_received) FROM payments p WHERE p.visit_id = v.id) as total_paid
+     FROM visits v
+     WHERE v.patient_id = ? AND v.planned_procedures != 'PHARMACY SALE'
+     ORDER BY v.visit_date DESC, v.id DESC LIMIT 1`,
     [patient_id],
     (err, row) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ last_visit_date: row ? row.visit_date : null });
+      if (!row) {
+        return res.json({ last_visit_date: null });
+      }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const visitDateStr = (row.visit_date || '').split('T')[0];
+      const isToday = visitDateStr === todayStr;
+
+      res.json({
+        last_visit_date: row.visit_date,
+        last_visit_id: row.visit_id,
+        is_today: isToday,
+        consultation_fee: row.consultation_fee,
+        planned_procedures: row.planned_procedures,
+        proc_names: row.proc_names,
+        has_procedures: !!(row.proc_names && row.proc_names.trim()),
+        payment_mode: row.payment_mode || 'CASH',
+        amount_received: parseFloat(row.total_paid) || 0
+      });
     }
   );
 });
