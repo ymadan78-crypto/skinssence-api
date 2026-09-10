@@ -1,0 +1,434 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput } from 'react-native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
+export default function PatientProfileScreen({ route, navigation }) {
+  const { patient: initialPatient } = route.params;
+  const [patient, setPatient] = useState(initialPatient);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState('');
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState(initialPatient);
+
+  const API_URL = `https://skinssence-api.onrender.com/api/patients/${patient.skinssence_id}/visits`;
+
+  const calculateAge = (dobString) => {
+    if (!dobString) return '';
+    // Assume DD/MM/YYYY or YYYY-MM-DD
+    let parts;
+    if (dobString.includes('/')) {
+      parts = dobString.split('/');
+      if (parts.length === 3) {
+        // Handle DD/MM/YYYY
+        const birthDate = new Date(parts[2], parts[1] - 1, parts[0]);
+        const ageDifMs = Date.now() - birthDate.getTime();
+        const ageDate = new Date(ageDifMs);
+        return Math.abs(ageDate.getUTCFullYear() - 1970);
+      }
+    } else if (dobString.includes('-')) {
+      const birthDate = new Date(dobString);
+      const ageDifMs = Date.now() - birthDate.getTime();
+      const ageDate = new Date(ageDifMs);
+      return Math.abs(ageDate.getUTCFullYear() - 1970);
+    }
+    return '';
+  };
+
+  const handleUpdateProfile = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await axios.put(`https://skinssence-api.onrender.com/api/patients/${patient.id}`, editForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPatient(editForm);
+      setIsEditing(false);
+      Alert.alert('Success', 'Profile updated successfully');
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update profile');
+    }
+  };
+
+  useEffect(() => {
+    fetchPatientData();
+    fetchHistory();
+  }, []);
+
+  const fetchPatientData = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const role = await AsyncStorage.getItem('userRole');
+      setUserRole(role);
+      
+      const response = await axios.get(`https://skinssence-api.onrender.com/api/patients/by-snumber/${patient.skinssence_id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPatient(response.data);
+      setEditForm(response.data);
+    } catch (error) {
+      console.log('Failed to refresh patient data');
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.get(API_URL, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setHistory(response.data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWalletRecharge = () => {
+    Alert.prompt(
+      'Recharge Prepaid Package',
+      'Enter the amount (₹) to add to this patient\'s package balance:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Add Funds', 
+          onPress: async (amountStr) => {
+            const amount = parseFloat(amountStr);
+            if (!amount || amount <= 0) return Alert.alert('Invalid Amount');
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.post(`https://skinssence-api.onrender.com/api/patients/${patient.id}/wallet`, {
+                amount, type: 'CREDIT', description: 'Prepaid Package Recharge'
+              }, { headers: { Authorization: `Bearer ${token}` } });
+              Alert.alert('Success', `₹${amount} added to prepaid balance.`);
+              fetchPatientData();
+            } catch (err) {
+              Alert.alert('Error', 'Failed to recharge wallet.');
+            }
+          } 
+        }
+      ],
+      'plain-text',
+      '',
+      'numeric'
+    );
+  };
+
+  const deleteVisit = async (visitId) => {
+    Alert.alert(
+      "Delete Visit?",
+      "Are you sure? This will permanently delete this record and automatically restore any deducted inventory.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.delete(`https://skinssence-api.onrender.com/api/visits/${visitId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              Alert.alert('Deleted', 'The visit has been deleted and inventory restored.');
+              fetchHistory(); // Refresh the list
+            } catch (err) {
+              Alert.alert('Error', err.response?.data?.error || 'Failed to delete visit. Only Admin/Doctor can delete.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const printReceipt = async (visit) => {
+    // Collect data safely
+    const totalAmount = visit.payments.reduce((sum, p) => sum + p.amount_received, 0);
+    const dateStr = new Date(visit.created_at).toLocaleDateString();
+    
+    let proceduresHtml = visit.procedures.map(p => `<tr><td>${p.name || 'Procedure'}</td><td>${p.notes || ''}</td><td>Rs. ${p.amount.toFixed(2)}</td></tr>`).join('');
+    let medicinesHtml = visit.medicines.map(m => `<tr><td>Medicine Dispensed</td><td>${m.details}</td><td>Rs. ${m.amount.toFixed(2)}</td></tr>`).join('');
+
+    const htmlContent = `
+      <html>
+        <head>
+          <style>
+            body { font-family: Helvetica, Arial, sans-serif; padding: 40px; color: #333; }
+            .header { text-align: center; border-bottom: 2px solid #5C0B0B; padding-bottom: 20px; margin-bottom: 30px; }
+            h1 { color: #5C0B0B; margin: 0; font-size: 32px; }
+            .sub { color: #666; font-size: 14px; margin-top: 5px; }
+            .details-box { display: flex; justify-content: space-between; margin-bottom: 30px; background: #f9f9f9; padding: 15px; border-radius: 8px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #5C0B0B; color: white; }
+            .total-row { font-weight: bold; font-size: 18px; }
+            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #888; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>SKINSSENCE CLINIC</h1>
+            <div class="sub">Dr. Ashima's Skin & Hair Clinic</div>
+          </div>
+          
+          <div class="details-box">
+            <div>
+              <strong>Patient Name:</strong> ${patient.first_name} ${patient.last_name}<br>
+              <strong>Patient ID:</strong> ${patient.skinssence_id}<br>
+              <strong>Mobile:</strong> ${patient.mobile}
+            </div>
+            <div style="text-align: right;">
+              <strong>Receipt Date:</strong> ${dateStr}<br>
+              <strong>Consulting Doctor:</strong> ${visit.doctor_name}
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Details / Notes</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${proceduresHtml}
+              ${medicinesHtml}
+              <tr class="total-row">
+                <td colspan="2" style="text-align: right;">Total Amount Received:</td>
+                <td>Rs. ${totalAmount.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+          
+          ${visit.planned_procedures ? `
+            <div style="margin-top: 20px; padding: 15px; background: #eef2ff; border-left: 4px solid #4f46e5;">
+              <strong>Dr. Advice / Planned Procedure:</strong><br>
+              ${visit.planned_procedures}
+            </div>
+          ` : ''}
+
+          <div class="footer">
+            Thank you for visiting Skinssence. This is a computer-generated receipt.
+          </div>
+        </body>
+      </html>
+    `;
+
+    try {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Failed to generate PDF.');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Patient Profile</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            {isEditing ? (
+              <View style={{flexDirection: 'row', flex: 1, marginRight: 10}}>
+                <TextInput style={[styles.inputEdit, {flex: 1, marginRight: 5}]} value={editForm.first_name} onChangeText={(v) => setEditForm({...editForm, first_name: v})} placeholder="First Name" />
+                <TextInput style={[styles.inputEdit, {flex: 1}]} value={editForm.last_name} onChangeText={(v) => setEditForm({...editForm, last_name: v})} placeholder="Last Name" />
+              </View>
+            ) : (
+              <Text style={styles.patientName}>{patient.first_name} {patient.last_name}</Text>
+            )}
+            <Text style={styles.patientId}>{patient.skinssence_id}</Text>
+          </View>
+          
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Mobile:</Text>
+            {isEditing ? (
+              <TextInput style={styles.inputEdit} value={editForm.mobile} onChangeText={(v) => setEditForm({...editForm, mobile: v})} keyboardType="phone-pad" />
+            ) : (
+              <Text style={styles.detailValue}>{patient.mobile}</Text>
+            )}
+          </View>
+          
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Date of Birth:</Text>
+            {isEditing ? (
+              <TextInput style={styles.inputEdit} value={editForm.dob} onChangeText={(v) => setEditForm({...editForm, dob: v})} placeholder="DD/MM/YYYY" />
+            ) : (
+              <View style={{flex: 1, flexDirection: 'row', alignItems: 'center'}}>
+                <Text style={styles.detailValue}>{patient.dob || 'N/A'}</Text>
+                {patient.dob && (
+                  <Text style={{marginLeft: 10, fontStyle: 'italic', color: '#6b7280'}}>
+                    (Age: {calculateAge(patient.dob)})
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>City:</Text>
+            {isEditing ? (
+              <TextInput style={styles.inputEdit} value={editForm.city} onChangeText={(v) => setEditForm({...editForm, city: v})} />
+            ) : (
+              <Text style={styles.detailValue}>{patient.city || 'N/A'}</Text>
+            )}
+          </View>
+          
+          {/* PREPAID PACKAGE WALLET BANNER */}
+          <View style={styles.walletBanner}>
+            <View>
+              <Text style={styles.walletTitle}>Prepaid Package Balance</Text>
+              <Text style={styles.walletAmount}>₹ {patient.wallet_balance ? patient.wallet_balance.toFixed(2) : '0.00'}</Text>
+            </View>
+            <TouchableOpacity style={styles.walletBtn} onPress={handleWalletRecharge}>
+              <Text style={styles.walletBtnText}>+ Recharge</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isEditing ? (
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 20}}>
+              <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginRight: 5, backgroundColor: '#9ca3af'}]} onPress={() => { setIsEditing(false); setEditForm(patient); }}>
+                <Text style={styles.actionBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginLeft: 5, backgroundColor: '#10b981'}]} onPress={handleUpdateProfile}>
+                <Text style={styles.actionBtnText}>Save Profile</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {(userRole === 'DOCTOR' || userRole === 'ADMIN') && (
+                <View style={{flexDirection: 'row', justifyContent: 'flex-end', gap: 15, marginTop: 10}}>
+                  <TouchableOpacity onPress={() => setIsEditing(true)}>
+                    <Text style={{color: '#3b82f6', fontWeight: 'bold'}}>✎ Edit Profile</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => {
+                    Alert.alert('Delete Patient', 'Are you sure you want to permanently delete this patient and all their visits?', [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Delete', 
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            const token = await AsyncStorage.getItem('userToken');
+                            await axios.delete(`https://skinssence-api.onrender.com/api/patients/${patient.id}`, { headers: { Authorization: `Bearer ${token}` } });
+                            Alert.alert('Deleted', 'Patient deleted.');
+                            navigation.goBack();
+                          } catch (err) {
+                            Alert.alert('Error', 'Failed to delete patient.');
+                          }
+                        }
+                      }
+                    ]);
+                  }}>
+                    <Text style={{color: '#ef4444', fontWeight: 'bold'}}>🗑️ Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 20}}>
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginRight: 5}]} onPress={() => {
+                  navigation.navigate('VisitEntry', { patient });
+                }}>
+                  <Text style={styles.actionBtnText}>+ Current Visit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginLeft: 5, backgroundColor: '#3b82f6'}]} onPress={() => {
+                  navigation.navigate('AppointmentCalendar', { patient });
+                }}>
+                  <Text style={styles.actionBtnText}>📅 Book Next</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+
+        <Text style={styles.sectionTitle}>Visit History</Text>
+        
+        {loading ? (
+          <ActivityIndicator size="large" color="#5C0B0B" style={{ marginTop: 20 }} />
+        ) : history.length === 0 ? (
+          <View style={styles.historyEmpty}>
+            <Text style={styles.historyEmptyText}>No previous visits recorded yet.</Text>
+          </View>
+        ) : (
+          history.map((visit, index) => (
+            <View key={visit.visit_id} style={styles.historyCard}>
+              <View style={styles.historyHeader}>
+                <Text style={styles.historyDate}>{new Date(visit.created_at).toLocaleDateString()}</Text>
+                <Text style={styles.historyDoctor}>Dr. {visit.doctor_name}</Text>
+              </View>
+              
+              {visit.procedures.map(p => (
+                <Text key={p.id} style={styles.historyItem}>• Procedure: {p.name} (₹{p.amount})</Text>
+              ))}
+              
+              {visit.medicines.map(m => (
+                <Text key={m.id} style={styles.historyItem}>• Medicine: {m.details} (₹{m.amount})</Text>
+              ))}
+              
+              {visit.planned_procedures ? (
+                <Text style={styles.historyAdvice}>Advice: {visit.planned_procedures}</Text>
+              ) : null}
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
+                <TouchableOpacity style={[styles.receiptBtn, { flex: 1, marginRight: 10, marginTop: 0 }]} onPress={() => printReceipt(visit)}>
+                  <Text style={styles.receiptBtnText}>📄 Generate PDF Receipt</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.receiptBtn, { backgroundColor: '#ef4444', flex: 0, paddingHorizontal: 15, marginTop: 0 }]} 
+                  onPress={() => deleteVisit(visit.visit_id)}>
+                  <Text style={styles.receiptBtnText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f7fb' },
+  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#5C0B0B', padding: 20, paddingTop: 50 },
+  backBtn: { marginRight: 15 },
+  backText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  scrollContent: { padding: 15 },
+  card: { backgroundColor: '#fff', padding: 20, borderRadius: 10, elevation: 2, marginBottom: 20 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 10 },
+  patientName: { fontSize: 22, fontWeight: 'bold', color: '#1f2937' },
+  patientId: { fontSize: 18, fontWeight: 'bold', color: '#5C0B0B' },
+  detailRow: { flexDirection: 'row', marginBottom: 8 },
+  detailLabel: { width: 120, fontSize: 16, fontWeight: '600', color: '#6b7280' },
+  detailValue: { flex: 1, fontSize: 16, color: '#1f2937' },
+  inputEdit: { flex: 1, fontSize: 16, color: '#1f2937', borderBottomWidth: 1, borderBottomColor: '#3b82f6', paddingVertical: 2 },
+  actionBtn: { backgroundColor: '#10b981', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+  actionBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#374151', marginBottom: 10, paddingHorizontal: 5 },
+  historyEmpty: { backgroundColor: '#fff', padding: 30, borderRadius: 10, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#ccc' },
+  historyEmptyText: { color: '#9ca3af', fontSize: 16 },
+  historyCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, elevation: 1, marginBottom: 15, borderLeftWidth: 4, borderLeftColor: '#5C0B0B' },
+  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', paddingBottom: 5 },
+  historyDate: { fontWeight: 'bold', color: '#1f2937', fontSize: 16 },
+  historyDoctor: { color: '#6b7280', fontStyle: 'italic' },
+  historyItem: { fontSize: 14, color: '#4b5563', marginBottom: 3 },
+  historyAdvice: { fontSize: 14, color: '#4f46e5', marginTop: 8, fontStyle: 'italic' },
+  receiptBtn: { backgroundColor: '#3b82f6', padding: 10, borderRadius: 6, alignItems: 'center', marginTop: 15 },
+  receiptBtnText: { color: '#fff', fontWeight: 'bold' },
+  walletBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ecfdf5', padding: 15, borderRadius: 8, marginTop: 15, borderWidth: 1, borderColor: '#10b981' },
+  walletTitle: { fontSize: 14, color: '#065f46', fontWeight: 'bold' },
+  walletAmount: { fontSize: 22, color: '#047857', fontWeight: '900' },
+  walletBtn: { backgroundColor: '#10b981', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 6 },
+  walletBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 }
+});
