@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Skinssence",
+    "slug": "mobile",
+    "version": "1.44.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "versionCode": 44,
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.skinssence.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "46652322-d121-4423-bc91-53931c0f0ef1"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/46652322-d121-4423-bc91-53931c0f0ef1"
+    },
+    "plugins": [
+      "expo-updates",
+      "expo-sharing",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app needs access to photos to upload handover medicine images for billing.",
+          "cameraPermission": "The app needs access to the camera to scan handover medicines for instant smart billing."
+        }
+      ]
+    ],
+    "owner": "skinssence"
+  }
+}

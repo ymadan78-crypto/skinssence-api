@@ -1,0 +1,30 @@
+﻿# Dependencies
+node_modules/
+package-lock.json
+
+# Expo & React Native
+.expo/
+dist/
+dist_test/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Local databases & logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,1038 @@
+[
+  {
+    "id": 6,
+    "medicine_name": "Acnemoist cream",
+    "mrp": 494,
+    "quantity": 13,
+    "default_instructions": ""
+  },
+  {
+    "id": 18,
+    "medicine_name": "Actilife tablet",
+    "mrp": 122,
+    "quantity": 34,
+    "default_instructions": ""
+  },
+  {
+    "id": 9,
+    "medicine_name": "Akosma",
+    "mrp": 1299,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 16,
+    "medicine_name": "Altegra 180mg",
+    "mrp": 30.2,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 14,
+    "medicine_name": "Amoxyclav-625",
+    "mrp": 20,
+    "quantity": 39,
+    "default_instructions": ""
+  },
+  {
+    "id": 20,
+    "medicine_name": "Aquaedge",
+    "mrp": 399,
+    "quantity": 7,
+    "default_instructions": ""
+  },
+  {
+    "id": 8,
+    "medicine_name": "Atarax",
+    "mrp": 488,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 10,
+    "medicine_name": "Azeetrust 500",
+    "mrp": 23.4,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 11,
+    "medicine_name": "Aziderm  cream 20%",
+    "mrp": 347,
+    "quantity": 27,
+    "default_instructions": ""
+  },
+  {
+    "id": 15,
+    "medicine_name": "Aziderm10%",
+    "mrp": 331,
+    "quantity": 18,
+    "default_instructions": ""
+  },
+  {
+    "id": 12,
+    "medicine_name": "Azkera",
+    "mrp": 240,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 21,
+    "medicine_name": "Benzonix gel wash",
+    "mrp": 275,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 13,
+    "medicine_name": "Blynds spf 80",
+    "mrp": 850,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 23,
+    "medicine_name": "Botoliss Hair Mask",
+    "mrp": 1950,
+    "quantity": 7,
+    "default_instructions": ""
+  },
+  {
+    "id": 19,
+    "medicine_name": "Botoliss Smooth Hair Serum",
+    "mrp": 1950,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 24,
+    "medicine_name": "Botoliss shampoo",
+    "mrp": 1860,
+    "quantity": 7,
+    "default_instructions": ""
+  },
+  {
+    "id": 17,
+    "medicine_name": "Botopep kit",
+    "mrp": 6498,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 26,
+    "medicine_name": "Botopep serum",
+    "mrp": 3411,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 22,
+    "medicine_name": "Brilante max",
+    "mrp": 639,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 25,
+    "medicine_name": "Bronze SPF",
+    "mrp": 599,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 7,
+    "medicine_name": "Celluglow Glutathione",
+    "mrp": 2700,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 29,
+    "medicine_name": "Cetaphil serum",
+    "mrp": 1999,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 27,
+    "medicine_name": "Clavnid-625",
+    "mrp": 20,
+    "quantity": 125,
+    "default_instructions": ""
+  },
+  {
+    "id": 28,
+    "medicine_name": "Clearzit gel",
+    "mrp": 140,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 30,
+    "medicine_name": "Clearzit soap",
+    "mrp": 140,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 31,
+    "medicine_name": "Clocip-B",
+    "mrp": 50.4,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 32,
+    "medicine_name": "Cosmelite next",
+    "mrp": 692,
+    "quantity": 13,
+    "default_instructions": ""
+  },
+  {
+    "id": 33,
+    "medicine_name": "Cuticans",
+    "mrp": 649,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 34,
+    "medicine_name": "De ten mask",
+    "mrp": 1250,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 35,
+    "medicine_name": "Doxylox",
+    "mrp": 116,
+    "quantity": 18,
+    "default_instructions": ""
+  },
+  {
+    "id": 36,
+    "medicine_name": "Dwash mois.f/w",
+    "mrp": 499,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 37,
+    "medicine_name": "Eclipse solarie spf50 sunscreen",
+    "mrp": 850,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 38,
+    "medicine_name": "Efanid cream",
+    "mrp": 632,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 39,
+    "medicine_name": "Epifager-Lite",
+    "mrp": 1000,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 40,
+    "medicine_name": "Epilight hydrating lotion",
+    "mrp": 549,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 41,
+    "medicine_name": "Ethiglo",
+    "mrp": 1199,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 42,
+    "medicine_name": "Exanic 10%",
+    "mrp": 220,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 43,
+    "medicine_name": "Eyegile am/pm",
+    "mrp": 1485,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 44,
+    "medicine_name": "Ezanic 20%",
+    "mrp": 275,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 54,
+    "medicine_name": "FCL  AHA lightening gel HQ",
+    "mrp": 1075,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 53,
+    "medicine_name": "FCL intensive night serum",
+    "mrp": 1755,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 55,
+    "medicine_name": "Foligain hair lotion",
+    "mrp": 610,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 45,
+    "medicine_name": "Glutone md",
+    "mrp": 310,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 47,
+    "medicine_name": "HQN Plus cream",
+    "mrp": 148,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 46,
+    "medicine_name": "HQN cream 3%",
+    "mrp": 80,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 48,
+    "medicine_name": "Head2toe wash/shampoo",
+    "mrp": 796,
+    "quantity": 9,
+    "default_instructions": ""
+  },
+  {
+    "id": 49,
+    "medicine_name": "Hebeda serum",
+    "mrp": 770,
+    "quantity": 13,
+    "default_instructions": ""
+  },
+  {
+    "id": 50,
+    "medicine_name": "Hexilak Gel",
+    "mrp": 580,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 51,
+    "medicine_name": "Hexilak acne+scar",
+    "mrp": 750,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 52,
+    "medicine_name": "Hexilak ultra",
+    "mrp": 880,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 56,
+    "medicine_name": "Hidrants mois.",
+    "mrp": 499,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 57,
+    "medicine_name": "Hydronic mois.",
+    "mrp": 339,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 58,
+    "medicine_name": "IMIDERM 1.0",
+    "mrp": 180,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 59,
+    "medicine_name": "Isograce-30",
+    "mrp": 250,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 60,
+    "medicine_name": "Isograce-5",
+    "mrp": 99,
+    "quantity": 16,
+    "default_instructions": ""
+  },
+  {
+    "id": 61,
+    "medicine_name": "Itraliz SB 130",
+    "mrp": 231,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 62,
+    "medicine_name": "Kalsma-D3",
+    "mrp": 104,
+    "quantity": 14,
+    "default_instructions": ""
+  },
+  {
+    "id": 4,
+    "medicine_name": "Kelocepa silicone gel",
+    "mrp": 650,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 63,
+    "medicine_name": "Kezil SL",
+    "mrp": 295,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 64,
+    "medicine_name": "Kozilite-H",
+    "mrp": 360,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 65,
+    "medicine_name": "L-Cetnid-5",
+    "mrp": 4.5,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 75,
+    "medicine_name": "LAH-5",
+    "mrp": 4.7,
+    "quantity": 85,
+    "default_instructions": ""
+  },
+  {
+    "id": 67,
+    "medicine_name": "Lactofyn",
+    "mrp": 799,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 66,
+    "medicine_name": "Limcee",
+    "mrp": 1.6,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 68,
+    "medicine_name": "Lipidz",
+    "mrp": 420,
+    "quantity": 13,
+    "default_instructions": ""
+  },
+  {
+    "id": 69,
+    "medicine_name": "Lipz mois.",
+    "mrp": 110,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 70,
+    "medicine_name": "Logifeel-IMF",
+    "mrp": 400,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 71,
+    "medicine_name": "Makcee tablets",
+    "mrp": 11,
+    "quantity": 15,
+    "default_instructions": ""
+  },
+  {
+    "id": 72,
+    "medicine_name": "Melalumin lip lightener",
+    "mrp": 395,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 73,
+    "medicine_name": "Melalumin ultra",
+    "mrp": 605,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 74,
+    "medicine_name": "Melalumin un eye serum",
+    "mrp": 999,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 76,
+    "medicine_name": "Mildy AHF",
+    "mrp": 333,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 77,
+    "medicine_name": "Milk Route KP",
+    "mrp": 980,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 78,
+    "medicine_name": "Minotas ER 45",
+    "mrp": 250,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 79,
+    "medicine_name": "Morr f Aqua",
+    "mrp": 1100,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 80,
+    "medicine_name": "My Tret 0.025%",
+    "mrp": 145,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 81,
+    "medicine_name": "My Tret 0.04%",
+    "mrp": 190,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 82,
+    "medicine_name": "My Tret 0.1%",
+    "mrp": 210,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 83,
+    "medicine_name": "Nidcort-HC",
+    "mrp": 130,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 84,
+    "medicine_name": "Nidgly-12",
+    "mrp": 178,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 85,
+    "medicine_name": "Nidgly-6",
+    "mrp": 145,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 86,
+    "medicine_name": "Nidgly-6",
+    "mrp": 135,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 87,
+    "medicine_name": "Nidsoft-E",
+    "mrp": 180,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 88,
+    "medicine_name": "Nidsone cream",
+    "mrp": 112,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 89,
+    "medicine_name": "Nidtroin-20",
+    "mrp": 210,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 90,
+    "medicine_name": "Nidtroin-20",
+    "mrp": 215,
+    "quantity": 20,
+    "default_instructions": ""
+  },
+  {
+    "id": 91,
+    "medicine_name": "Noskurf daily cream",
+    "mrp": 399,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 92,
+    "medicine_name": "OMEZ",
+    "mrp": 3.21,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 93,
+    "medicine_name": "Pelliwash shampoo",
+    "mrp": 227,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 94,
+    "medicine_name": "Physiogel",
+    "mrp": 730,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 95,
+    "medicine_name": "Reverage",
+    "mrp": 820,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 96,
+    "medicine_name": "Revgrey solution",
+    "mrp": 820,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 97,
+    "medicine_name": "Screenguard spf50",
+    "mrp": 495,
+    "quantity": 14,
+    "default_instructions": ""
+  },
+  {
+    "id": 98,
+    "medicine_name": "Sebogel",
+    "mrp": 250,
+    "quantity": 16,
+    "default_instructions": ""
+  },
+  {
+    "id": 100,
+    "medicine_name": "Seren conditioner",
+    "mrp": 265,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 99,
+    "medicine_name": "Seren shampoo",
+    "mrp": 249,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 101,
+    "medicine_name": "Sesderma Azlec RU",
+    "mrp": 2650,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 102,
+    "medicine_name": "Shadow transparent spf50",
+    "mrp": 495,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 103,
+    "medicine_name": "Solasafe sunscreen",
+    "mrp": 769,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 104,
+    "medicine_name": "Solglo",
+    "mrp": 516,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 105,
+    "medicine_name": "Spironolactone tab.",
+    "mrp": 2.26,
+    "quantity": 150,
+    "default_instructions": ""
+  },
+  {
+    "id": 106,
+    "medicine_name": "Sweatnil max",
+    "mrp": 449,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 107,
+    "medicine_name": "Tacronid 0.1%",
+    "mrp": 485,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 108,
+    "medicine_name": "Tacronid-30",
+    "mrp": 295,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 109,
+    "medicine_name": "Tivenca gel",
+    "mrp": 375,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 110,
+    "medicine_name": "Tracnil sachet",
+    "mrp": 46,
+    "quantity": 150,
+    "default_instructions": ""
+  },
+  {
+    "id": 111,
+    "medicine_name": "TrichoExito Repair",
+    "mrp": 1299,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 112,
+    "medicine_name": "Trichospire hair kit",
+    "mrp": 1111,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 113,
+    "medicine_name": "Trichospire hair mask",
+    "mrp": 549,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 114,
+    "medicine_name": "Trichowel hair serum",
+    "mrp": 450,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 115,
+    "medicine_name": "Triolite cream",
+    "mrp": 140,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 116,
+    "medicine_name": "Truderma f/w",
+    "mrp": 499,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 118,
+    "medicine_name": "Tyrodin-FSR",
+    "mrp": 171,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 117,
+    "medicine_name": "Uproot lotion hair",
+    "mrp": 610,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 135,
+    "medicine_name": "Uvsilk spf 40",
+    "mrp": 900,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 119,
+    "medicine_name": "Z block",
+    "mrp": 899,
+    "quantity": 4,
+    "default_instructions": ""
+  },
+  {
+    "id": 121,
+    "medicine_name": "Zitcare Forte",
+    "mrp": 7,
+    "quantity": 195,
+    "default_instructions": ""
+  },
+  {
+    "id": 120,
+    "medicine_name": "acnepurge 20",
+    "mrp": 210,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 122,
+    "medicine_name": "acnepurge f/w",
+    "mrp": 259,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 123,
+    "medicine_name": "acnewar",
+    "mrp": 270,
+    "quantity": 9,
+    "default_instructions": ""
+  },
+  {
+    "id": 124,
+    "medicine_name": "aziderm 15%",
+    "mrp": 317,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 125,
+    "medicine_name": "chitomesh-SF",
+    "mrp": 55,
+    "quantity": 7,
+    "default_instructions": ""
+  },
+  {
+    "id": 126,
+    "medicine_name": "depiscreen UE cream",
+    "mrp": 550,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 127,
+    "medicine_name": "desoadd",
+    "mrp": 164,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 128,
+    "medicine_name": "juveskin 2Ã cream",
+    "mrp": 1369,
+    "quantity": 13,
+    "default_instructions": ""
+  },
+  {
+    "id": 129,
+    "medicine_name": "lytec klense 690",
+    "mrp": 690,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 130,
+    "medicine_name": "medrol 8 mg",
+    "mrp": 6.1,
+    "quantity": 11,
+    "default_instructions": ""
+  },
+  {
+    "id": 131,
+    "medicine_name": "methylprednisolone -8mg",
+    "mrp": 7.6,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 132,
+    "medicine_name": "minoxidil tab.(aga mx) 2.5",
+    "mrp": 14.5,
+    "quantity": 100,
+    "default_instructions": ""
+  },
+  {
+    "id": 133,
+    "medicine_name": "mometaDoc",
+    "mrp": 248,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 134,
+    "medicine_name": "momin",
+    "mrp": 51.9,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 136,
+    "medicine_name": "morr max",
+    "mrp": 773,
+    "quantity": 1,
+    "default_instructions": ""
+  },
+  {
+    "id": 137,
+    "medicine_name": "morr pro gold",
+    "mrp": 1275,
+    "quantity": 6,
+    "default_instructions": ""
+  },
+  {
+    "id": 138,
+    "medicine_name": "okacet-L",
+    "mrp": 7.8,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 140,
+    "medicine_name": "ozetof",
+    "mrp": 118,
+    "quantity": 3,
+    "default_instructions": ""
+  },
+  {
+    "id": 139,
+    "medicine_name": "pantraz DSR pantoprazole",
+    "mrp": 130,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 141,
+    "medicine_name": "perato 10",
+    "mrp": 110,
+    "quantity": 8,
+    "default_instructions": ""
+  },
+  {
+    "id": 142,
+    "medicine_name": "piranid",
+    "mrp": 105,
+    "quantity": 14,
+    "default_instructions": ""
+  },
+  {
+    "id": 144,
+    "medicine_name": "predmet 16mg",
+    "mrp": 0,
+    "quantity": 18,
+    "default_instructions": ""
+  },
+  {
+    "id": 143,
+    "medicine_name": "predmet 8mg",
+    "mrp": 7.6,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 145,
+    "medicine_name": "rediance creme",
+    "mrp": 1875,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 146,
+    "medicine_name": "salicure 17",
+    "mrp": 185,
+    "quantity": 10,
+    "default_instructions": ""
+  },
+  {
+    "id": 147,
+    "medicine_name": "screenguard tablet",
+    "mrp": 200,
+    "quantity": 12,
+    "default_instructions": ""
+  },
+  {
+    "id": 149,
+    "medicine_name": "sesderma k- VIT anti dark Serum",
+    "mrp": 1450,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 148,
+    "medicine_name": "trichospire hair shampoo",
+    "mrp": 399,
+    "quantity": 2,
+    "default_instructions": ""
+  },
+  {
+    "id": 150,
+    "medicine_name": "vegetal we bio hair colour",
+    "mrp": 899,
+    "quantity": 5,
+    "default_instructions": ""
+  },
+  {
+    "id": 152,
+    "medicine_name": "velmect",
+    "mrp": 127,
+    "quantity": 9,
+    "default_instructions": ""
+  },
+  {
+    "id": 151,
+    "medicine_name": "zithronid-500",
+    "mrp": 26,
+    "quantity": 7,
+    "default_instructions": ""
+  }
+]
