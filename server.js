@@ -29,56 +29,6 @@ const smartCameraService = (() => {
  * - Continuous learning from confirmed image references
  */
 
-const https = require('https');
-
-// Free Public OCR Endpoint Fallback (OCR.space Engine 2)
-function extractTextWithOcrSpace(imageBase64) {
-  if (!imageBase64) return Promise.resolve('');
-  return new Promise((resolve) => {
-    try {
-      const cleanB64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
-      const postData = 'apikey=helloworld&isOverlayRequired=false&detectOrientation=true&scale=true&OCREngine=2&base64Image=' + encodeURIComponent('data:image/jpeg;base64,' + cleanB64);
-      
-      const req = https.request('https://api.ocr.space/parse/image', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postData)
-        },
-        timeout: 18000
-      }, (res) => {
-        let buf = '';
-        res.on('data', (c) => buf += c);
-        res.on('end', () => {
-          try {
-            const j = JSON.parse(buf);
-            const parsed = j.ParsedResults?.[0]?.ParsedText || '';
-            resolve(parsed.trim());
-          } catch (e) {
-            resolve('');
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        console.warn('[SmartCamera OCR] Fallback network notice:', err.message);
-        resolve('');
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        resolve('');
-      });
-
-      req.write(postData);
-      req.end();
-    } catch (err) {
-      console.warn('[SmartCamera OCR] Exception:', err.message);
-      resolve('');
-    }
-  });
-}
-
 // 1. Expiry Date Parser (FEFO helper)
 function parseExpiryDate(expStr) {
   if (!expStr || typeof expStr !== 'string') return 99999999;
@@ -170,10 +120,6 @@ function selectBestBatchFEFO(batches) {
 }
 
 // 3. String Normalization & Levenshtein / Token Distance for Fuzzy Matching
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\function normalizeText(str) {');
-}
-
 function normalizeText(str) {
   if (!str) return '';
   return str
@@ -214,11 +160,10 @@ function computeSimilarity(str1, str2) {
   if (norm1 === norm2) return 1.0;
   if (!norm1 || !norm2) return 0;
 
-  // Exact match or substring inclusion with spaces (require minLen >= 3 to avoid single-letter false matches)
+  // Exact match or substring inclusion with spaces
   if (norm1.includes(norm2) || norm2.includes(norm1)) {
     const minLen = Math.min(norm1.length, norm2.length);
     const maxLen = Math.max(norm1.length, norm2.length);
-    if (minLen < 3) return minLen / maxLen;
     return Math.max(0.85, minLen / maxLen);
   }
 
@@ -281,14 +226,14 @@ function matchProduct(detectedName, catalogueGrouped, learnedKeywords = []) {
     }
   }
 
-  if (highestScore >= 0.72) {
+  if (highestScore >= 0.80) {
     return {
       product: bestMatch.prodData,
       confidence: 'HIGH',
       similarity: highestScore,
       matchedName: bestMatch.prodName
     };
-  } else if (highestScore >= 0.50) {
+  } else if (highestScore >= 0.52) {
     return {
       product: bestMatch.prodData,
       confidence: 'MEDIUM',
@@ -312,14 +257,14 @@ function matchPatientFromText(detectedText, patientsList) {
   }
 
   const normText = normalizeText(detectedText);
-  const spacelessFullText = normText.replace(/\s+/g, '');
+  const lines = detectedText.split('\n').map(l => normalizeText(l)).filter(Boolean);
 
-  // Look for explicit prefix: patient / pt / name / mr / ms / mrs
-  const namePrefixRegex = /(?:patient|pt|name|mr|ms|mrs)\s*[:\-\s]\s*([^\n\r,;]+)/i;
+  // Look for explicit prefix: patient / pt / name / mr / ms / mrs / dr
+  const namePrefixRegex = /(?:patient|pt|name|mr|ms|mrs)\s*[:\-\s]\s*([a-z\s]+)/i;
   let extractedName = null;
   const matchPrefix = detectedText.match(namePrefixRegex);
   if (matchPrefix && matchPrefix[1]) {
-    extractedName = normalizeText(matchPrefix[1]).slice(0, 40);
+    extractedName = normalizeText(matchPrefix[1]).slice(0, 30);
   }
 
   let bestPatient = null;
@@ -328,11 +273,10 @@ function matchPatientFromText(detectedText, patientsList) {
 
   for (const pt of patientsList) {
     const ptNameNorm = normalizeText(pt.name);
-    if (!ptNameNorm || ptNameNorm.length < 3) continue;
     const ptCodeNorm = normalizeText(pt.patient_code || '');
     const ptPhone = (pt.phone || '').trim();
 
-    // 1. Direct phone number match in text (100% confidence)
+    // Direct phone number match in text
     if (ptPhone && ptPhone.length >= 7 && normText.includes(ptPhone)) {
       return {
         matched: pt,
@@ -341,7 +285,7 @@ function matchPatientFromText(detectedText, patientsList) {
       };
     }
 
-    // 2. Direct Patient Code match (e.g. S2858) (100% confidence)
+    // Direct Patient Code match (e.g. S2858)
     if (ptCodeNorm && ptCodeNorm.length >= 3 && normText.includes(ptCodeNorm)) {
       return {
         matched: pt,
@@ -350,65 +294,29 @@ function matchPatientFromText(detectedText, patientsList) {
       };
     }
 
-    // 3. Direct exact full patient name match in OCR text (98% confidence)
-    const ptSpaceless = ptNameNorm.replace(/\s+/g, '');
-    if (normText.includes(ptNameNorm) || (ptSpaceless.length >= 6 && spacelessFullText.includes(ptSpaceless))) {
-      candidates.push({ ...pt, matchScore: 0.98 });
-      if (0.98 > bestScore) {
-        bestScore = 0.98;
-        bestPatient = pt;
-      }
-      continue;
-    }
-
-    // 4. Multi-token match using word boundaries and fuzzy first-name prefix matching
-    const ptWords = ptNameNorm.split(' ').filter(w => w.length >= 2 && w !== 'dr' && w !== 'mr' && w !== 'ms' && w !== 'mrs');
-    if (ptWords.length >= 2) {
-      let matchedWordCount = 0;
-      let hasFuzzyFirst = false;
-
-      for (let i = 0; i < ptWords.length; i++) {
-        const w = ptWords[i];
-        const wordRegex = new RegExp('\\b' + escapeRegex(w) + '\\b', 'i');
-        if (wordRegex.test(normText)) {
-          matchedWordCount++;
-        } else if (i === 0 && extractedName) {
-          // Check if first name matches extracted name fuzzily (e.g. "as pita" vs "arpita")
-          const sim = computeSimilarity(extractedName.replace(/\s+/g, ''), w);
-          if (sim >= 0.70) {
-            hasFuzzyFirst = true;
-            matchedWordCount++;
-          }
-        }
-      }
-
-      if (matchedWordCount === ptWords.length) {
-        const tokenScore = hasFuzzyFirst ? 0.95 : 0.94;
-        candidates.push({ ...pt, matchScore: tokenScore });
-        if (tokenScore > bestScore) {
-          bestScore = tokenScore;
-          bestPatient = pt;
-        }
-        continue;
-      }
-    }
-
-    // 5. If explicit "Name: XYZ" was captured, match against that extracted name
+    // Name matching
+    let score = 0;
     if (extractedName) {
-      const score = computeSimilarity(extractedName, ptNameNorm);
-      if (score >= 0.65) {
-        candidates.push({ ...pt, matchScore: score });
-        if (score > bestScore) {
-          bestScore = score;
-          bestPatient = pt;
-        }
+      score = computeSimilarity(extractedName, ptNameNorm);
+    } else {
+      for (const line of lines) {
+        const lineScore = computeSimilarity(line, ptNameNorm);
+        if (lineScore > score) score = lineScore;
+      }
+    }
+
+    if (score > 0.6) {
+      candidates.push({ ...pt, matchScore: score });
+      if (score > bestScore) {
+        bestScore = score;
+        bestPatient = pt;
       }
     }
   }
 
   candidates.sort((a, b) => b.matchScore - a.matchScore);
 
-  if (bestScore >= 0.72) {
+  if (bestScore >= 0.82) {
     return {
       matched: bestPatient,
       confidence: 'HIGH',
@@ -531,21 +439,14 @@ async function createDraftFromImage({
 
   const catalogueNames = Object.keys(catalogueGrouped);
 
-  // 1. Attempt Gemini Vision first if image provided and key configured
+  // Attempt Gemini Vision first if image provided
   let visionResult = null;
   if (imageBase64 && process.env.GEMINI_API_KEY) {
     visionResult = await analyzeWithGemini(imageBase64, catalogueNames, patientsList);
   }
 
-  // 2. High-accuracy Zero-Config OCR Fallback (OCR.space free engine 2)
-  let extractedOcrText = visionResult?.raw_ocr_text || rawText || '';
-  if (!extractedOcrText && imageBase64) {
-    try {
-      extractedOcrText = await extractTextWithOcrSpace(imageBase64);
-    } catch (errOcr) {
-      console.warn('[SmartCamera] OCR fallback warning:', errOcr.message);
-    }
-  }
+  // Determine OCR / extracted text
+  const extractedOcrText = visionResult?.raw_ocr_text || rawText || '';
 
   // Patient Identification
   let patientMatch = null;
@@ -648,85 +549,17 @@ async function createDraftFromImage({
     }
   }
 
-  // Catalogue Brand Full-Text Scan Fallback
-  // If items are wrapped or multi-line in OCR, scan full text for all 148 catalogue items
-  if (extractedOcrText) {
-    const normFullText = normalizeText(extractedOcrText);
-    const spacelessFullText = normFullText.replace(/\s+/g, '');
-
-    for (const prodName of catalogueNames) {
-      const alreadyDrafted = draftItems.some(it => it.medicine_name.toLowerCase() === prodName.toLowerCase());
-      if (alreadyDrafted) continue;
-
-      const normPName = normalizeText(prodName);
-      if (!normPName || normPName.length < 4) continue;
-      const spacelessPName = normPName.replace(/\s+/g, '');
-      const words = normPName.split(' ').filter(w => w.length > 3);
-      const brandWord = words[0];
-
-      // Exclude generic packaging words from triggering brand scan
-      const genericWords = ['cream', 'gel', 'lotion', 'tablet', 'serum', 'shampoo', 'wash', 'face', 'mask', 'plus'];
-      const isGenericBrand = genericWords.includes(brandWord);
-
-      let isMatch = false;
-      if (normFullText.includes(normPName) || (spacelessPName.length >= 6 && spacelessFullText.includes(spacelessPName))) {
-        isMatch = true;
-      } else if (!isGenericBrand && brandWord && brandWord.length >= 5 && (normFullText.includes(brandWord) || spacelessFullText.includes(brandWord))) {
-        isMatch = true;
-      }
-
-      if (isMatch) {
-        const prod = catalogueGrouped[prodName];
-        const batchResult = selectBestBatchFEFO(prod.batches);
-        const selBatch = batchResult?.selectedBatch;
-
-        if (!selBatch || batchResult?.isOutOfStockOrExpired) {
-          const hasAnyQty = prod.batches.some(b => (b.quantity || 0) > 0);
-          if (!outOfStockItems.some(o => o.product_name.toLowerCase() === prod.medicine_name.toLowerCase())) {
-            outOfStockItems.push({
-              product_name: prod.medicine_name,
-              raw_detected_name: prod.medicine_name,
-              reason: hasAnyQty ? 'EXPIRED' : 'ZERO_QUANTITY'
-            });
-          }
-          continue;
-        }
-
-        const unitPrice = selBatch?.mrp || prod.mrp || 0;
-        const defaultInstr = prod.default_instructions 
-          ? prod.default_instructions.split(',')[0].trim() 
-          : (prod.medicine_name.toLowerCase().includes('piranid') ? 'Apply twice daily post-procedure' : '');
-
-        draftItems.push({
-          inventory_id: selBatch?.id || prod.batches[0]?.id,
-          medicine_name: prod.medicine_name,
-          quantity: 1,
-          mrp: unitPrice,
-          amount: unitPrice,
-          batch_number: selBatch?.batch_number || 'N/A',
-          expiry_date: selBatch?.expiry_date || 'N/A',
-          is_early_expiry: true,
-          available_batches: batchResult?.availableBatches || [],
-          default_instructions: defaultInstr,
-          instruction: defaultInstr,
-          confidence: 'HIGH',
-          similarity: 95
-        });
-      }
-    }
-  }
-
   const subtotal = draftItems.reduce((sum, it) => sum + (it.amount || 0), 0);
 
   return {
-    patient: patientMatch?.matched ? {
+    patient: patientMatch.matched ? {
       id: patientMatch.matched.id,
       name: patientMatch.matched.name,
       phone: patientMatch.matched.phone,
       patient_code: patientMatch.matched.patient_code,
       confidence: patientMatch.confidence
     } : null,
-    patient_candidates: patientMatch?.candidates || [],
+    patient_candidates: patientMatch.candidates || [],
     items: draftItems,
     unmatched_items: unmatchedDetections,
     out_of_stock_items: outOfStockItems,
@@ -735,19 +568,8 @@ async function createDraftFromImage({
   };
 }
 
-module.exports = {
-  extractTextWithOcrSpace,
-  parseExpiryDate,
-  isExpired,
-  selectBestBatchFEFO,
-  computeSimilarity,
-  matchProduct,
-  matchPatientFromText,
-  createDraftFromImage
-};
 
   return {
-    extractTextWithOcrSpace,
     parseExpiryDate,
     isExpired,
     selectBestBatchFEFO,
@@ -757,11 +579,6 @@ module.exports = {
     createDraftFromImage
   };
 })();
-
-
-
-
-
 
 
 const PORT = process.env.PORT || 3000;
@@ -1065,12 +882,40 @@ app.get('/api/patients/search', authenticateToken, (req, res) => {
 
 // Fetch Single Patient by S-Number
 app.get('/api/patients/by-snumber/:snumber', authenticateToken, (req, res) => {
+  const sn = (req.params.snumber || '').trim();
   db.get(`
     SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
     FROM patients p 
     LEFT JOIN skin_concerns s ON p.id = s.patient_id 
-    WHERE p.skinssence_id = ?
-  `, [req.params.snumber], (err, row) => {
+    WHERE UPPER(TRIM(p.skinssence_id)) = UPPER(?)
+       OR UPPER(TRIM(p.skinssence_id)) = UPPER('S' || ?)
+       OR UPPER(TRIM('S' || p.skinssence_id)) = UPPER(?)
+    LIMIT 1
+  `, [sn, sn, sn], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Patient not found' });
+    res.json(row);
+  });
+});
+
+// Fetch Single Patient by ID (numeric ID or S-Number)
+app.get('/api/patients/:id', authenticateToken, (req, res) => {
+  const param = (req.params.id || '').trim();
+  const isNumeric = /^\d+$/.test(param);
+  const query = isNumeric 
+    ? `SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
+       FROM patients p 
+       LEFT JOIN skin_concerns s ON p.id = s.patient_id 
+       WHERE p.id = ? LIMIT 1`
+    : `SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
+       FROM patients p 
+       LEFT JOIN skin_concerns s ON p.id = s.patient_id 
+       WHERE UPPER(TRIM(p.skinssence_id)) = UPPER(?)
+          OR UPPER(TRIM(p.skinssence_id)) = UPPER('S' || ?)
+          OR UPPER(TRIM('S' || p.skinssence_id)) = UPPER(?)
+       LIMIT 1`;
+  const params = isNumeric ? [parseInt(param, 10)] : [param, param, param];
+  db.get(query, params, (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Patient not found' });
     res.json(row);
@@ -1097,7 +942,6 @@ app.get('/api/packages/:patient_id', authenticateToken, (req, res) => {
     }
   );
 });
-
 
 // ============================================================
 // MASTER PROCEDURES CATALOG (LOCKED NAMES, FLEXIBLE PRICING)
@@ -2659,12 +2503,26 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
               // Combine all visit IDs to fetch sub-records
               const allVisits = [...visits, ...pharmacyVisits];
               if (allVisits.length === 0) {
-                return res.json(packageHistory);
+                db.all(
+                  `SELECT appointment_date, appointment_time, notes, status 
+                   FROM appointments 
+                   WHERE (patient_id = ? OR patient_id = (SELECT skinssence_id FROM patients WHERE id = ?) OR mobile = (SELECT mobile FROM patients WHERE id = ?))
+                     AND (status IS NULL OR (status != 'CANCELLED' AND status != 'CANCEL'))
+                     AND date(appointment_date) >= date('now', '-1 day')
+                   ORDER BY appointment_date ASC, appointment_time ASC LIMIT 1`,
+                  [patient_id, patient_id, patient_id],
+                  (errAppt, apptRows = []) => {
+                    const nA = (!errAppt && apptRows && apptRows.length > 0) ? apptRows[0] : null;
+                    return res.json(packageHistory.map(pkg => ({ ...pkg, next_appointment: nA })));
+                  }
+                );
+                return;
               }
 
               const allIds = allVisits.map(v => v.visit_id).join(',');
               let procedures = [], medicines = [], payments = [];
-              let pending = 3;
+              let nextAppt = null;
+              let pending = 4;
 
               const checkDone = () => {
                 pending--;
@@ -2686,13 +2544,34 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                     const pharmPays = payments.filter(p => sameDayPharmacyIds.includes(p.visit_id));
                     const pharmTotal = pharmMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
 
+                    const vProcs = procedures.filter(p => p.visit_id === v.visit_id);
+                    const allMeds = [...visitMeds, ...pharmMeds];
+                    const allPays = [...visitPays, ...pharmPays];
+
+                    const cFee = parseFloat(v.consultation_fee) || 0;
+                    const procTotal = vProcs.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+                    const medTotal = allMeds.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+                    const unifiedSubtotal = cFee + procTotal + medTotal;
+
+                    const vDiscAmt = parseFloat(v.discount_amount) || 0;
+                    const pharmDiscAmt = sameDayPharmacy.reduce((s, pv) => s + (parseFloat(pv.discount_amount) || 0), 0);
+                    const totalDiscAmt = vDiscAmt + pharmDiscAmt;
+
+                    const unifiedNet = Math.max(0, unifiedSubtotal - totalDiscAmt);
+                    const totalPaid = allPays.reduce((s, p) => s + (parseFloat(p.amount_received) || 0), 0);
+
                     return {
                       ...v,
-                      procedures: procedures.filter(p => p.visit_id === v.visit_id),
-                      medicines: [...visitMeds, ...pharmMeds],
-                      payments: [...visitPays, ...pharmPays],
+                      procedures: vProcs,
+                      medicines: allMeds,
+                      payments: allPays,
                       pharmacy_total: pharmTotal,
-                      has_pharmacy: sameDayPharmacy.length > 0
+                      has_pharmacy: sameDayPharmacy.length > 0,
+                      subtotal: unifiedSubtotal,
+                      discount_amount: totalDiscAmt,
+                      net_payable: unifiedNet,
+                      amount_paid: totalPaid,
+                      next_appointment: nextAppt
                     };
                   });
 
@@ -2711,13 +2590,14 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                     medicines: medicines.filter(m => m.visit_id === pv.visit_id),
                     payments: payments.filter(p => p.visit_id === pv.visit_id),
                     pharmacy_total: medicines.filter(m => m.visit_id === pv.visit_id).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0),
-                    has_pharmacy: true
+                    has_pharmacy: true,
+                    next_appointment: nextAppt
                   }));
 
                   // Filter out packageHistory entries that already exist as [Package Sold] visits to prevent duplicates
                   const filteredPackageHistory = packageHistory.filter(pkgItem => {
                     return !fullHistory.some(v => (v.procedures || []).some(p => p.name && p.name.includes('[Package Sold]') && p.name.includes(pkgItem.package_name)));
-                  });
+                  }).map(pkg => ({ ...pkg, next_appointment: nextAppt }));
 
                   // Merge visits and package bookings, and sort by date descending
                   const combined = [...fullHistory, ...standaloneHistory, ...filteredPackageHistory].sort((a, b) =>
@@ -2739,6 +2619,21 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                 if (!err) payments = rows;
                 checkDone();
               });
+              db.all(
+                `SELECT appointment_date, appointment_time, notes, status 
+                 FROM appointments 
+                 WHERE (patient_id = ? OR patient_id = (SELECT skinssence_id FROM patients WHERE id = ?) OR mobile = (SELECT mobile FROM patients WHERE id = ?))
+                   AND (status IS NULL OR (status != 'CANCELLED' AND status != 'CANCEL'))
+                   AND date(appointment_date) >= date('now', '-1 day')
+                 ORDER BY appointment_date ASC, appointment_time ASC LIMIT 1`,
+                [patient_id, patient_id, patient_id],
+                (errAppt, apptRows = []) => {
+                  if (!errAppt && apptRows && apptRows.length > 0) {
+                    nextAppt = apptRows[0];
+                  }
+                  checkDone();
+                }
+              );
             }
           );
         }
@@ -2892,7 +2787,7 @@ const formatFullMonthLabel = (monthKey) => {
 };
 
 // 2. Comprehensive Clinic Sales & Revenue Analytics Report (Includes Consultation Fees, Procedures, & Pharmacy)
-app.get('/api/admin/reports', authenticateToken, (req, res) => {
+app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
   const todayStr = getISTDate();
   const currMonthKey = todayStr.substring(0, 7); // "YYYY-MM"
 
@@ -3180,7 +3075,7 @@ app.get('/api/reports/procedures', authenticateToken, (req, res) => {
 // ============================================================
 // DAILY DIARY / DAY BOOK (Day-Wise Complete Activity View)
 // ============================================================
-app.get('/api/admin/diary', authenticateToken, (req, res) => {
+app.get('/api/admin/diary', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
   const targetDate = req.query.date || getISTDate();
 
   // Helper for IST time formatting
@@ -4859,6 +4754,11 @@ const writeAudit = (user, action, entity, entityId, oldVal, newVal, reason) => {
 
 // Expose writeAudit for use in routes (attach to app)
 app.locals.writeAudit = writeAudit;
+
+// --- LEAD MANAGEMENT ROUTES (PHASE 1) ---
+const { setupLeadRoutes } = require('./leadsRoutes');
+setupLeadRoutes(app, db, authenticateToken, writeAudit);
+
 
 // ============================================================
 // ADMIN PHARMACY TRANSACTION CORRECTION / EDIT ENDPOINTS
