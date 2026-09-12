@@ -100,6 +100,20 @@ function setupLeadRoutes(app, db, authenticateToken, writeAudit) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_lead_followups_lead_id ON lead_followups(lead_id)`, () => {});
   db.run(`CREATE INDEX IF NOT EXISTS idx_lead_followups_status_date ON lead_followups(status, followup_date)`, () => {});
 
+  db.run(`CREATE TABLE IF NOT EXISTS clinic_device_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key TEXT UNIQUE NOT NULL,
+    device_id TEXT NOT NULL,
+    device_name TEXT NOT NULL,
+    designated_by_id INTEGER,
+    designated_by_name TEXT,
+    designated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, () => {});
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_clinic_device_key ON clinic_device_config(config_key)`, () => {});
+
+
   // Helper: Generate next sequential Lead ID: L-00001, L-00002...
   const generateNextLeadId = (callback) => {
     db.get(`SELECT MAX(CAST(SUBSTR(lead_id, 3) AS INTEGER)) as max_num FROM leads WHERE lead_id LIKE 'L-%'`, [], (err, row) => {
@@ -850,6 +864,150 @@ function setupLeadRoutes(app, db, authenticateToken, writeAudit) {
       });
     });
   });
+
+  // -------------------------------------------------------------
+  // 14. GET CLINIC PHONE DESIGNATION STATUS
+  // -------------------------------------------------------------
+  app.get('/api/leads/clinic-device/status', authenticateToken, (req, res) => {
+    const callerDeviceId = req.query.device_id || req.headers['x-device-id'] || '';
+
+    db.get(
+      `SELECT device_id, device_name, designated_by_id, designated_by_name, designated_at, updated_at
+       FROM clinic_device_config
+       WHERE config_key = 'designated_clinic_phone'`,
+      [],
+      (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        if (!row) {
+          return res.json({
+            is_configured: false,
+            is_current_device: false,
+            designated_device: null,
+            message: 'No clinic phone is currently designated'
+          });
+        }
+
+        const isCurrent = Boolean(callerDeviceId && callerDeviceId.trim() === row.device_id);
+
+        res.json({
+          is_configured: true,
+          is_current_device: isCurrent,
+          designated_device: {
+            device_id: row.device_id,
+            device_name: row.device_name,
+            designated_by_name: row.designated_by_name,
+            designated_at: row.designated_at,
+            updated_at: row.updated_at
+          }
+        });
+      }
+    );
+  });
+
+  // -------------------------------------------------------------
+  // 15. DESIGNATE / TRANSFER CLINIC PHONE (ADMIN / DOCTOR ONLY)
+  // -------------------------------------------------------------
+  app.post('/api/leads/clinic-device/designate', authenticateToken, (req, res) => {
+    const userRole = (req.user?.role || '').toUpperCase();
+    if (userRole !== 'ADMIN' && userRole !== 'DOCTOR') {
+      return res.status(403).json({ error: 'Access denied. Only an Admin or Doctor can designate the clinic phone.' });
+    }
+
+    const { device_id, device_name, override_existing } = req.body;
+    if (!device_id || !device_name) {
+      return res.status(400).json({ error: 'device_id and device_name are required' });
+    }
+
+    const userId = req.user?.id || 1;
+    const userName = req.user?.username || 'Admin';
+
+    // Check if another device is currently designated
+    db.get(
+      `SELECT device_id, device_name FROM clinic_device_config WHERE config_key = 'designated_clinic_phone'`,
+      [],
+      (err, current) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        if (current && current.device_id !== device_id && !override_existing) {
+          return res.status(409).json({
+            conflict: true,
+            current_device_name: current.device_name,
+            current_device_id: current.device_id,
+            message: `Another phone is already designated as the Clinic Phone ("${current.device_name}"). Transfer designation to this device?`
+          });
+        }
+
+        // Upsert designated clinic phone
+        const sql = `
+          INSERT INTO clinic_device_config (
+            config_key, device_id, device_name, designated_by_id, designated_by_name, designated_at, updated_at
+          ) VALUES ('designated_clinic_phone', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(config_key) DO UPDATE SET
+            device_id = excluded.device_id,
+            device_name = excluded.device_name,
+            designated_by_id = excluded.designated_by_id,
+            designated_by_name = excluded.designated_by_name,
+            designated_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        `;
+
+        db.run(sql, [device_id, device_name, userId, userName], function(err2) {
+          if (err2) return res.status(500).json({ error: err2.message });
+
+          if (typeof writeAudit === 'function') {
+            writeAudit(req.user, 'CLINIC_PHONE_DESIGNATED', 'clinic_device_config', 'designated_clinic_phone', current, {
+              device_id,
+              device_name,
+              designated_by_name: userName
+            }, `Designated "${device_name}" as the active clinic call/lead phone`);
+          }
+
+          res.json({
+            success: true,
+            message: `"${device_name}" is now designated as the single Clinic Call & Lead Phone`,
+            designated_device: {
+              device_id,
+              device_name,
+              designated_by_name: userName,
+              designated_at: new Date().toISOString()
+            }
+          });
+        });
+      }
+    );
+  });
+
+  // -------------------------------------------------------------
+  // 16. REVOKE CLINIC PHONE DESIGNATION (ADMIN / DOCTOR ONLY)
+  // -------------------------------------------------------------
+  app.post('/api/leads/clinic-device/revoke', authenticateToken, (req, res) => {
+    const userRole = (req.user?.role || '').toUpperCase();
+    if (userRole !== 'ADMIN' && userRole !== 'DOCTOR') {
+      return res.status(403).json({ error: 'Access denied. Only an Admin or Doctor can revoke the clinic phone designation.' });
+    }
+
+    db.get(`SELECT * FROM clinic_device_config WHERE config_key = 'designated_clinic_phone'`, [], (err, current) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!current) {
+        return res.json({ success: true, message: 'No clinic phone was designated' });
+      }
+
+      db.run(`DELETE FROM clinic_device_config WHERE config_key = 'designated_clinic_phone'`, [], function(err2) {
+        if (err2) return res.status(500).json({ error: err2.message });
+
+        if (typeof writeAudit === 'function') {
+          writeAudit(req.user, 'CLINIC_PHONE_REVOKED', 'clinic_device_config', 'designated_clinic_phone', current, null, 'Revoked clinic phone designation');
+        }
+
+        res.json({
+          success: true,
+          message: 'Clinic phone designation revoked. All phones are now in personal staff mode.'
+        });
+      });
+    });
+  });
+
 }
 
 module.exports = {
