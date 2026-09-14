@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal } from 'react-native';
+import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal, BackHandler } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const INSTRUCTION_PRESETS = ['OD (Once Daily)', 'BD (Twice Daily)', 'TDS (Thrice Daily)', 'SOS (When Needed)', 'Apply at Night', 'Apply in Morning', 'Wash after 2 hrs', 'Wash after 30 min', 'Local application only', 'Use on alternate days', 'Weekly once'];
 
-export default function InventoryManagementScreen({ navigation }) {
+function InventoryManagementScreenContent({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [inventory, setInventory] = useState([]);
   const [searchQ, setSearchQ] = useState('');
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [userRole, setUserRole] = useState('');
   const [formData, setFormData] = useState({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], original_quantity: 0, is_new_batch: false });
+  const [initialFormState, setInitialFormState] = useState(null);
   const [isRecModalVisible, setIsRecModalVisible] = useState(false);
   const [recLoading, setRecLoading] = useState(false);
   const [recApplying, setRecApplying] = useState(false);
@@ -159,7 +160,9 @@ Do you want to proceed?`,
   };
 
   const openAddModal = () => {
-    setFormData({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0 });
+    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0 };
+    setFormData(initial);
+    setInitialFormState(initial);
     setIsModalVisible(true);
   };
 
@@ -167,7 +170,7 @@ Do you want to proceed?`,
     const instructions = item.default_instructions
       ? item.default_instructions.split(',').map(i => i.trim()).filter(Boolean)
       : [];
-    setFormData({
+    const initial = {
       id: null, // creates a new stock entry
       medicine_name: item.medicine_name || '',
       batch_number: '',
@@ -177,7 +180,9 @@ Do you want to proceed?`,
       default_instructions: instructions,
       is_new_batch: true,
       original_quantity: 0
-    });
+    };
+    setFormData(initial);
+    setInitialFormState(initial);
     setIsModalVisible(true);
   };
 
@@ -186,7 +191,7 @@ Do you want to proceed?`,
       ? item.default_instructions.split(',').map(i => i.trim()).filter(Boolean)
       : [];
     const currQty = item.quantity !== undefined && item.quantity !== null ? item.quantity : 0;
-    setFormData({
+    const initial = {
       id: item.id,
       medicine_name: item.medicine_name || '',
       batch_number: item.batch_number || '',
@@ -196,9 +201,65 @@ Do you want to proceed?`,
       default_instructions: instructions,
       is_new_batch: false,
       original_quantity: currQty
-    });
+    };
+    setFormData(initial);
+    setInitialFormState(initial);
     setIsModalVisible(true);
   };
+
+  const hasUnsavedChanges = () => {
+    if (!initialFormState) return false;
+    const nameChanged = (formData.medicine_name || '').trim() !== (initialFormState.medicine_name || '').trim();
+    const batchChanged = (formData.batch_number || '').trim() !== (initialFormState.batch_number || '').trim();
+    const mrpChanged = (formData.mrp || '').toString().trim() !== (initialFormState.mrp || '').toString().trim();
+    const qtyChanged = (formData.quantity || '').toString().trim() !== (initialFormState.quantity || '').toString().trim();
+    const expChanged = (formData.expiry_date || '').trim() !== (initialFormState.expiry_date || '').trim();
+    const currInst = Array.isArray(formData.default_instructions) ? [...formData.default_instructions].sort().join(',') : '';
+    const initInst = Array.isArray(initialFormState.default_instructions) ? [...initialFormState.default_instructions].sort().join(',') : '';
+    const instChanged = currInst !== initInst;
+
+    return nameChanged || batchChanged || mrpChanged || qtyChanged || expChanged || instChanged;
+  };
+
+  const handleModalBackOrCancel = () => {
+    if (hasUnsavedChanges()) {
+      Alert.alert(
+        'Discard Changes?',
+        'You have unsaved changes in this medicine entry. Do you want to discard them?',
+        [
+          { text: 'Keep Editing', style: 'cancel' },
+          {
+            text: 'Discard & Go Back',
+            style: 'destructive',
+            onPress: () => {
+              setIsModalVisible(false);
+              setInitialFormState(null);
+            }
+          }
+        ]
+      );
+    } else {
+      setIsModalVisible(false);
+      setInitialFormState(null);
+    }
+  };
+
+  useEffect(() => {
+    const backAction = () => {
+      if (isModalVisible) {
+        handleModalBackOrCancel();
+        return true;
+      }
+      if (isRecModalVisible) {
+        setIsRecModalVisible(false);
+        return true;
+      }
+      return false;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [isModalVisible, isRecModalVisible, formData, initialFormState]);
 
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
@@ -211,6 +272,35 @@ Do you want to proceed?`,
       (item.expiry_date || '').toLowerCase().includes(q)
     );
   });
+
+  const isAdmin = userRole === 'ADMIN' || userRole === 'DOCTOR';
+
+  let totalInStockMrpValue = 0;
+  let totalInStockUnits = 0;
+  let totalInStockBatches = 0;
+  let filteredInStockMrpValue = 0;
+  let filteredInStockUnits = 0;
+
+  if (isAdmin) {
+    inventory.forEach(item => {
+      const qty = Number(item.quantity) || 0;
+      const mrp = Number(item.mrp) || 0;
+      if (qty > 0) {
+        totalInStockUnits += qty;
+        totalInStockBatches += 1;
+        totalInStockMrpValue += qty * mrp;
+      }
+    });
+
+    filteredInventory.forEach(item => {
+      const qty = Number(item.quantity) || 0;
+      const mrp = Number(item.mrp) || 0;
+      if (qty > 0) {
+        filteredInStockUnits += qty;
+        filteredInStockMrpValue += qty * mrp;
+      }
+    });
+  }
 
   return (
     <View style={styles.container}>
@@ -236,6 +326,44 @@ Do you want to proceed?`,
           onChangeText={setSearchQ}
         />
       </View>
+
+      {/* ADMIN ONLY: TOTAL IN-STOCK MRP VALUE CARD */}
+      {isAdmin && (
+        <View style={styles.adminValuationCard}>
+          <View style={styles.valuationHeaderRow}>
+            <View>
+              <Text style={styles.valuationBadge}>👑 ADMIN ONLY</Text>
+              <Text style={styles.valuationTitle}>Total In-Stock MRP Value</Text>
+            </View>
+            <Text style={styles.valuationAmount}>
+              ₹{totalInStockMrpValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </Text>
+          </View>
+          <View style={styles.valuationStatsRow}>
+            <View style={styles.valuationStatItem}>
+              <Text style={styles.valuationStatLabel}>In-Stock Units</Text>
+              <Text style={styles.valuationStatVal}>{totalInStockUnits.toLocaleString('en-IN')}</Text>
+            </View>
+            <View style={styles.valuationStatDivider} />
+            <View style={styles.valuationStatItem}>
+              <Text style={styles.valuationStatLabel}>Active Batches</Text>
+              <Text style={styles.valuationStatVal}>{totalInStockBatches}</Text>
+            </View>
+            <View style={styles.valuationStatDivider} />
+            <View style={styles.valuationStatItem}>
+              <Text style={styles.valuationStatLabel}>Distinct Meds</Text>
+              <Text style={styles.valuationStatVal}>{existingMedicineNames.length}</Text>
+            </View>
+          </View>
+          {searchQ.trim().length > 0 && (
+            <View style={styles.filteredNoticeRow}>
+              <Text style={styles.filteredNoticeText}>
+                🔍 Filtered In-Stock MRP: <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>₹{filteredInStockMrpValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text> ({filteredInStockUnits} units)
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {loading ? <ActivityIndicator size="large" color="#5C0B0B" style={{marginTop: 50}} /> : (
         <ScrollView style={styles.scrollContent}>
@@ -284,15 +412,28 @@ Do you want to proceed?`,
         </ScrollView>
       )}
 
-      <Modal visible={isModalVisible} animationType="slide" transparent={true}>
+      <Modal 
+        visible={isModalVisible} 
+        animationType="slide" 
+        transparent={true}
+        onRequestClose={handleModalBackOrCancel}
+      >
         <View style={styles.modalOverlay}>
-          <ScrollView>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
-                {formData.is_new_batch 
-                  ? '📦 Create / Add New Batch' 
-                  : (formData.id ? 'Edit Stock Item' : 'Add New Medicine / Stock')}
-              </Text>
+              <View style={styles.modalHeaderRow}>
+                <TouchableOpacity onPress={handleModalBackOrCancel} style={styles.modalTopBackBtn}>
+                  <Text style={styles.modalTopBackText}>← Back</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalHeaderTitle} numberOfLines={1}>
+                  {formData.is_new_batch 
+                    ? '📦 Add New Batch' 
+                    : (formData.id ? 'Edit Stock Item' : 'Add Medicine')}
+                </Text>
+                <TouchableOpacity onPress={handleModalBackOrCancel} style={styles.modalTopCloseBtn}>
+                  <Text style={styles.modalTopCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
 
               {formData.is_new_batch && (
                 <View style={styles.newBatchBanner}>
@@ -418,7 +559,7 @@ Do you want to proceed?`,
               )}
 
               <View style={styles.modalActions}>
-                <TouchableOpacity style={[styles.modalBtn, {backgroundColor: '#6b7280'}]} onPress={() => setIsModalVisible(false)}>
+                <TouchableOpacity style={[styles.modalBtn, {backgroundColor: '#6b7280'}]} onPress={handleModalBackOrCancel}>
                   <Text style={styles.modalBtnText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.modalBtn, {backgroundColor: '#5C0B0B'}]} onPress={handleSave}>
@@ -432,10 +573,25 @@ Do you want to proceed?`,
         </View>
       </Modal>
       {/* LIVE STOCK RECONCILIATION MODAL */}
-      <Modal visible={isRecModalVisible} animationType="slide" transparent={true}>
+      <Modal 
+        visible={isRecModalVisible} 
+        animationType="slide" 
+        transparent={true}
+        onRequestClose={() => setIsRecModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: '90%', width: '95%' }]}>
-            <Text style={[styles.modalTitle, { color: '#4338ca', marginBottom: 6 }]}>🔄 Live Stock Reconciliation</Text>
+            <View style={styles.modalHeaderRow}>
+              <TouchableOpacity onPress={() => setIsRecModalVisible(false)} style={styles.modalTopBackBtn}>
+                <Text style={styles.modalTopBackText}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={[styles.modalHeaderTitle, { color: '#4338ca' }]} numberOfLines={1}>
+                🔄 Live Reconciliation
+              </Text>
+              <TouchableOpacity onPress={() => setIsRecModalVisible(false)} style={styles.modalTopCloseBtn}>
+                <Text style={styles.modalTopCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
             <Text style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>
               Replaces/overrides live stock quantities from the Excel summary file.
             </Text>
@@ -534,6 +690,48 @@ Do you want to proceed?`,
   );
 }
 
+class MedicineErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('Medicine module error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorTitle}>Unable to load Medicine module</Text>
+          <Text style={styles.errorMessage}>{this.state.error?.message || 'An unexpected error occurred.'}</Text>
+          <TouchableOpacity 
+            style={styles.retryBtn} 
+            onPress={() => this.setState({ hasError: false, error: null })}
+          >
+            <Text style={styles.retryBtnText}>🔄 Retry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.goBackBtn} 
+            onPress={() => this.props.navigation?.goBack()}
+          >
+            <Text style={styles.goBackBtnText}>← Back to Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function InventoryManagementScreen(props) {
+  return (
+    <MedicineErrorBoundary navigation={props.navigation}>
+      <InventoryManagementScreenContent {...props} />
+    </MedicineErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f7fb' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#5C0B0B', padding: 20, paddingTop: 50 },
@@ -568,7 +766,171 @@ const styles = StyleSheet.create({
   selectedInstr: { backgroundColor: '#e8f5e9', padding: 8, borderRadius: 6, marginBottom: 12 },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 15 },
   modalBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
-  modalBtnText: { color: '#fff', fontWeight: 'bold' },
+  modalBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   newBatchBanner: { backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 12 },
-  newBatchBannerText: { fontSize: 13, color: '#166534', fontWeight: '600' }
+  newBatchBannerText: { fontSize: 13, color: '#166534', fontWeight: '600' },
+  adminValuationCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4
+  },
+  valuationHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10
+  },
+  valuationBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#b91c1c',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 3
+  },
+  valuationTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4b5563'
+  },
+  valuationAmount: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#065f46'
+  },
+  valuationStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 6
+  },
+  valuationStatItem: {
+    alignItems: 'center',
+    flex: 1
+  },
+  valuationStatDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#e2e8f0'
+  },
+  valuationStatLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    marginBottom: 2
+  },
+  valuationStatVal: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#0f172a'
+  },
+  filteredNoticeRow: {
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9'
+  },
+  filteredNoticeText: {
+    fontSize: 12,
+    color: '#475569'
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6'
+  },
+  modalTopBackBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 6
+  },
+  modalTopBackText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#374151'
+  },
+  modalHeaderTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#5C0B0B',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8
+  },
+  modalTopCloseBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#fee2e2',
+    borderRadius: 6
+  },
+  modalTopCloseText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#b91c1c'
+  },
+  errorContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24
+  },
+  errorIcon: {
+    fontSize: 48,
+    marginBottom: 12
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#dc2626',
+    textAlign: 'center',
+    marginBottom: 24
+  },
+  retryBtn: {
+    backgroundColor: '#5C0B0B',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 12
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold'
+  },
+  goBackBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10
+  },
+  goBackBtnText: {
+    color: '#4b5563',
+    fontSize: 14,
+    fontWeight: '600'
+  }
 });
