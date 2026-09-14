@@ -704,7 +704,13 @@ app.post('/api/login', (req, res) => {
     bcrypt.compare(password, user.password_hash, (err, result) => {
       if (result) {
         const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-        res.json({ token, role: user.role, name: user.name });
+        let userPermissions = {};
+        try {
+          userPermissions = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : {};
+        } catch (e) {
+          userPermissions = {};
+        }
+        res.json({ token, role: user.role, name: user.name, permissions: userPermissions });
       } else {
         res.status(400).json({ error: 'Invalid password' });
       }
@@ -868,26 +874,93 @@ app.delete('/api/patients/:id', authenticateToken, (req, res) => {
   });
 });
 
-// Search Patient
+function sortPatientsNewestFirst(patients) {
+  if (!Array.isArray(patients)) return [];
+  const parseTs = (dStr) => {
+    if (!dStr || typeof dStr !== 'string') return 0;
+    const s = dStr.trim();
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+      const parts = s.split(' ');
+      const dParts = parts[0].split('/');
+      const tParts = parts[1] ? parts[1].split(':') : ['00', '00', '00'];
+      const dt = new Date(
+        parseInt(dParts[2], 10),
+        parseInt(dParts[1], 10) - 1,
+        parseInt(dParts[0], 10),
+        parseInt(tParts[0] || 0, 10),
+        parseInt(tParts[1] || 0, 10),
+        parseInt(tParts[2] || 0, 10)
+      ).getTime();
+      return isNaN(dt) ? 0 : dt;
+    }
+    const t = new Date(s).getTime();
+    return isNaN(t) ? 0 : t;
+  };
+
+  return patients.sort((a, b) => {
+    const timeA = parseTs(a.created_at);
+    const timeB = parseTs(b.created_at);
+    if (timeB !== timeA && timeA > 0 && timeB > 0) {
+      return timeB - timeA;
+    }
+    return (b.id || 0) - (a.id || 0);
+  });
+}
+
+// Search Patient (Ordered with newest registered clients first)
 app.get('/api/patients/search', authenticateToken, (req, res) => {
   const query = req.query.query || req.query.q || ''; 
-  const sql = `SELECT * FROM patients WHERE skinssence_id LIKE ? OR mobile LIKE ? OR first_name LIKE ? OR last_name LIKE ? LIMIT 50`;
+  const sql = `
+    SELECT * FROM patients 
+    WHERE skinssence_id LIKE ? OR mobile LIKE ? OR first_name LIKE ? OR last_name LIKE ? 
+    ORDER BY id DESC 
+    LIMIT 100
+  `;
   const likeQuery = `%${query}%`;
   
   db.all(sql, [likeQuery, likeQuery, likeQuery, likeQuery], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    const sorted = sortPatientsNewestFirst(rows || []);
+    res.json(sorted.slice(0, 50));
   });
 });
 
 // Fetch Single Patient by S-Number
 app.get('/api/patients/by-snumber/:snumber', authenticateToken, (req, res) => {
+  const sn = (req.params.snumber || '').trim();
   db.get(`
     SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
     FROM patients p 
     LEFT JOIN skin_concerns s ON p.id = s.patient_id 
-    WHERE p.skinssence_id = ?
-  `, [req.params.snumber], (err, row) => {
+    WHERE UPPER(TRIM(p.skinssence_id)) = UPPER(?)
+       OR UPPER(TRIM(p.skinssence_id)) = UPPER('S' || ?)
+       OR UPPER(TRIM('S' || p.skinssence_id)) = UPPER(?)
+    LIMIT 1
+  `, [sn, sn, sn], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Patient not found' });
+    res.json(row);
+  });
+});
+
+// Fetch Single Patient by ID (numeric ID or S-Number)
+app.get('/api/patients/:id', authenticateToken, (req, res) => {
+  const param = (req.params.id || '').trim();
+  const isNumeric = /^\d+$/.test(param);
+  const query = isNumeric 
+    ? `SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
+       FROM patients p 
+       LEFT JOIN skin_concerns s ON p.id = s.patient_id 
+       WHERE p.id = ? LIMIT 1`
+    : `SELECT p.*, s.concerns, s.other_concern, s.upcoming_event, s.event_date, s.last_hair_procedure, s.last_hair_procedure_date 
+       FROM patients p 
+       LEFT JOIN skin_concerns s ON p.id = s.patient_id 
+       WHERE UPPER(TRIM(p.skinssence_id)) = UPPER(?)
+          OR UPPER(TRIM(p.skinssence_id)) = UPPER('S' || ?)
+          OR UPPER(TRIM('S' || p.skinssence_id)) = UPPER(?)
+       LIMIT 1`;
+  const params = isNumeric ? [parseInt(param, 10)] : [param, param, param];
+  db.get(query, params, (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Patient not found' });
     res.json(row);
@@ -896,9 +969,10 @@ app.get('/api/patients/by-snumber/:snumber', authenticateToken, (req, res) => {
 
 // Get all patients (Doctor only)
 app.get('/api/patients', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
-  db.all('SELECT * FROM patients ORDER BY created_at DESC', (err, rows) => {
+  db.all('SELECT * FROM patients ORDER BY id DESC', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    const sorted = sortPatientsNewestFirst(rows || []);
+    res.json(sorted);
   });
 });
 
@@ -914,7 +988,6 @@ app.get('/api/packages/:patient_id', authenticateToken, (req, res) => {
     }
   );
 });
-
 
 // ============================================================
 // MASTER PROCEDURES CATALOG (LOCKED NAMES, FLEXIBLE PRICING)
@@ -2319,6 +2392,41 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
       });
       expiringSoonAlarm.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
+      // Calculate Admin-Only MRP Valuations
+      let totalInStockMrpValue = 0;
+      let totalInStockUnits = 0;
+      let activeBatchesCount = 0;
+      let expiredMrpValue = 0;
+      let expiringSoonMrpValue = 0;
+      let validMrpValue = 0;
+
+      (inventoryRows || []).forEach(item => {
+        const qty = Number(item.quantity) || 0;
+        const mrp = Number(item.mrp) || 0;
+        if (qty > 0) {
+          totalInStockUnits += qty;
+          activeBatchesCount += 1;
+          const val = qty * mrp;
+          totalInStockMrpValue += val;
+
+          const expDate = parseExpiryDate(item.expiry_date);
+          if (expDate) {
+            expDate.setHours(23, 59, 59, 999);
+            const diffTime = expDate.getTime() - now.getTime();
+            const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (daysRemaining < 0) {
+              expiredMrpValue += val;
+            } else if (daysRemaining <= 90) {
+              expiringSoonMrpValue += val;
+            } else {
+              validMrpValue += val;
+            }
+          } else {
+            validMrpValue += val;
+          }
+        }
+      });
+
       const summary = {
         expiredCount: byCategory.expired.length,
         in3MonthsCount: byCategory.in3Months.length,
@@ -2328,6 +2436,17 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
         invalidCount: byCategory.invalidDate.length,
         totalMedicines: processedItems.length
       };
+
+      // Admin & Doctor only: attach MRP valuation metrics
+      const isUserAdmin = req.user && (req.user.role === 'ADMIN' || req.user.role === 'DOCTOR');
+      if (isUserAdmin) {
+        summary.totalInStockMrpValue = Math.round(totalInStockMrpValue * 100) / 100;
+        summary.totalInStockUnits = totalInStockUnits;
+        summary.activeBatchesCount = activeBatchesCount;
+        summary.expiredMrpValue = Math.round(expiredMrpValue * 100) / 100;
+        summary.expiringSoonMrpValue = Math.round(expiringSoonMrpValue * 100) / 100;
+        summary.validMrpValue = Math.round(validMrpValue * 100) / 100;
+      }
 
       res.json({
         summary,
@@ -3048,7 +3167,26 @@ app.get('/api/reports/procedures', authenticateToken, (req, res) => {
 // ============================================================
 // DAILY DIARY / DAY BOOK (Day-Wise Complete Activity View)
 // ============================================================
-app.get('/api/admin/diary', authenticateToken, authorizeRole('DOCTOR'), (req, res) => {
+// Middleware checking DOCTOR role OR staff with can_see_daily_diary / can_view_diary permission
+const authorizeDiaryAccess = (req, res, next) => {
+  if (req.user.role === 'DOCTOR' || req.user.role === 'ADMIN') {
+    return next();
+  }
+  db.get('SELECT permissions FROM users WHERE id = ?', [req.user.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(403).json({ error: 'Access denied: User account not found.' });
+    let perms = {};
+    try {
+      perms = row.permissions ? (typeof row.permissions === 'string' ? JSON.parse(row.permissions) : row.permissions) : {};
+    } catch(e) {}
+    if (perms.can_see_daily_diary || perms.can_view_diary) {
+      return next();
+    }
+    return res.status(403).json({ error: 'Access denied: Daily Diary viewing is disabled for your staff account.' });
+  });
+};
+
+app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) => {
   const targetDate = req.query.date || getISTDate();
 
   // Helper for IST time formatting
@@ -3825,6 +3963,25 @@ app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
 });
 
 // --- USER & HR MANAGEMENT (ADMIN ONLY) ---
+app.get('/api/users/me', authenticateToken, (req, res) => {
+  db.get('SELECT id, username, role, name, monthly_salary, permissions FROM users WHERE id = ?', [req.user.id], (err, user) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    let perms = {};
+    try {
+      perms = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : {};
+    } catch (e) {}
+    res.json({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      name: user.name,
+      monthly_salary: user.monthly_salary,
+      permissions: perms
+    });
+  });
+});
+
 app.get('/api/users', authenticateToken, (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
   db.all('SELECT id, username, role, name, monthly_salary, permissions FROM users', [], (err, rows) => {
@@ -4727,6 +4884,11 @@ const writeAudit = (user, action, entity, entityId, oldVal, newVal, reason) => {
 
 // Expose writeAudit for use in routes (attach to app)
 app.locals.writeAudit = writeAudit;
+
+// --- LEAD MANAGEMENT ROUTES (PHASE 1) ---
+const { setupLeadRoutes } = require('./leadsRoutes');
+setupLeadRoutes(app, db, authenticateToken, writeAudit);
+
 
 // ============================================================
 // ADMIN PHARMACY TRANSACTION CORRECTION / EDIT ENDPOINTS
