@@ -659,6 +659,115 @@ db.run(`CREATE TABLE IF NOT EXISTS consultation_fee_rules (
     active INTEGER DEFAULT 1
 )`, () => {});
 
+// --- INVENTORY STOCK MOVEMENTS AUDIT SYSTEM ---
+db.run("ALTER TABLE inventory ADD COLUMN unit TEXT DEFAULT 'units'", () => {});
+db.run("ALTER TABLE inventory ADD COLUMN reorder_level INTEGER DEFAULT 5", () => {});
+
+db.run(`CREATE TABLE IF NOT EXISTS inventory_stock_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    medicine_name TEXT,
+    batch_number TEXT,
+    movement_type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    previous_quantity REAL NOT NULL,
+    new_quantity REAL NOT NULL,
+    reason TEXT,
+    reference_type TEXT,
+    reference_id TEXT,
+    user_id INTEGER,
+    user_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+db.run(`CREATE INDEX IF NOT EXISTS idx_stock_movements_item_id ON inventory_stock_movements(item_id)`, () => {});
+db.run(`CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON inventory_stock_movements(created_at)`, () => {});
+
+function recordStockChange(params, callback) {
+  const {
+    itemId,
+    movementType,
+    quantity,
+    reason = '',
+    referenceType = 'MANUAL_ENTRY',
+    referenceId = '',
+    userId = null,
+    userName = 'Staff'
+  } = params;
+
+  const delta = parseFloat(quantity) || 0;
+  if (delta === 0 && movementType !== 'OPENING_STOCK') {
+    return callback(new Error('Quantity change cannot be zero.'));
+  }
+
+  db.serialize(() => {
+    db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
+      if (errBegin) return callback(errBegin);
+
+      db.get('SELECT * FROM inventory WHERE id = ?', [itemId], (errGet, item) => {
+        if (errGet || !item) {
+          return db.run('ROLLBACK', () => callback(errGet || new Error('Inventory item not found.')));
+        }
+
+        const prevQty = parseFloat(item.quantity) || 0;
+        const newQty = prevQty + delta;
+
+        // Negative stock validation
+        if (newQty < 0) {
+          return db.run('ROLLBACK', () => {
+            callback(new Error(`Insufficient stock. Current stock is ${prevQty}, requested reduction is ${Math.abs(delta)}.`));
+          });
+        }
+
+        db.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newQty, itemId], function(errUpd) {
+          if (errUpd) {
+            return db.run('ROLLBACK', () => callback(errUpd));
+          }
+
+          db.run(
+            `INSERT INTO inventory_stock_movements (
+              item_id, medicine_name, batch_number, movement_type, quantity,
+              previous_quantity, new_quantity, reason, reference_type, reference_id,
+              user_id, user_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [
+              itemId,
+              item.medicine_name,
+              item.batch_number || '',
+              movementType,
+              delta,
+              prevQty,
+              newQty,
+              reason || '',
+              referenceType || '',
+              referenceId ? String(referenceId) : '',
+              userId,
+              userName || 'Staff'
+            ],
+            function(errIns) {
+              if (errIns) {
+                return db.run('ROLLBACK', () => callback(errIns));
+              }
+
+              const movementId = this.lastID;
+              db.run('COMMIT', (errCommit) => {
+                if (errCommit) {
+                  return db.run('ROLLBACK', () => callback(errCommit));
+                }
+                callback(null, {
+                  previousQuantity: prevQty,
+                  newQuantity: newQty,
+                  movementId,
+                  item: { ...item, quantity: newQty }
+                });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+}
+
 // Seed default fee rules if table is empty
 db.get('SELECT COUNT(*) as cnt FROM consultation_fee_rules', [], (err, row) => {
   if (!err && row && row.cnt === 0) {
@@ -1596,17 +1705,37 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
           db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
             [visit_id, detailsString, parseFloat(med.amount) || 0], (err1) => {
               if (err1) {
-                console.error("ERR1:", err1);
+                console.error('ERR1:', err1);
                 hasError = true;
               }
-              
-              db.run('UPDATE inventory SET quantity = quantity - ? WHERE id = ?', [med.quantity, med.id], (err2) => {
-                if (err2) {
-                  console.error("ERR2:", err2);
-                  hasError = true;
-                }
-                pending--;
-                if (pending === 0) finalize(visit_id);
+
+              db.get('SELECT quantity, medicine_name, batch_number FROM inventory WHERE id = ?', [med.id], (errG, invRow) => {
+                const prevQty = invRow ? (parseFloat(invRow.quantity) || 0) : 0;
+                const soldQty = parseFloat(med.quantity) || 0;
+                const newQty = prevQty - soldQty;
+                const medName = invRow?.medicine_name || med.medicine_name;
+                const batchNum = invRow?.batch_number || med.batch_number || '';
+
+                db.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newQty, med.id], (err2) => {
+                  if (err2) {
+                    console.error('ERR2:', err2);
+                    hasError = true;
+                  } else {
+                    db.run(
+                      `INSERT INTO inventory_stock_movements (
+                        item_id, medicine_name, batch_number, movement_type, quantity,
+                        previous_quantity, new_quantity, reason, reference_type, reference_id,
+                        user_id, user_name, created_at
+                      ) VALUES (?, ?, ?, 'SOLD', ?, ?, ?, 'Pharmacy sale', 'PHARMACY_SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+                      [med.id, medName, batchNum, -soldQty, prevQty, newQty, String(visit_id), staff_id, req.user?.name || req.user?.username || 'Staff'],
+                      (errMov) => {
+                        if (errMov) console.error('Error logging sale stock movement:', errMov);
+                      }
+                    );
+                  }
+                  pending--;
+                  if (pending === 0) finalize(visit_id);
+                });
               });
           });
         });
@@ -1615,7 +1744,7 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
       if (existing_visit_id) {
         // Update existing visit record with discount fields
         db.run(
-          `UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?`,
+          'UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?',
           [finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable, existing_visit_id],
           () => processItemsWithVisitId(existing_visit_id)
         );
@@ -1826,18 +1955,38 @@ app.post('/api/pharmacy/camera/confirm', authenticateToken, (req, res) => {
           }
           // Deduct stock from specific batch
           const invId = med.inventory_id || med.id;
-          db.run(
-            'UPDATE inventory SET quantity = quantity - ? WHERE id = ?',
-            [med.quantity, invId],
-            (errS) => {
-              if (errS) {
-                console.error('Error deducting stock:', errS);
-                hasError = true;
+          db.get('SELECT quantity, medicine_name, batch_number FROM inventory WHERE id = ?', [invId], (errG, invRow) => {
+            const prevQty = invRow ? (parseFloat(invRow.quantity) || 0) : 0;
+            const soldQty = parseFloat(med.quantity) || 0;
+            const newQty = prevQty - soldQty;
+            const medName = invRow?.medicine_name || med.medicine_name;
+            const batchNum = invRow?.batch_number || med.batch_number || '';
+
+            db.run(
+              'UPDATE inventory SET quantity = ? WHERE id = ?',
+              [newQty, invId],
+              (errS) => {
+                if (errS) {
+                  console.error('Error deducting stock:', errS);
+                  hasError = true;
+                } else {
+                  db.run(
+                    `INSERT INTO inventory_stock_movements (
+                      item_id, medicine_name, batch_number, movement_type, quantity,
+                      previous_quantity, new_quantity, reason, reference_type, reference_id,
+                      user_id, user_name, created_at
+                    ) VALUES (?, ?, ?, 'SOLD', ?, ?, ?, 'Smart camera pharmacy sale', 'PHARMACY_SALE', ?, ?, ?, CURRENT_TIMESTAMP)`,
+                    [invId, medName, batchNum, -soldQty, prevQty, newQty, String(visit_id), staff_id, req.user?.name || req.user?.username || 'Staff'],
+                    (errMov) => {
+                      if (errMov) console.error("Error inserting camera sale stock movement:", errMov);
+                    }
+                  );
+                }
+                pending--;
+                if (pending === 0) finalizeConfirmation();
               }
-              pending--;
-              if (pending === 0) finalizeConfirmation();
-            }
-          );
+            );
+          });
         }
       );
     });
@@ -1910,27 +2059,52 @@ app.get('/api/inventory/all', authenticateToken, (req, res) => {
 });
 
 app.post('/api/inventory', authenticateToken, (req, res) => {
-  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '' } = req.body;
+  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '', unit = 'units', reorder_level = 5 } = req.body;
   if (!medicine_name) return res.status(400).json({ error: 'Medicine name required' });
-  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions) VALUES (?, ?, ?, ?, ?, ?)',
-    [medicine_name, batch_number, mrp || 0, quantity || 0, expiry_date, default_instructions], function(err) {
+
+  const initialQty = parseFloat(quantity) || 0;
+  const userName = req.user?.name || req.user?.username || 'Staff';
+  const userId = req.user?.id || null;
+
+  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions, unit, reorder_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [medicine_name, batch_number, mrp || 0, initialQty, expiry_date, default_instructions, unit || 'units', parseInt(reorder_level, 10) || 5],
+    function(err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ id: this.lastID });
+      const newItemId = this.lastID;
+
+      if (initialQty > 0) {
+        db.run(
+          `INSERT INTO inventory_stock_movements (
+            item_id, medicine_name, batch_number, movement_type, quantity,
+            previous_quantity, new_quantity, reason, reference_type, reference_id,
+            user_id, user_name, created_at
+          ) VALUES (?, ?, ?, 'OPENING_STOCK', ?, 0, ?, 'Initial opening stock', 'OPENING_STOCK', ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [newItemId, medicine_name, batch_number, initialQty, initialQty, String(newItemId), userId, userName],
+          (errMov) => {
+            if (errMov) console.error('Failed to log opening stock movement:', errMov);
+            res.json({ id: newItemId, message: 'Item created with opening stock' });
+          }
+        );
+      } else {
+        res.json({ id: newItemId });
+      }
   });
 });
 
 app.put('/api/inventory/:id', authenticateToken, (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  const userName = req.user?.name || req.user?.username || 'Staff';
+  const userId = req.user?.id || null;
   const id = req.params.id;
-  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '' } = req.body;
+  const { medicine_name, batch_number = '', mrp = 0, quantity, expiry_date = '', default_instructions = '', unit, reorder_level } = req.body;
 
   db.get('SELECT * FROM inventory WHERE id = ?', [id], (errRow, existingRow) => {
     if (errRow) return res.status(500).json({ error: errRow.message });
     if (!existingRow) return res.status(404).json({ error: 'Inventory item not found.' });
 
     const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
-    const newQty = parseInt(quantity, 10) || 0;
-    const existingQty = parseInt(existingRow.quantity, 10) || 0;
+    const existingQty = parseFloat(existingRow.quantity) || 0;
+    const newQty = (quantity !== undefined && quantity !== null) ? parseFloat(quantity) : existingQty;
 
     // Staff cannot reduce already entered stock quantity
     if (!isPrivileged && newQty < existingQty) {
@@ -1939,10 +2113,296 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
       });
     }
 
-    db.run('UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=? WHERE id=?',
-      [medicine_name, batch_number, mrp || 0, newQty, expiry_date, default_instructions, id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Updated' });
+    if (newQty < 0) {
+      return res.status(400).json({ error: 'Stock quantity cannot be negative.' });
+    }
+
+    const finalUnit = unit !== undefined ? unit : (existingRow.unit || 'units');
+    const finalReorder = reorder_level !== undefined ? parseInt(reorder_level, 10) : (existingRow.reorder_level || 5);
+    const finalName = medicine_name || existingRow.medicine_name;
+    const finalBatch = batch_number !== undefined ? batch_number : existingRow.batch_number;
+    const finalMrp = mrp !== undefined ? mrp : existingRow.mrp;
+    const finalExp = expiry_date !== undefined ? expiry_date : existingRow.expiry_date;
+    const finalInst = default_instructions !== undefined ? default_instructions : existingRow.default_instructions;
+
+    const delta = newQty - existingQty;
+
+    db.run(
+      'UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=?, unit=?, reorder_level=? WHERE id=?',
+      [finalName, finalBatch, finalMrp, newQty, finalExp, finalInst, finalUnit, finalReorder, id],
+      function(errUpd) {
+        if (errUpd) return res.status(500).json({ error: errUpd.message });
+
+        if (delta !== 0) {
+          const movType = delta > 0 ? 'ADDED' : 'ADJUSTMENT';
+          const reason = delta > 0 ? 'Manual stock increase via item edit' : 'Manual stock reduction via item edit';
+          db.run(
+            `INSERT INTO inventory_stock_movements (
+              item_id, medicine_name, batch_number, movement_type, quantity,
+              previous_quantity, new_quantity, reason, reference_type, reference_id,
+              user_id, user_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL_EDIT', ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [id, finalName, finalBatch, movType, delta, existingQty, newQty, reason, String(id), userId, userName],
+            (errMov) => {
+              if (errMov) console.error('Failed to log movement on item update:', errMov);
+              res.json({ message: 'Updated', previousQuantity: existingQty, newQuantity: newQty });
+            }
+          );
+        } else {
+          res.json({ message: 'Updated' });
+        }
+    });
+  });
+});
+
+// Dedicated stock addition endpoint
+app.post('/api/inventory/:id/add-stock', authenticateToken, (req, res) => {
+  const id = req.params.id;
+  const { quantity, batch_number, expiry_date, reason = '', notes = '' } = req.body;
+  const addQty = parseFloat(quantity);
+
+  if (isNaN(addQty) || addQty <= 0) {
+    return res.status(400).json({ error: 'Quantity to add must be greater than zero.' });
+  }
+
+  const userName = req.user?.name || req.user?.username || 'Staff';
+  const userId = req.user?.id || null;
+  const fullReason = [reason || 'Stock added', notes].filter(Boolean).join(' - ');
+
+  db.serialize(() => {
+    db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
+      if (errBegin) return res.status(500).json({ error: errBegin.message });
+
+      db.get('SELECT * FROM inventory WHERE id = ?', [id], (errGet, item) => {
+        if (errGet || !item) {
+          return db.run('ROLLBACK', () => res.status(404).json({ error: 'Inventory item not found.' }));
+        }
+
+        const prevQty = parseFloat(item.quantity) || 0;
+        const newQty = prevQty + addQty;
+        const finalBatch = (batch_number && batch_number.trim()) ? batch_number.trim() : (item.batch_number || '');
+        const finalExp = (expiry_date && expiry_date.trim()) ? expiry_date.trim() : (item.expiry_date || '');
+
+        db.run(
+          'UPDATE inventory SET quantity = ?, batch_number = ?, expiry_date = ? WHERE id = ?',
+          [newQty, finalBatch, finalExp, id],
+          function(errUpd) {
+            if (errUpd) {
+              return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
+            }
+
+            db.run(
+              `INSERT INTO inventory_stock_movements (
+                item_id, medicine_name, batch_number, movement_type, quantity,
+                previous_quantity, new_quantity, reason, reference_type, reference_id,
+                user_id, user_name, created_at
+              ) VALUES (?, ?, ?, 'ADDED', ?, ?, ?, ?, 'STOCK_ADDITION', ?, ?, ?, CURRENT_TIMESTAMP)`,
+              [id, item.medicine_name, finalBatch, addQty, prevQty, newQty, fullReason, String(id), userId, userName],
+              function(errIns) {
+                if (errIns) {
+                  return db.run('ROLLBACK', () => res.status(500).json({ error: errIns.message }));
+                }
+
+                const movementId = this.lastID;
+                db.run('COMMIT', (errCommit) => {
+                  if (errCommit) {
+                    return db.run('ROLLBACK', () => res.status(500).json({ error: errCommit.message }));
+                  }
+                  res.json({
+                    message: `Successfully added ${addQty} ${item.unit || 'units'} to ${item.medicine_name}.`,
+                    movementId,
+                    previousQuantity: prevQty,
+                    newQuantity: newQty,
+                    item: { ...item, quantity: newQty, batch_number: finalBatch, expiry_date: finalExp }
+                  });
+                });
+              }
+            );
+          }
+        );
+      });
+    });
+  });
+});
+
+// Dedicated stock adjustment endpoint
+app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
+  const id = req.params.id;
+  const { quantity, reason_type = 'Stock count correction', notes = '' } = req.body;
+  const delta = parseFloat(quantity);
+
+  if (isNaN(delta) || delta === 0) {
+    return res.status(400).json({ error: 'Adjustment quantity cannot be zero.' });
+  }
+
+  // Staff cannot reduce stock
+  if (!isPrivileged && delta < 0) {
+    return res.status(403).json({
+      error: 'Permission denied: Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.'
+    });
+  }
+
+  const userName = req.user?.name || req.user?.username || 'Staff';
+  const userId = req.user?.id || null;
+  const fullReason = [reason_type, notes].filter(Boolean).join(': ');
+  const movementType = delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT');
+
+  db.serialize(() => {
+    db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
+      if (errBegin) return res.status(500).json({ error: errBegin.message });
+
+      db.get('SELECT * FROM inventory WHERE id = ?', [id], (errGet, item) => {
+        if (errGet || !item) {
+          return db.run('ROLLBACK', () => res.status(404).json({ error: 'Inventory item not found.' }));
+        }
+
+        const prevQty = parseFloat(item.quantity) || 0;
+        const newQty = prevQty + delta;
+
+        // Prevent negative stock
+        if (newQty < 0) {
+          return db.run('ROLLBACK', () => {
+            res.status(400).json({
+              error: `Adjustment rejected: Resulting stock cannot be negative. Current stock is ${prevQty} ${item.unit || 'units'}, reduction is ${Math.abs(delta)}.`
+            });
+          });
+        }
+
+        db.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newQty, id], function(errUpd) {
+          if (errUpd) {
+            return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
+          }
+
+          db.run(
+            `INSERT INTO inventory_stock_movements (
+              item_id, medicine_name, batch_number, movement_type, quantity,
+              previous_quantity, new_quantity, reason, reference_type, reference_id,
+              user_id, user_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'STOCK_ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [id, item.medicine_name, item.batch_number || '', movementType, delta, prevQty, newQty, fullReason, String(id), userId, userName],
+            function(errIns) {
+              if (errIns) {
+                return db.run('ROLLBACK', () => res.status(500).json({ error: errIns.message }));
+              }
+
+              const movementId = this.lastID;
+              db.run('COMMIT', (errCommit) => {
+                if (errCommit) {
+                  return db.run('ROLLBACK', () => res.status(500).json({ error: errCommit.message }));
+                }
+                res.json({
+                  message: `Stock adjusted by ${delta > 0 ? '+' + delta : delta} ${item.unit || 'units'} (${fullReason}).`,
+                  movementId,
+                  previousQuantity: prevQty,
+                  newQuantity: newQty,
+                  item: { ...item, quantity: newQty }
+                });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+});
+
+// Full Item Details & Stock Movement History
+app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
+  const id = req.params.id;
+  const { type, startDate, endDate, user } = req.query;
+
+  db.get('SELECT * FROM inventory WHERE id = ?', [id], (errItem, item) => {
+    if (errItem) return res.status(500).json({ error: errItem.message });
+    if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
+
+    let sql = 'SELECT * FROM inventory_stock_movements WHERE item_id = ?';
+    const params = [id];
+
+    if (type && type !== 'ALL') {
+      if (type === 'REDUCED_OR_ADJUSTED') {
+        sql += ` AND (movement_type IN ('REDUCED', 'ADJUSTMENT') OR quantity < 0)`;
+      } else {
+        sql += ` AND movement_type = ?`;
+        params.push(type);
+      }
+    }
+
+    if (startDate) {
+      sql += ` AND created_at >= ?`;
+      params.push(startDate);
+    }
+
+    if (endDate) {
+      sql += ` AND created_at <= ?`;
+      params.push(endDate);
+    }
+
+    if (user) {
+      sql += ` AND (LOWER(user_name) LIKE LOWER(?) OR user_id = ?)`;
+      params.push(`%${user}%`, parseInt(user, 10) || -1);
+    }
+
+    sql += ' ORDER BY created_at DESC, id DESC LIMIT 500';
+
+    db.all(sql, params, (errMov, movements) => {
+      if (errMov) return res.status(500).json({ error: errMov.message });
+
+      // Fetch aggregated metrics over all history for this item
+      db.all('SELECT movement_type, quantity, created_at FROM inventory_stock_movements WHERE item_id = ? ORDER BY created_at ASC', [id], (errAll, allMovs) => {
+        if (errAll) return res.status(500).json({ error: errAll.message });
+
+        let totalAdded = 0;
+        let totalSold = 0;
+        let totalReduced = 0;
+        let totalAdjustments = 0;
+        let lastAdded = null;
+        let lastSold = null;
+
+        (allMovs || []).forEach(m => {
+          const q = parseFloat(m.quantity) || 0;
+          const mType = (m.movement_type || '').toUpperCase();
+
+          if (mType === 'ADDED' || mType === 'OPENING_STOCK' || (mType === 'ADJUSTMENT' && q > 0)) {
+            totalAdded += Math.abs(q);
+            lastAdded = m.created_at;
+          }
+
+          if (mType === 'SOLD') {
+            totalSold += Math.abs(q);
+            lastSold = m.created_at;
+          }
+
+          if (mType === 'REDUCED' || mType === 'SOLD' || (mType === 'ADJUSTMENT' && q < 0)) {
+            totalReduced += Math.abs(q);
+          }
+
+          if (mType === 'ADJUSTMENT' || mType === 'REDUCED') {
+            totalAdjustments += 1;
+          }
+        });
+
+        res.json({
+          item: {
+            ...item,
+            unit: item.unit || 'units',
+            reorder_level: item.reorder_level !== null && item.reorder_level !== undefined ? item.reorder_level : 5
+          },
+          summary: {
+            current_stock: parseFloat(item.quantity) || 0,
+            unit: item.unit || 'units',
+            reorder_level: item.reorder_level !== null && item.reorder_level !== undefined ? item.reorder_level : 5,
+            total_added: totalAdded,
+            total_sold: totalSold,
+            total_reduced: totalReduced,
+            total_adjustments: totalAdjustments,
+            last_added: lastAdded,
+            last_sold: lastSold
+          },
+          movements: movements || []
+        });
+      });
     });
   });
 });
