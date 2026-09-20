@@ -18,12 +18,188 @@ function InventoryManagementScreenContent({ navigation }) {
   const [recApplying, setRecApplying] = useState(false);
   const [recPreview, setRecPreview] = useState(null);
 
+  // --- ITEM DETAILS & STOCK HISTORY STATE ---
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
+  const [isHistoryModalVisible, setIsHistoryModalVisible] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [itemHistoryData, setItemHistoryData] = useState(null);
+  const [historyFilter, setHistoryFilter] = useState('ALL');
+
+  // Dedicated Add Stock Modal
+  const [isAddStockModalVisible, setIsAddStockModalVisible] = useState(false);
+  const [addStockForm, setAddStockForm] = useState({ quantity: '', batch_number: '', expiry_date: '', reason: 'Supplier Delivery', notes: '' });
+  const [addStockLoading, setAddStockLoading] = useState(false);
+
+  // Dedicated Stock Adjustment Modal
+  const [isAdjustModalVisible, setIsAdjustModalVisible] = useState(false);
+  const [adjustForm, setAdjustForm] = useState({ direction: 'REDUCE', quantity: '', reason_type: 'Damaged', notes: '' });
+  const [adjustLoading, setAdjustLoading] = useState(false);
+
   const BASE_URL = 'https://skinssence-api.onrender.com/api/inventory';
 
   useEffect(() => {
     fetchInventory();
     AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
   }, []);
+
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const d = new Date(dateStr.replace(' ', 'T'));
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      }) + ' ' + d.toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const openItemHistoryModal = async (item, filter = 'ALL') => {
+    setSelectedHistoryItem(item);
+    setIsHistoryModalVisible(true);
+    setHistoryLoading(true);
+    setHistoryFilter(filter);
+
+    // Populate instant local item data so user immediately sees stock status, unit, and controls
+    setItemHistoryData({
+      item: item,
+      summary: {
+        current_stock: parseFloat(item.quantity) || 0,
+        unit: item.unit || 'units',
+        reorder_level: item.reorder_level !== undefined && item.reorder_level !== null ? item.reorder_level : 5,
+        total_added: parseFloat(item.quantity) || 0,
+        total_sold: 0,
+        total_reduced: 0,
+        total_adjustments: 0,
+        last_added: null,
+        last_sold: null
+      },
+      movements: []
+    });
+
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const url = `${BASE_URL}/${item.id}/history${filter !== 'ALL' ? `?type=${filter}` : ''}`;
+      const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.data) {
+        setItemHistoryData(res.data);
+      }
+    } catch (e) {
+      console.log('Stock history API notice:', e?.response?.status || e.message);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleFilterChange = async (newFilter) => {
+    if (!selectedHistoryItem) return;
+    setHistoryFilter(newFilter);
+    setHistoryLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const url = `${BASE_URL}/${selectedHistoryItem.id}/history${newFilter !== 'ALL' ? `?type=${newFilter}` : ''}`;
+      const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      setItemHistoryData(res.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const openAddStockModal = () => {
+    if (!selectedHistoryItem) return;
+    setAddStockForm({
+      quantity: '',
+      batch_number: selectedHistoryItem.batch_number || '',
+      expiry_date: selectedHistoryItem.expiry_date || '',
+      reason: 'Supplier Delivery',
+      notes: ''
+    });
+    setIsAddStockModalVisible(true);
+  };
+
+  const handleSaveAddStock = async () => {
+    const qty = parseFloat(addStockForm.quantity);
+    if (isNaN(qty) || qty <= 0) {
+      return Alert.alert('Invalid Quantity', 'Please enter a quantity greater than zero.');
+    }
+    setAddStockLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.post(
+        `${BASE_URL}/${selectedHistoryItem.id}/add-stock`,
+        {
+          quantity: qty,
+          batch_number: addStockForm.batch_number,
+          expiry_date: addStockForm.expiry_date,
+          reason: addStockForm.reason,
+          notes: addStockForm.notes
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      Alert.alert('Stock Added', res.data.message || 'Stock successfully added!');
+      setIsAddStockModalVisible(false);
+      fetchInventory();
+      openItemHistoryModal(res.data.item || selectedHistoryItem, historyFilter);
+    } catch (e) {
+      Alert.alert('Error', e.response?.data?.error || 'Failed to add stock.');
+    } finally {
+      setAddStockLoading(false);
+    }
+  };
+
+  const openAdjustModal = () => {
+    if (!selectedHistoryItem) return;
+    const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
+    setAdjustForm({
+      direction: isStaff ? 'ADD' : 'REDUCE',
+      quantity: '',
+      reason_type: isStaff ? 'Stock count correction' : 'Damaged',
+      notes: ''
+    });
+    setIsAdjustModalVisible(true);
+  };
+
+  const handleSaveAdjust = async () => {
+    const rawQty = parseFloat(adjustForm.quantity);
+    if (isNaN(rawQty) || rawQty <= 0) {
+      return Alert.alert('Invalid Quantity', 'Please enter a valid quantity.');
+    }
+    const signedQty = adjustForm.direction === 'REDUCE' ? -rawQty : rawQty;
+    const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
+    if (isStaff && signedQty < 0) {
+      return Alert.alert('Permission Denied', 'Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.');
+    }
+    setAdjustLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.post(
+        `${BASE_URL}/${selectedHistoryItem.id}/adjust`,
+        {
+          quantity: signedQty,
+          reason_type: adjustForm.reason_type,
+          notes: adjustForm.notes
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      Alert.alert('Stock Adjusted', res.data.message || 'Stock adjusted successfully!');
+      setIsAdjustModalVisible(false);
+      fetchInventory();
+      openItemHistoryModal(res.data.item || selectedHistoryItem, historyFilter);
+    } catch (e) {
+      Alert.alert('Adjustment Error', e.response?.data?.error || 'Failed to adjust stock.');
+    } finally {
+      setAdjustLoading(false);
+    }
+  };
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -246,6 +422,18 @@ Do you want to proceed?`,
 
   useEffect(() => {
     const backAction = () => {
+      if (isAdjustModalVisible) {
+        setIsAdjustModalVisible(false);
+        return true;
+      }
+      if (isAddStockModalVisible) {
+        setIsAddStockModalVisible(false);
+        return true;
+      }
+      if (isHistoryModalVisible) {
+        setIsHistoryModalVisible(false);
+        return true;
+      }
       if (isModalVisible) {
         handleModalBackOrCancel();
         return true;
@@ -259,7 +447,7 @@ Do you want to proceed?`,
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [isModalVisible, isRecModalVisible, formData, initialFormState]);
+  }, [isModalVisible, isRecModalVisible, isHistoryModalVisible, isAddStockModalVisible, isAdjustModalVisible, formData, initialFormState]);
 
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
@@ -368,12 +556,21 @@ Do you want to proceed?`,
       {loading ? <ActivityIndicator size="large" color="#5C0B0B" style={{marginTop: 50}} /> : (
         <ScrollView style={styles.scrollContent}>
           {filteredInventory.map(item => (
-            <View key={item.id} style={[styles.itemCard, item.quantity === 0 && { borderColor: '#fca5a5', borderWidth: 1.5, backgroundColor: '#fff5f5' }]}>
+            <TouchableOpacity
+              key={item.id}
+              activeOpacity={0.85}
+              onPress={() => openItemHistoryModal(item)}
+              style={[styles.itemCard, item.quantity === 0 && { borderColor: '#fca5a5', borderWidth: 1.5, backgroundColor: '#fff5f5' }]}
+            >
               <View style={styles.itemInfo}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <Text style={styles.itemName}>{item.medicine_name}</Text>
-                  {item.quantity === 0 && (
+                  {item.quantity === 0 ? (
                     <View style={styles.outOfStockBadge}><Text style={styles.outOfStockText}>OUT OF STOCK (0)</Text></View>
+                  ) : (
+                    <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                      <Text style={{ fontSize: 10, color: '#1d4ed8', fontWeight: 'bold' }}>📋 History</Text>
+                    </View>
                   )}
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
@@ -382,7 +579,7 @@ Do you want to proceed?`,
                   <Text style={styles.itemDetail}>Expiry: <Text style={{fontWeight:'bold', color: '#b91c1c'}}>{item.expiry_date || 'N/A'}</Text></Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 }}>
-                  <Text style={styles.itemDetail}>Stock: <Text style={{fontWeight:'bold', color: item.quantity > 5 ? '#10b981' : (item.quantity === 0 ? '#b91c1c' : '#f59e0b')}}>{item.quantity} units</Text></Text>
+                  <Text style={styles.itemDetail}>Stock: <Text style={{fontWeight:'bold', color: item.quantity > 5 ? '#10b981' : (item.quantity === 0 ? '#b91c1c' : '#f59e0b')}}>{item.quantity} {item.unit || 'units'}</Text></Text>
                   <Text style={styles.itemDetail}>MRP: <Text style={{fontWeight: 'bold', color: '#111827'}}>₹{item.mrp}</Text></Text>
                 </View>
                 {item.default_instructions ? (
@@ -394,6 +591,9 @@ Do you want to proceed?`,
                 ) : null}
               </View>
               <View style={styles.itemActions}>
+                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#4338ca', marginBottom: 6}]} onPress={() => openItemHistoryModal(item)}>
+                  <Text style={styles.actionBtnText}>History</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10b981', marginBottom: 6}]} onPress={() => openAddBatchModal(item)}>
                   <Text style={styles.actionBtnText}>+ Batch</Text>
                 </TouchableOpacity>
@@ -406,7 +606,7 @@ Do you want to proceed?`,
                   </TouchableOpacity>
                 )}
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
           {filteredInventory.length === 0 && <Text style={{textAlign: 'center', marginTop: 50, color: '#6b7280', fontSize: 16}}>No matching stock found.</Text>}
         </ScrollView>
@@ -686,6 +886,509 @@ Do you want to proceed?`,
           </View>
         </View>
       </Modal>
+
+      {/* 1. ITEM DETAILS & STOCK HISTORY MODAL */}
+      <Modal
+        visible={isHistoryModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsHistoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={{ height: '88%', width: '100%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', marginTop: 0 }}>
+            {/* Modal Header */}
+            <View style={{ backgroundColor: '#5C0B0B', paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <TouchableOpacity onPress={() => setIsHistoryModalVisible(false)} style={{ paddingVertical: 4, paddingHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>← Back</Text>
+              </TouchableOpacity>
+              <View style={{ flex: 1, marginHorizontal: 10 }}>
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold', textAlign: 'center' }} numberOfLines={1}>
+                  {selectedHistoryItem?.medicine_name || 'Stock History'}
+                </Text>
+                <Text style={{ color: '#fca5a5', fontSize: 11, textAlign: 'center', marginTop: 2 }}>
+                  Batch: {selectedHistoryItem?.batch_number || 'N/A'} | Exp: {selectedHistoryItem?.expiry_date || 'N/A'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsHistoryModalVisible(false)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, paddingBottom: 40 }} showsVerticalScrollIndicator={true}>
+                {/* Top Metrics Grid */}
+                <View style={{ backgroundColor: '#f8fafc', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 14 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Inventory Summary</Text>
+                    <View style={{
+                      backgroundColor: (itemHistoryData?.summary?.current_stock || 0) > (itemHistoryData?.summary?.reorder_level || 5) ? '#dcfce7' : ((itemHistoryData?.summary?.current_stock || 0) === 0 ? '#fee2e2' : '#fef3c7'),
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 10
+                    }}>
+                      <Text style={{
+                        fontSize: 10,
+                        fontWeight: 'bold',
+                        color: (itemHistoryData?.summary?.current_stock || 0) > (itemHistoryData?.summary?.reorder_level || 5) ? '#166534' : ((itemHistoryData?.summary?.current_stock || 0) === 0 ? '#991b1b' : '#92400e')
+                      }}>
+                        {(itemHistoryData?.summary?.current_stock || 0) === 0 ? 'OUT OF STOCK' : ((itemHistoryData?.summary?.current_stock || 0) <= (itemHistoryData?.summary?.reorder_level || 5) ? 'LOW STOCK' : 'IN STOCK')}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                    <View style={{ flex: 1, backgroundColor: '#fff', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1' }}>
+                      <Text style={{ fontSize: 11, color: '#64748b' }}>Current Stock</Text>
+                      <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0f172a' }}>
+                        {itemHistoryData?.summary?.current_stock ?? 0}{' '}
+                        <Text style={{ fontSize: 12, fontWeight: 'normal', color: '#64748b' }}>{itemHistoryData?.summary?.unit || 'units'}</Text>
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: '#fff', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1' }}>
+                      <Text style={{ fontSize: 11, color: '#64748b' }}>Reorder Level</Text>
+                      <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#f59e0b' }}>
+                        {itemHistoryData?.summary?.reorder_level ?? 5}{' '}
+                        <Text style={{ fontSize: 12, fontWeight: 'normal', color: '#64748b' }}>{itemHistoryData?.summary?.unit || 'units'}</Text>
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <View style={{ flex: 1, backgroundColor: '#f0fdf4', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#bbf7d0' }}>
+                      <Text style={{ fontSize: 10, color: '#166534', fontWeight: 'bold' }}>Total Added</Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#15803d' }}>+{itemHistoryData?.summary?.total_added ?? 0}</Text>
+                      <Text style={{ fontSize: 9, color: '#15803d', marginTop: 2 }} numberOfLines={1}>Last: {formatDateTime(itemHistoryData?.summary?.last_added)}</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: '#eff6ff', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                      <Text style={{ fontSize: 10, color: '#1e40af', fontWeight: 'bold' }}>Total Sold</Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#2563eb' }}>-{itemHistoryData?.summary?.total_sold ?? 0}</Text>
+                      <Text style={{ fontSize: 9, color: '#1e40af', marginTop: 2 }} numberOfLines={1}>Last: {formatDateTime(itemHistoryData?.summary?.last_sold)}</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: '#fff1f2', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#fecdd3' }}>
+                      <Text style={{ fontSize: 10, color: '#9f1239', fontWeight: 'bold' }}>Adjustments</Text>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#e11d48' }}>{itemHistoryData?.summary?.total_adjustments ?? 0}</Text>
+                      <Text style={{ fontSize: 9, color: '#9f1239', marginTop: 2 }} numberOfLines={1}>Red: -{itemHistoryData?.summary?.total_reduced ?? 0}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Quick Actions: Add Stock & Stock Adjustment */}
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                  <TouchableOpacity
+                    onPress={openAddStockModal}
+                    style={{ flex: 1, backgroundColor: '#15803d', paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>➕ Add Stock</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={openAdjustModal}
+                    style={{ flex: 1, backgroundColor: '#b45309', paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>⚖️ Adjust Stock</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Filter Chips */}
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 6 }}>Filter Log:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                    {[
+                      { key: 'ALL', label: `All (${itemHistoryData?.movements?.length || 0})` },
+                      { key: 'ADDED', label: 'Added' },
+                      { key: 'SOLD', label: 'Sold' },
+                      { key: 'REDUCED_OR_ADJUSTED', label: 'Reduced / Adjust' }
+                    ].map(f => (
+                      <TouchableOpacity
+                        key={f.key}
+                        onPress={() => handleFilterChange(f.key)}
+                        style={{
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 16,
+                          marginRight: 8,
+                          backgroundColor: historyFilter === f.key ? '#5C0B0B' : '#f3f4f6',
+                          borderWidth: 1,
+                          borderColor: historyFilter === f.key ? '#5C0B0B' : '#e5e7eb'
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: historyFilter === f.key ? 'bold' : '500', color: historyFilter === f.key ? '#fff' : '#4b5563' }}>
+                          {f.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Movements Log Header */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1f2937' }}>
+                    Movement History (Newest First)
+                  </Text>
+                  {historyLoading && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <ActivityIndicator size="small" color="#5C0B0B" />
+                      <Text style={{ fontSize: 11, color: '#6b7280' }}>Syncing...</Text>
+                    </View>
+                  )}
+                </View>
+
+                {(!itemHistoryData?.movements || itemHistoryData.movements.length === 0) ? (
+                  <View style={{ padding: 24, backgroundColor: '#f9fafb', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', marginBottom: 20 }}>
+                    <Text style={{ fontSize: 24, marginBottom: 6 }}>📦</Text>
+                    <Text style={{ fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
+                      No stock movements recorded yet for this item.
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+                      Any addition, sale, or adjustment will automatically appear here permanently.
+                    </Text>
+                  </View>
+                ) : (
+                  itemHistoryData.movements.map((m, idx) => {
+                    const isPositive = m.quantity > 0;
+                    const deltaStr = isPositive ? `+${m.quantity}` : `${m.quantity}`;
+                    const badgeBg = m.movement_type === 'OPENING_STOCK' ? '#f3e8ff' : (m.movement_type === 'ADDED' ? '#dcfce7' : (m.movement_type === 'SOLD' ? '#dbeafe' : '#fee2e2'));
+                    const badgeColor = m.movement_type === 'OPENING_STOCK' ? '#6b21a8' : (m.movement_type === 'ADDED' ? '#15803d' : (m.movement_type === 'SOLD' ? '#1e40af' : '#b91c1c'));
+
+                    return (
+                      <View key={m.id || idx} style={{ backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', padding: 10, marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <View style={{ backgroundColor: badgeBg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: badgeColor }}>
+                              {m.movement_type}
+                            </Text>
+                          </View>
+                          <Text style={{ fontSize: 14, fontWeight: 'bold', color: isPositive ? '#15803d' : '#dc2626' }}>
+                            {deltaStr} {itemHistoryData?.item?.unit || 'units'}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+                          <Text style={{ fontSize: 11, color: '#4b5563' }}>
+                            Stock: <Text style={{ fontWeight: 'bold' }}>{m.previous_quantity}</Text> → <Text style={{ fontWeight: 'bold', color: '#1f2937' }}>{m.new_quantity}</Text>
+                          </Text>
+                          <Text style={{ fontSize: 10, color: '#9ca3af' }}>
+                            {formatDateTime(m.created_at)}
+                          </Text>
+                        </View>
+
+                        {m.reason ? (
+                          <Text style={{ fontSize: 11, color: '#374151', marginTop: 4 }}>
+                            📝 {m.reason}
+                          </Text>
+                        ) : null}
+
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: '#f3f4f6' }}>
+                          <Text style={{ fontSize: 10, color: '#6b7280' }}>
+                            👤 By: <Text style={{ fontWeight: '600' }}>{m.user_name || 'Staff'}</Text>
+                          </Text>
+                          {m.reference_type ? (
+                            <Text style={{ fontSize: 10, color: '#9ca3af' }}>
+                              Ref: {m.reference_type}{m.reference_id ? ` #${m.reference_id}` : ''}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+                <View style={{ height: 30 }} />
+              </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 2. ADD STOCK SUBMODAL */}
+      <Modal
+        visible={isAddStockModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsAddStockModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeaderRow}>
+                <TouchableOpacity onPress={() => setIsAddStockModalVisible(false)} style={styles.modalTopBackBtn}>
+                  <Text style={styles.modalTopBackText}>← Back</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalHeaderTitle} numberOfLines={1}>
+                  ➕ Add Stock
+                </Text>
+                <TouchableOpacity onPress={() => setIsAddStockModalVisible(false)} style={styles.modalTopCloseBtn}>
+                  <Text style={styles.modalTopCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#166534', marginBottom: 10 }}>
+                {selectedHistoryItem?.medicine_name}
+              </Text>
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Quantity to Add ({selectedHistoryItem?.unit || 'units'}) *
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 10, 25, 50..."
+                keyboardType="numeric"
+                value={addStockForm.quantity}
+                onChangeText={(v) => setAddStockForm({ ...addStockForm, quantity: v })}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                {[5, 10, 25, 50, 100].map(n => (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => {
+                      const curr = parseFloat(addStockForm.quantity) || 0;
+                      setAddStockForm({ ...addStockForm, quantity: String(curr + n) });
+                    }}
+                    style={{ backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#86efac', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534' }}>+{n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Batch Number (Optional)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Leave blank to keep existing batch"
+                value={addStockForm.batch_number}
+                onChangeText={(v) => setAddStockForm({ ...addStockForm, batch_number: v })}
+              />
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Expiry Date (Optional, MM/YYYY)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 12/2026"
+                value={addStockForm.expiry_date}
+                onChangeText={(v) => setAddStockForm({ ...addStockForm, expiry_date: v })}
+              />
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Reason / Source
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {['Supplier Delivery', 'Stock Return', 'Bonus / Sample', 'Opening Stock', 'Other'].map(r => (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setAddStockForm({ ...addStockForm, reason: r })}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: addStockForm.reason === r ? '#166534' : '#f3f4f6',
+                      borderWidth: 1,
+                      borderColor: addStockForm.reason === r ? '#166534' : '#e5e7eb'
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: addStockForm.reason === r ? '#fff' : '#4b5563', fontWeight: addStockForm.reason === r ? 'bold' : 'normal' }}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Notes / Invoice Details
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Invoice #9988 from ABC Distributor"
+                value={addStockForm.notes}
+                onChangeText={(v) => setAddStockForm({ ...addStockForm, notes: v })}
+              />
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: '#6b7280' }]}
+                  onPress={() => setIsAddStockModalVisible(false)}
+                  disabled={addStockLoading}
+                >
+                  <Text style={styles.modalBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: '#15803d' }]}
+                  onPress={handleSaveAddStock}
+                  disabled={addStockLoading}
+                >
+                  {addStockLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.modalBtnText}>Confirm Add Stock</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* 3. STOCK ADJUSTMENT SUBMODAL */}
+      <Modal
+        visible={isAdjustModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsAdjustModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeaderRow}>
+                <TouchableOpacity onPress={() => setIsAdjustModalVisible(false)} style={styles.modalTopBackBtn}>
+                  <Text style={styles.modalTopBackText}>← Back</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalHeaderTitle} numberOfLines={1}>
+                  ⚖️ Adjust Stock
+                </Text>
+                <TouchableOpacity onPress={() => setIsAdjustModalVisible(false)} style={styles.modalTopCloseBtn}>
+                  <Text style={styles.modalTopCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#b45309', marginBottom: 4 }}>
+                {selectedHistoryItem?.medicine_name}
+              </Text>
+              <Text style={{ fontSize: 12, color: '#4b5563', marginBottom: 12 }}>
+                Current Stock: <Text style={{ fontWeight: 'bold', color: '#0f172a' }}>{selectedHistoryItem?.quantity || 0} {selectedHistoryItem?.unit || 'units'}</Text>
+              </Text>
+
+              {/* Direction Toggle */}
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (userRole !== 'ADMIN' && userRole !== 'DOCTOR') {
+                      return Alert.alert('Permission Denied', 'Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.');
+                    }
+                    setAdjustForm({ ...adjustForm, direction: 'REDUCE' });
+                  }}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    borderRadius: 6,
+                    alignItems: 'center',
+                    backgroundColor: adjustForm.direction === 'REDUCE' ? '#dc2626' : '#fee2e2',
+                    borderWidth: 1,
+                    borderColor: '#dc2626'
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: adjustForm.direction === 'REDUCE' ? '#fff' : '#b91c1c' }}>
+                    (-) Reduce Stock
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setAdjustForm({ ...adjustForm, direction: 'ADD' })}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    borderRadius: 6,
+                    alignItems: 'center',
+                    backgroundColor: adjustForm.direction === 'ADD' ? '#15803d' : '#dcfce7',
+                    borderWidth: 1,
+                    borderColor: '#15803d'
+                  }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: adjustForm.direction === 'ADD' ? '#fff' : '#166534' }}>
+                    (+) Add / Correct
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {userRole !== 'ADMIN' && userRole !== 'DOCTOR' && (
+                <Text style={{ fontSize: 11, color: '#dc2626', marginBottom: 10, fontWeight: '500' }}>
+                  🔒 Staff rule: Only Admin or Doctor can reduce stock. Staff can only make positive count corrections.
+                </Text>
+              )}
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Adjustment Quantity ({selectedHistoryItem?.unit || 'units'}) *
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 2, 5, 10..."
+                keyboardType="numeric"
+                value={adjustForm.quantity}
+                onChangeText={(v) => setAdjustForm({ ...adjustForm, quantity: v })}
+              />
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Adjustment Reason *
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {['Stock count correction', 'Damaged', 'Expired', 'Wastage', 'Returned to supplier', 'Other'].map(r => (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setAdjustForm({ ...adjustForm, reason_type: r })}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: adjustForm.reason_type === r ? '#b45309' : '#f3f4f6',
+                      borderWidth: 1,
+                      borderColor: adjustForm.reason_type === r ? '#b45309' : '#e5e7eb'
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: adjustForm.reason_type === r ? '#fff' : '#4b5563', fontWeight: adjustForm.reason_type === r ? 'bold' : 'normal' }}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
+                Detailed Audit Notes (Optional)
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Broken seal, expired batch inspection, shelf audit"
+                value={adjustForm.notes}
+                onChangeText={(v) => setAdjustForm({ ...adjustForm, notes: v })}
+              />
+
+              {/* Result Preview */}
+              {(() => {
+                const cur = parseFloat(selectedHistoryItem?.quantity) || 0;
+                const adj = parseFloat(adjustForm.quantity) || 0;
+                const signed = adjustForm.direction === 'REDUCE' ? -adj : adj;
+                const result = cur + signed;
+                return (
+                  <View style={{ backgroundColor: result < 0 ? '#fee2e2' : '#f8fafc', padding: 8, borderRadius: 6, borderWidth: 1, borderColor: result < 0 ? '#fca5a5' : '#cbd5e1', marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, color: result < 0 ? '#991b1b' : '#334155', fontWeight: 'bold' }}>
+                      {result < 0 ? '❌ Error: Resulting stock cannot be negative!' : `Preview: Current ${cur} → New ${result} ${selectedHistoryItem?.unit || 'units'}`}
+                    </Text>
+                  </View>
+                );
+              })()}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: '#6b7280' }]}
+                  onPress={() => setIsAdjustModalVisible(false)}
+                  disabled={adjustLoading}
+                >
+                  <Text style={styles.modalBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: '#b45309' }]}
+                  onPress={handleSaveAdjust}
+                  disabled={adjustLoading}
+                >
+                  {adjustLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.modalBtnText}>Confirm Adjustment</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
     </View>
   );
 }
