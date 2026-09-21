@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking, Modal } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking, Modal, Vibration } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -11,6 +11,7 @@ import SmartPharmacyCameraModal from '../components/SmartPharmacyCameraModal';
 
 import { HEADER_BANNER_BASE64, LOGO_BASE64 } from '../constants/billAssets';
 import { renameBillPdfAsync } from '../utils/billNaming';
+import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 
 export default function PharmacyBillingScreen({ navigation, route }) {
   const [inventory, setInventory] = useState([]);
@@ -37,12 +38,27 @@ export default function PharmacyBillingScreen({ navigation, route }) {
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+
   useEffect(() => {
+    // 1. Immediately hydrate from AsyncStorage cache for instant 0ms access
+    AsyncStorage.getItem('@cached_pharmacy_inventory').then(cached => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setInventory(parsed);
+          }
+        } catch (e) {}
+      }
+    });
+    // 2. Fetch fresh inventory from server
     fetchInventory();
   }, []);
 
   const fetchInventory = async () => {
     try {
+      setInventoryLoading(true);
       const token = await AsyncStorage.getItem('userToken');
       const res = await axios.get('https://skinssence-api.onrender.com/api/inventory', {
         headers: { Authorization: `Bearer ${token}` }
@@ -63,11 +79,44 @@ export default function PharmacyBillingScreen({ navigation, route }) {
         }
         return expVal < currentMonthVal;
       };
-      setInventory((res.data || []).filter(m => (m.quantity || 0) > 0 && !isExpClient(m.expiry_date)));
+      const activeItems = (res.data || []).filter(m => (m.quantity || 0) > 0 && !isExpClient(m.expiry_date));
+      setInventory(activeItems);
+      // Persist to local cache for instant future loads
+      AsyncStorage.setItem('@cached_pharmacy_inventory', JSON.stringify(activeItems)).catch(() => {});
     } catch (e) {
       console.error(e);
+    } finally {
+      setInventoryLoading(false);
     }
   };
+
+  // Smart relevance-ranked search:
+  // 1. Prefix match (item name starts with query) -> TOP PRIORITY
+  // 2. Word-boundary match (any word in item name starts with query) -> SECOND PRIORITY
+  // 3. Substring match (query anywhere in item name) -> THIRD PRIORITY
+  const filteredAndSortedInventory = useMemo(() => {
+    const q = (medSearchQ || '').trim().toLowerCase();
+    if (!q) return inventory;
+
+    return inventory
+      .filter(med => (med.medicine_name || '').toLowerCase().includes(q))
+      .sort((a, b) => {
+        const nameA = (a.medicine_name || '').toLowerCase();
+        const nameB = (b.medicine_name || '').toLowerCase();
+
+        const aStarts = nameA.startsWith(q);
+        const bStarts = nameB.startsWith(q);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+
+        const aWordStarts = nameA.split(/\s+/).some(w => w.startsWith(q));
+        const bWordStarts = nameB.split(/\s+/).some(w => w.startsWith(q));
+        if (aWordStarts && !bWordStarts) return -1;
+        if (!aWordStarts && bWordStarts) return 1;
+
+        return nameA.localeCompare(nameB);
+      });
+  }, [inventory, medSearchQ]);
 
   const handleSearchPatient = async (text) => {
     setSearchQ(text);
@@ -84,40 +133,80 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     }
   };
 
-  const addToCart = (med, forceComplimentary = null) => {
+  const updateQuantity = useCallback((id, delta) => {
+    try {
+      Vibration.vibrate(8);
+    } catch (e) {}
+
+    setCart(prevCart => {
+      const item = prevCart.find(c => c.id === id);
+      if (!item) return prevCart;
+
+      const newQty = item.qty + delta;
+      if (newQty <= 0) {
+        return prevCart.filter(c => c.id !== id);
+      }
+
+      if (delta > 0 && item.quantity && newQty > item.quantity) {
+        Alert.alert('Out of Stock', `Cannot add more than available stock (${item.quantity}).`);
+        return prevCart;
+      }
+
+      return prevCart.map(c => {
+        if (c.id === id) {
+          const effectivePrice = c.is_complimentary ? 0 : (c.unit_price !== undefined ? c.unit_price : (c.mrp || 0));
+          return {
+            ...c,
+            qty: newQty,
+            total: newQty * effectivePrice
+          };
+        }
+        return c;
+      });
+    });
+  }, []);
+
+  const addToCart = useCallback((med, forceComplimentary = null) => {
+    try {
+      Vibration.vibrate(8);
+    } catch (e) {}
+
     const isPiranid = (med.medicine_name || '').toLowerCase().includes('piranid');
     const complimentaryFlag = forceComplimentary !== null ? forceComplimentary : isPiranid;
-    const existing = cart.find(c => c.id === med.id);
-    if (existing) {
-      if (existing.qty >= med.quantity) {
-        Alert.alert('Out of Stock', 'Cannot add more than available stock.');
-        return;
+
+    setCart(prevCart => {
+      const existing = prevCart.find(c => c.id === med.id);
+      if (existing) {
+        if (med.quantity && existing.qty >= med.quantity) {
+          Alert.alert('Out of Stock', `Cannot add more than available stock (${med.quantity}).`);
+          return prevCart;
+        }
+        const isComp = forceComplimentary !== null ? forceComplimentary : existing.is_complimentary;
+        const unitPrice = isComp ? 0 : (med.mrp || 0);
+        const nextQty = existing.qty + 1;
+        return prevCart.map(c => c.id === med.id ? { 
+          ...c, 
+          qty: nextQty, 
+          is_complimentary: isComp, 
+          unit_price: unitPrice, 
+          total: nextQty * unitPrice 
+        } : c);
+      } else {
+        const defaultInstr = isPiranid 
+          ? 'Apply twice daily post-procedure' 
+          : (med.default_instructions ? med.default_instructions.split(',')[0].trim() : '');
+        const unitPrice = complimentaryFlag ? 0 : (med.mrp || 0);
+        return [...prevCart, { 
+          ...med, 
+          qty: 1, 
+          is_complimentary: complimentaryFlag, 
+          unit_price: unitPrice, 
+          total: unitPrice, 
+          instruction: defaultInstr 
+        }];
       }
-      const isComp = forceComplimentary !== null ? forceComplimentary : existing.is_complimentary;
-      const unitPrice = isComp ? 0 : med.mrp;
-      setCart(cart.map(c => c.id === med.id ? { 
-        ...c, 
-        qty: c.qty + 1, 
-        is_complimentary: isComp, 
-        unit_price: unitPrice, 
-        total: (c.qty + 1) * unitPrice 
-      } : c));
-    } else {
-      // Auto-fill instruction: Piranid default post-procedure or saved default_instructions
-      const defaultInstr = isPiranid 
-        ? 'Apply twice daily post-procedure' 
-        : (med.default_instructions ? med.default_instructions.split(',')[0].trim() : '');
-      const unitPrice = complimentaryFlag ? 0 : med.mrp;
-      setCart([...cart, { 
-        ...med, 
-        qty: 1, 
-        is_complimentary: complimentaryFlag, 
-        unit_price: unitPrice, 
-        total: unitPrice, 
-        instruction: defaultInstr 
-      }]);
-    }
-  };
+    });
+  }, []);
 
   const toggleComplimentary = (id) => {
     setCart(cart.map(c => {
@@ -439,6 +528,18 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     }
   };
 
+  const handleWhatsAppPDF = () => {
+    if (!completedSale?.pdfUri) {
+      Alert.alert('PDF Not Ready', 'The PDF bill file is not available yet.');
+      return;
+    }
+    shareBillToWhatsAppAsync({
+      pdfUri: completedSale.pdfUri,
+      filename: completedSale.pdfFilename,
+      patient: completedSale.patient
+    });
+  };
+
   const handleWhatsAppText = () => {
     if (!completedSale) return;
     const patientName = `${completedSale.patient?.first_name || ''}`.trim() || 'Patient';
@@ -590,38 +691,79 @@ export default function PharmacyBillingScreen({ navigation, route }) {
             style={styles.input} 
             placeholder="Search for a medicine..." 
             value={medSearchQ} 
-            onChangeText={setMedSearchQ} 
+            onChangeText={setMedSearchQ}
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            returnKeyType="search"
           />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-            {inventory.filter(med => med.medicine_name.toLowerCase().includes(medSearchQ.toLowerCase())).map(med => {
-              const isPiranid = (med.medicine_name || '').toLowerCase().includes('piranid');
-              return (
-                <View key={med.id} style={[styles.medCard, isPiranid && { borderColor: '#f472b6', borderWidth: 1.5, backgroundColor: '#fff5f7' }]}>
-                  <Text style={styles.medName}>{isPiranid ? '🎁 ' : ''}{med.medicine_name}</Text>
-                  <Text style={styles.medStock}>Stock: {med.quantity} • Batch: {med.batch_number || 'N/A'}</Text>
-                  <Text style={styles.medPrice}>Rs. {med.mrp}</Text>
-                  {isPiranid ? (
-                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
-                      <TouchableOpacity 
-                        style={{ flex: 1, backgroundColor: '#15803d', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4, alignItems: 'center' }} 
-                        onPress={() => addToCart(med, true)}>
-                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+ Free (₹0)</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={{ flex: 1, backgroundColor: '#5C0B0B', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4, alignItems: 'center' }} 
-                        onPress={() => addToCart(med, false)}>
-                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+ MRP (₹{med.mrp})</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <TouchableOpacity style={{ marginTop: 6, backgroundColor: '#5C0B0B', paddingVertical: 5, borderRadius: 4, alignItems: 'center' }} onPress={() => addToCart(med)}>
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>+ Add to Cart</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
-          </ScrollView>
+          {inventoryLoading && inventory.length === 0 ? (
+            <View style={{ paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+              <ActivityIndicator size="small" color="#5C0B0B" />
+              <Text style={{ color: '#64748b', fontSize: 13 }}>Loading pharmacy inventory...</Text>
+            </View>
+          ) : filteredAndSortedInventory.length === 0 ? (
+            <View style={{ paddingVertical: 16, paddingHorizontal: 12, alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', marginVertical: 4 }}>
+              <Text style={{ color: '#64748b', fontSize: 13, fontWeight: '500' }}>
+                {medSearchQ.trim() ? `No medicines matching "${medSearchQ.trim()}" found.` : 'No medicines available in stock.'}
+              </Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+              {filteredAndSortedInventory.map(med => {
+                const isPiranid = (med.medicine_name || '').toLowerCase().includes('piranid');
+                return (
+                  <View key={med.id} style={[styles.medCard, isPiranid && { borderColor: '#f472b6', borderWidth: 1.5, backgroundColor: '#fff5f7' }]}>
+                    <Text style={styles.medName}>{isPiranid ? '🎁 ' : ''}{med.medicine_name}</Text>
+                    <Text style={styles.medStock}>Stock: {med.quantity} • Batch: {med.batch_number || 'N/A'}</Text>
+                    <Text style={styles.medPrice}>Rs. {med.mrp}</Text>
+                    {isPiranid ? (
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+                        <TouchableOpacity 
+                          style={{ flex: 1, backgroundColor: '#15803d', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4, alignItems: 'center' }} 
+                          onPress={() => addToCart(med, true)}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+ Free (₹0)</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={{ flex: 1, backgroundColor: '#5C0B0B', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4, alignItems: 'center' }} 
+                          onPress={() => addToCart(med, false)}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+ MRP (₹{med.mrp})</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      cart.find(c => c.id === med.id)?.qty > 0 ? (
+                        <View style={styles.medCardStepper}>
+                          <TouchableOpacity 
+                            style={styles.medCardStepBtnMinus} 
+                            activeOpacity={0.5} 
+                            touchSoundDisabled={false}
+                            onPress={() => updateQuantity(med.id, -1)}>
+                            <Text style={styles.medCardStepBtnMinusText}>−</Text>
+                          </TouchableOpacity>
+                          <Text style={styles.medCardQtyText}>{cart.find(c => c.id === med.id)?.qty} in cart</Text>
+                          <TouchableOpacity 
+                            style={styles.medCardStepBtnPlus} 
+                            activeOpacity={0.5} 
+                            touchSoundDisabled={false}
+                            onPress={() => updateQuantity(med.id, 1)}>
+                            <Text style={styles.medCardStepBtnPlusText}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity 
+                          style={styles.medCardAddBtn} 
+                          activeOpacity={0.6} 
+                          touchSoundDisabled={false}
+                          onPress={() => addToCart(med)}>
+                          <Text style={styles.medCardAddBtnText}>+ Add to Cart</Text>
+                        </TouchableOpacity>
+                      )
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
         </View>
 
         {/* Cart */}
@@ -640,9 +782,30 @@ export default function PharmacyBillingScreen({ navigation, route }) {
                       </View>
                     )}
                   </View>
-                  <Text style={styles.cartQty}>
-                    Qty: {c.qty} x {c.is_complimentary ? 'Rs. 0 (Free)' : `Rs. ${c.mrp}`}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8 }}>
+                    <View style={styles.stepperContainer}>
+                      <TouchableOpacity 
+                        style={styles.stepperBtn} 
+                        activeOpacity={0.5} 
+                        touchSoundDisabled={false}
+                        onPress={() => updateQuantity(c.id, -1)}>
+                        <Text style={styles.stepperBtnText}>−</Text>
+                      </TouchableOpacity>
+                      <View style={styles.stepperValueBox}>
+                        <Text style={styles.stepperValueText}>{c.qty}</Text>
+                      </View>
+                      <TouchableOpacity 
+                        style={styles.stepperBtn} 
+                        activeOpacity={0.5} 
+                        touchSoundDisabled={false}
+                        onPress={() => updateQuantity(c.id, 1)}>
+                        <Text style={styles.stepperBtnText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.cartUnitPriceText}>
+                      x {c.is_complimentary ? 'Rs. 0 (Free)' : `Rs. ${c.mrp}`}
+                    </Text>
+                  </View>
                 </View>
                 <View style={{alignItems: 'flex-end', marginLeft: 10}}>
                   <Text style={[styles.cartTotal, c.is_complimentary && {color: '#16a34a'}]}>
@@ -843,8 +1006,8 @@ export default function PharmacyBillingScreen({ navigation, route }) {
                     <Text style={styles.modalActionBtnText}>🖨️ View / Print PDF Bill</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.modalActionBtnWhatsApp} onPress={handleWhatsAppText}>
-                    <Text style={styles.modalActionBtnText}>💬 Send WhatsApp Text Receipt</Text>
+                  <TouchableOpacity style={styles.modalActionBtnWhatsApp} onPress={handleWhatsAppPDF}>
+                    <Text style={styles.modalActionBtnText}>💬 Send WhatsApp PDF Bill</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.modalActionBtnSecondary} onPress={handleSharePDF}>
@@ -982,6 +1145,103 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     marginTop: 3
+  },
+
+
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    overflow: 'hidden'
+  },
+  stepperBtn: {
+    width: 32,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff'
+  },
+  stepperBtnText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#334155'
+  },
+  stepperValueBox: {
+    paddingHorizontal: 12,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  stepperValueText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#0f172a'
+  },
+  cartUnitPriceText: {
+    color: '#64748b',
+    fontSize: 13,
+    fontWeight: '500'
+  },
+  medCardStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    backgroundColor: '#fdf2f2',
+    borderRadius: 6,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: '#fca5a5'
+  },
+  medCardStepBtnMinus: {
+    width: 26,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 4
+  },
+  medCardStepBtnMinusText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#b91c1c'
+  },
+  medCardQtyText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#5C0B0B'
+  },
+  medCardStepBtnPlus: {
+    width: 26,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5C0B0B',
+    borderRadius: 4
+  },
+  medCardStepBtnPlusText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#fff'
+  },
+  medCardAddBtn: {
+    marginTop: 6,
+    backgroundColor: '#5C0B0B',
+    paddingVertical: 5,
+    borderRadius: 4,
+    alignItems: 'center'
+  },
+  medCardAddBtnText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold'
   },
 
   container: { flex: 1, backgroundColor: '#f4f6f9' },
