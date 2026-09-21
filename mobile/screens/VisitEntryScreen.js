@@ -99,15 +99,16 @@ export default function VisitEntryScreen({ route, navigation }) {
   const procTotal = procedures.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
   const cFeeNum = parseFloat(consultationFee) || 0;
   
-  // Total billable value of the visit
-  const subtotal = (entryMode === 'STANDARD' ? procTotal + cFeeNum : 0) + pharmacyTotal;
+  // Total billable value of THIS visit (procedures + consultation)
+  // Pharmacy items are billed separately under their own Pharmacy Bill to prevent duplicate items and doubled bills.
+  const subtotal = (entryMode === 'STANDARD' ? procTotal + cFeeNum : 0);
   const netPayable = Math.max(0, subtotal - (discount?.amount || 0));
 
-  // Actual amount payable TODAY (excluding procedure if client hasn't paid for it yet)
+  // Actual amount payable for THIS visit TODAY (excluding procedure if client hasn't paid for it yet)
   const payableProcToday = (entryMode === 'STANDARD' && procedurePaidToday) ? procTotal : 0;
-  const subtotalPayableToday = (entryMode === 'STANDARD' ? payableProcToday + cFeeNum : 0) + pharmacyTotal;
+  const subtotalPayableToday = (entryMode === 'STANDARD' ? payableProcToday + cFeeNum : 0);
   const netPayableToday = Math.max(0, subtotalPayableToday - (discount?.amount || 0));
-  const collectNow = Math.max(0, netPayableToday - pharmacyPaid - (alreadyPaidAtRegistration || 0));
+  const collectNow = Math.max(0, netPayableToday - (alreadyPaidAtRegistration || 0));
 
   // Clinic Rule: If any procedure is performed with fee, consultation fee automatically becomes ₹0
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function VisitEntryScreen({ route, navigation }) {
       const totalToRecord = (alreadyPaidAtRegistration || 0) + collectNow;
       setFormData(prev => ({ ...prev, amount_received: totalToRecord.toString() }));
     }
-  }, [procedures, consultationFee, pharmacyTotal, pharmacyPaid, entryMode, discount, procedurePaidToday, alreadyPaidAtRegistration]);
+  }, [procedures, consultationFee, entryMode, discount, procedurePaidToday, alreadyPaidAtRegistration]);
 
   const fetchActivePackages = async () => {
     try {
@@ -314,8 +315,8 @@ export default function VisitEntryScreen({ route, navigation }) {
         existing_visit_id: existingVisitId || null,
         notes: formData.notes,
         consultation_fee: (entryMode === 'REDEEM_PACKAGE' || entryMode === 'SELL_PACKAGE') ? 0 : cFeeNum,
-        medicine_details: pharmacyMeds.map(m => m.details).join(', '),
-        medicine_amount: pharmacyTotal,
+        medicine_details: '', // Kept separate under the Pharmacy Bill to prevent duplicate items
+        medicine_amount: 0,
         payment_mode: formData.payment_mode,
         subtotal: subtotal,
         discount_type: discount.type,
@@ -534,15 +535,15 @@ export default function VisitEntryScreen({ route, navigation }) {
           <TextInput style={[styles.input, { height: 70 }]} multiline value={formData.notes} onChangeText={(v) => handleInputChange('notes', v)} placeholder="Doctor clinical notes..." />
         </View>
 
-        {/* 3. PHARMACY MEDICINES SECTION (AUTOMATICALLY SYNCHRONIZED) */}
+        {/* 3. PHARMACY MEDICINES SECTION (SEPARATELY BILLED) */}
         <View style={styles.section}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
-            <Text style={styles.sectionTitle}>💊 Pharmacy Medicines</Text>
+            <Text style={styles.sectionTitle}>💊 Pharmacy Medicines (Separate Bill)</Text>
             {fetchingPharmacy ? (
               <ActivityIndicator size="small" color="#5C0B0B" />
             ) : (
               <TouchableOpacity onPress={() => fetchPharmacyForDate(visitDate)} style={styles.syncBtn}>
-                <Text style={styles.syncBtnText}>🔄 Sync Bill</Text>
+                <Text style={styles.syncBtnText}>🔄 Refresh</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -550,9 +551,12 @@ export default function VisitEntryScreen({ route, navigation }) {
           {pharmacyMeds.length > 0 ? (
             <View style={styles.pharmacyListBox}>
               <View style={styles.pharmacyHeaderRow}>
-                <Text style={styles.pharmacyBadge}>✓ {pharmacyMeds.length} Items from Pharmacy Bill</Text>
+                <Text style={styles.pharmacyBadge}>✓ {pharmacyMeds.length} Items Billed in Pharmacy</Text>
                 <Text style={styles.pharmacyTotalText}>Total: Rs. {pharmacyTotal.toFixed(0)}</Text>
               </View>
+              <Text style={{fontSize: 11, color: '#166534', marginBottom: 6, fontStyle: 'italic'}}>
+                ℹ️ Billed separately under Pharmacy Bill. This visit records only procedures & consultation to prevent double billing.
+              </Text>
               {pharmacyMeds.map((m, idx) => (
                 <View key={idx} style={styles.pharmacyMedRow}>
                   <Text style={styles.pharmacyMedDetails}>• {m.details}</Text>
@@ -562,7 +566,7 @@ export default function VisitEntryScreen({ route, navigation }) {
               {pharmacyPaid > 0 && (
                 <View style={styles.pharmacyPaidNotice}>
                   <Text style={{color: '#15803d', fontSize: 13, fontWeight: 'bold'}}>
-                    ✓ Already paid in Pharmacy: Rs. {pharmacyPaid.toFixed(0)}
+                    ✓ Already paid at Pharmacy counter: Rs. {pharmacyPaid.toFixed(0)}
                   </Text>
                 </View>
               )}
@@ -680,14 +684,19 @@ export default function VisitEntryScreen({ route, navigation }) {
               </View>
             )}
             {pharmacyTotal > 0 && (
-              <View style={styles.calcRow}>
-                <Text style={styles.calcLabel}>Pharmacy Medicines Total</Text>
-                <Text style={styles.calcValue}>Rs. {pharmacyTotal.toFixed(0)}</Text>
+              <View style={[styles.calcRow, {backgroundColor: '#f0fdf4', padding: 8, borderRadius: 6, marginVertical: 4, borderWidth: 1, borderColor: '#bbf7d0'}]}>
+                <View style={{flex: 1}}>
+                  <Text style={{fontSize: 12, color: '#166534', fontWeight: 'bold'}}>Separate Pharmacy Bill (Today)</Text>
+                  <Text style={{fontSize: 11, color: '#15803d'}}>Handled separately at Pharmacy counter</Text>
+                </View>
+                <Text style={{fontSize: 13, fontWeight: 'bold', color: '#166534'}}>
+                  Rs. {pharmacyTotal.toFixed(0)} {pharmacyPaid >= pharmacyTotal ? '(Paid)' : ''}
+                </Text>
               </View>
             )}
             <View style={styles.calcDivider} />
             <View style={styles.calcRow}>
-              <Text style={styles.calcGrandLabel}>BILL SUBTOTAL</Text>
+              <Text style={styles.calcGrandLabel}>VISIT SUBTOTAL</Text>
               <Text style={styles.calcGrandValue}>Rs. {subtotal.toFixed(0)}</Text>
             </View>
 
@@ -702,19 +711,19 @@ export default function VisitEntryScreen({ route, navigation }) {
 
             {discount.amount > 0 && (
               <View style={[styles.calcRow, {marginTop: 6}]}>
-                <Text style={{fontSize: 14, fontWeight: 'bold', color: '#111827'}}>TOTAL AMOUNT</Text>
+                <Text style={{fontSize: 14, fontWeight: 'bold', color: '#111827'}}>TOTAL AMOUNT (VISIT)</Text>
                 <Text style={{fontSize: 15, fontWeight: 'bold', color: '#5C0B0B'}}>Rs. {netPayable.toFixed(0)}</Text>
               </View>
             )}
 
-            {pharmacyPaid > 0 && (
+            {alreadyPaidAtRegistration > 0 && (
               <View style={styles.calcRow}>
-                <Text style={{color: '#ef4444', fontSize: 13}}>Already Paid in Pharmacy</Text>
-                <Text style={{color: '#ef4444', fontWeight: 'bold'}}>- Rs. {pharmacyPaid.toFixed(0)}</Text>
+                <Text style={{color: '#15803d', fontSize: 13}}>Already Paid at Registration</Text>
+                <Text style={{color: '#15803d', fontWeight: 'bold'}}>- Rs. {alreadyPaidAtRegistration.toFixed(0)}</Text>
               </View>
             )}
             <View style={[styles.calcRow, {marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#e5e7eb'}]}>
-              <Text style={styles.collectNowLabel}>AMOUNT TO COLLECT TODAY</Text>
+              <Text style={styles.collectNowLabel}>AMOUNT TO COLLECT FOR VISIT</Text>
               <Text style={styles.collectNowValue}>Rs. {collectNow.toFixed(0)}</Text>
             </View>
           </View>
@@ -729,7 +738,7 @@ export default function VisitEntryScreen({ route, navigation }) {
           </View>
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            <Text style={[styles.label, { marginTop: 0 }]}>Amount Received Today (Rs.)</Text>
+            <Text style={[styles.label, { marginTop: 0 }]}>Amount Received for Visit (Rs.)</Text>
             <Text style={{ fontSize: 11, color: '#6b7280' }}>Actual cash/UPI collected</Text>
           </View>
           <TextInput
@@ -746,17 +755,8 @@ export default function VisitEntryScreen({ route, navigation }) {
               style={styles.quickFillBtn}
               onPress={() => handleInputChange('amount_received', collectNow.toFixed(0))}
             >
-              <Text style={styles.quickFillText}>Rs. {collectNow.toFixed(0)} (Full Today)</Text>
+              <Text style={styles.quickFillText}>Rs. {collectNow.toFixed(0)} (Full Visit)</Text>
             </TouchableOpacity>
-
-            {pharmacyTotal > 0 && Math.max(0, pharmacyTotal - pharmacyPaid) > 0 && (
-              <TouchableOpacity
-                style={styles.quickFillBtn}
-                onPress={() => handleInputChange('amount_received', Math.max(0, pharmacyTotal - pharmacyPaid).toFixed(0))}
-              >
-                <Text style={styles.quickFillText}>Meds Only (Rs. {Math.max(0, pharmacyTotal - pharmacyPaid).toFixed(0)})</Text>
-              </TouchableOpacity>
-            )}
 
             <TouchableOpacity
               style={[styles.quickFillBtn, { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}
@@ -768,7 +768,7 @@ export default function VisitEntryScreen({ route, navigation }) {
         </View>
 
         <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>✓ Save Visit & Synchronize Bill</Text>}
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>✓ Save Visit Record</Text>}
         </TouchableOpacity>
       </ScrollView>
 
