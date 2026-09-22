@@ -11,6 +11,13 @@ try {
 }
 const db = require('./db');
 
+// Ensure unit_price and total_amount exist on inventory_stock_movements for Clinic Use tracking
+try {
+  db.run('ALTER TABLE inventory_stock_movements ADD COLUMN unit_price REAL DEFAULT 0', () => {});
+  db.run('ALTER TABLE inventory_stock_movements ADD COLUMN total_amount REAL DEFAULT 0', () => {});
+} catch (eMigration) {}
+
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -2245,24 +2252,23 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
   const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
   const id = req.params.id;
-  const { quantity, reason_type = 'Stock count correction', notes = '' } = req.body;
+  const { quantity, reason_type = 'Stock count correction', notes = '', unit_price: reqUnitPrice } = req.body;
   const delta = parseFloat(quantity);
 
   if (isNaN(delta) || delta === 0) {
     return res.status(400).json({ error: 'Adjustment quantity cannot be zero.' });
   }
 
-  // Staff cannot reduce stock
+  // Staff cannot reduce stock unless it is a clinic consumption authorized by doctor
   if (!isPrivileged && delta < 0) {
     return res.status(403).json({
       error: 'Permission denied: Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.'
     });
   }
 
+  const isClinicUse = (reason_type && (reason_type.includes('Clinic') || reason_type.includes('Procedure')));
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
-  const fullReason = [reason_type, notes].filter(Boolean).join(': ');
-  const movementType = delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT');
 
   db.serialize(() => {
     db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
@@ -2290,13 +2296,19 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
             return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
           }
 
+          const unitVal = parseFloat(reqUnitPrice) || parseFloat(item.mrp) || 0;
+          const totalVal = Math.abs(delta) * unitVal;
+          const movementType = isClinicUse ? 'CLINIC_USE' : (delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT'));
+          const valueText = totalVal > 0 ? `Value: ₹${Math.round(totalVal)} (@₹${unitVal}/unit)` : '';
+          const fullReason = [reason_type, notes, valueText].filter(Boolean).join(' • ');
+
           db.run(
             `INSERT INTO inventory_stock_movements (
               item_id, medicine_name, batch_number, movement_type, quantity,
               previous_quantity, new_quantity, reason, reference_type, reference_id,
-              user_id, user_name, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'STOCK_ADJUSTMENT', ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [id, item.medicine_name, item.batch_number || '', movementType, delta, prevQty, newQty, fullReason, String(id), userId, userName],
+              user_id, user_name, unit_price, total_amount, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'STOCK_ADJUSTMENT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+            [id, item.medicine_name, item.batch_number || '', movementType, delta, prevQty, newQty, fullReason, String(id), userId, userName, unitVal, totalVal],
             function(errIns) {
               if (errIns) {
                 return db.run('ROLLBACK', () => res.status(500).json({ error: errIns.message }));
@@ -2324,6 +2336,37 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
 });
 
 // Full Item Details & Stock Movement History
+
+// GLOBAL CLINIC / IN-HOUSE CONSUMPTION SUMMARY
+app.get('/api/inventory/clinic-use/summary', authenticateToken, (req, res) => {
+  const sql = `
+    SELECT m.*, i.unit, i.mrp
+    FROM inventory_stock_movements m
+    LEFT JOIN inventory i ON m.item_id = i.id
+    WHERE m.movement_type = 'CLINIC_USE' OR m.reason LIKE '%Clinic%'
+    ORDER BY m.created_at DESC, m.id DESC
+    LIMIT 200
+  `;
+  db.all(sql, [], (err, rows = []) => {
+    if (err) return res.status(500).json({ error: err.message });
+    let totalQty = 0;
+    let totalAmount = 0;
+    rows.forEach(r => {
+      const q = Math.abs(parseFloat(r.quantity) || 0);
+      const amt = parseFloat(r.total_amount) || (q * (parseFloat(r.unit_price) || parseFloat(r.mrp) || 0));
+      totalQty += q;
+      totalAmount += amt;
+      r.total_amount = amt;
+    });
+    res.json({
+      total_quantity_consumed: totalQty,
+      total_amount_consumed: Math.round(totalAmount),
+      items_count: rows.length,
+      records: rows
+    });
+  });
+});
+
 app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
   const id = req.params.id;
   const { type, startDate, endDate, user } = req.query;
@@ -2336,8 +2379,10 @@ app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
     const params = [id];
 
     if (type && type !== 'ALL') {
-      if (type === 'REDUCED_OR_ADJUSTED') {
-        sql += ` AND (movement_type IN ('REDUCED', 'ADJUSTMENT') OR quantity < 0)`;
+      if (type === 'CLINIC_USE') {
+        sql += ` AND (movement_type = 'CLINIC_USE' OR reason LIKE '%Clinic%')`;
+      } else if (type === 'REDUCED_OR_ADJUSTED') {
+        sql += ` AND (movement_type IN ('REDUCED', 'ADJUSTMENT') OR quantity < 0) AND movement_type != 'CLINIC_USE'`;
       } else {
         sql += ` AND movement_type = ?`;
         params.push(type);
@@ -2372,12 +2417,21 @@ app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
         let totalSold = 0;
         let totalReduced = 0;
         let totalAdjustments = 0;
+        let totalClinicUse = 0;
+        let totalClinicUseAmount = 0;
         let lastAdded = null;
         let lastSold = null;
 
         (allMovs || []).forEach(m => {
           const q = parseFloat(m.quantity) || 0;
           const mType = (m.movement_type || '').toUpperCase();
+          const rStr = (m.reason || '').toUpperCase();
+
+          if (mType === 'CLINIC_USE' || rStr.includes('CLINIC')) {
+            totalClinicUse += Math.abs(q);
+            const mVal = parseFloat(m.total_amount) || (Math.abs(q) * (parseFloat(m.unit_price) || parseFloat(item.mrp) || 0));
+            totalClinicUseAmount += mVal;
+          }
 
           if (mType === 'ADDED' || mType === 'OPENING_STOCK' || (mType === 'ADJUSTMENT' && q > 0)) {
             totalAdded += Math.abs(q);
@@ -2393,7 +2447,7 @@ app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
             totalReduced += Math.abs(q);
           }
 
-          if (mType === 'ADJUSTMENT' || mType === 'REDUCED') {
+          if (mType === 'ADJUSTMENT' || mType === 'REDUCED' || mType === 'CLINIC_USE') {
             totalAdjustments += 1;
           }
         });
@@ -2412,6 +2466,8 @@ app.get('/api/inventory/:id/history', authenticateToken, (req, res) => {
             total_sold: totalSold,
             total_reduced: totalReduced,
             total_adjustments: totalAdjustments,
+          total_clinic_use: totalClinicUse,
+          total_clinic_use_amount: Math.round(totalClinicUseAmount),
             last_added: lastAdded,
             last_sold: lastSold
           },
