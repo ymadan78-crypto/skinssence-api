@@ -268,33 +268,77 @@ function setupLeadRoutes(app, db, authenticateToken, writeAudit) {
   // (Ensures call is not lost while preventing Lead duplication)
   // -------------------------------------------------------------
   app.post('/api/leads/log-patient-call', authenticateToken, (req, res) => {
-    const { patient_id, skinssence_id, call_type = 'Incoming Call', call_outcome, notes } = req.body;
+    const {
+      patient_id,
+      skinssence_id,
+      mobile = '',
+      call_type = 'Incoming Call',
+      call_outcome,
+      notes,
+      ai_transcript = '',
+      ai_summary_json = null,
+      recording_file_name = ''
+    } = req.body;
+
     if (!patient_id && !skinssence_id) {
       return res.status(400).json({ error: 'patient_id or skinssence_id is required' });
     }
 
     const userId = req.user?.id || 1;
-    const userName = req.user?.username || 'Staff';
+    const userName = req.user?.username || req.user?.name || 'Staff';
     const auditSummary = `${call_type}: ${call_outcome || 'Received call'}${notes ? ` - ${notes}` : ''}`;
 
     if (typeof writeAudit === 'function') {
       writeAudit(req.user, 'PATIENT_CALL_LOGGED', 'patients', String(skinssence_id || patient_id), null, {
         patient_id,
         skinssence_id,
+        mobile,
         call_type,
         call_outcome,
         notes,
+        recording_file_name,
+        ai_transcript,
         logged_by: userName
       }, auditSummary);
     }
 
-    res.json({
-      message: 'Patient call activity logged successfully',
-      success: true,
-      patient_id: patient_id || skinssence_id,
-      call_outcome,
-      logged_at: new Date().toISOString()
-    });
+    // Record interaction in lead_interactions with skinssence_id to preserve call notes and audio reference
+    const targetRef = String(skinssence_id || patient_id);
+    db.run(
+      `INSERT INTO lead_interactions (
+        lead_id, interaction_type, staff_id, staff_name, summary, notes, recording_ref
+      ) VALUES (?, 'PATIENT_CALL_AI_LOGGED', ?, ?, ?, ?, ?)`,
+      [
+        targetRef,
+        userId,
+        userName,
+        auditSummary,
+        notes || (typeof ai_summary_json === 'object' ? JSON.stringify(ai_summary_json) : ''),
+        recording_file_name || ''
+      ],
+      (err) => {
+        if (err) console.warn('[Log Patient Call] could not insert into lead_interactions:', err.message);
+
+        // If an existing lead exists for this mobile number, mark recording as completed
+        const norm = normalizeIndianMobile(mobile);
+        if (norm) {
+          db.run(
+            `UPDATE leads SET recording_status = 'COMPLETED', recording_file_name = ?, last_contact_at = CURRENT_TIMESTAMP WHERE normalized_mobile = ?`,
+            [recording_file_name || '', norm],
+            () => {}
+          );
+        }
+
+        res.json({
+          message: 'Patient call activity logged successfully',
+          success: true,
+          patient_id: patient_id || skinssence_id,
+          call_outcome,
+          recording_file_name,
+          logged_at: new Date().toISOString()
+        });
+      }
+    );
   });
 
   // -------------------------------------------------------------
@@ -1354,8 +1398,39 @@ Return ONLY valid JSON. Do not include markdown formatting.`;
 
       if (!response.ok) {
         const errText = await response.text();
-        console.error('[Gemini Audio Error]', response.status, errText);
-        return res.status(502).json({ error: `Gemini API returned error ${response.status}: ${errText}` });
+        console.warn('[Gemini Audio Warning]', response.status, errText);
+        // Do not crash the entire call scanning pipeline; provide an actionable draft
+        const fallbackSummary = {
+          call_classification: existingPatient ? 'EXISTING_CLIENT' : 'POTENTIAL_CLIENT',
+          lead_intent: 'INFO_ENQUIRY',
+          lead_name: existingPatient ? existingPatient.name : (caller_name || 'Caller'),
+          phone_number: mobile || '',
+          call_type: call_type || 'INCOMING',
+          service_interest: 'Other',
+          main_concern: 'Call recorded on phone. Audio could not be processed by AI (unsupported format, silent, or corrupted audio).',
+          questions_asked: [],
+          price_discussed: 'Not Discussed',
+          appointment_requested: false,
+          appointment_booked: false,
+          follow_up_required: true,
+          follow_up_date: getTodayString(),
+          urgency: 'Normal',
+          lead_temperature: 'Warm',
+          staff_action_required: 'Check recording manually on device and call back.',
+          important_notes: `Recording: ${recording_file_name}. Audio could not be transcribed (${response.status}).`,
+          transcript: `[System]: Audio file could not be parsed by AI model (${response.status}). Call duration was ${call_duration}s.`,
+          confidence: 0.2,
+          existing_patient: existingPatient || null,
+          audio_error: true
+        };
+
+        return res.json({
+          success: true,
+          ai_summary: fallbackSummary,
+          recording_file_name,
+          processing_status: 'PARTIAL_AUDIO_ERROR',
+          notice: 'Audio could not be transcribed by Gemini. Saved draft for manual review.'
+        });
       }
 
       const geminiData = await response.json();
