@@ -3418,10 +3418,24 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
   const d = new Date(parseInt(currMonthKey.split('-')[0], 10), parseInt(currMonthKey.split('-')[1], 10) - 2, 1);
   const prevMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
+  // First fetch first visit ever for every patient to accurately identify New (first time) patients
   db.all(`
-    SELECT v.id, v.consultation_fee, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
-    FROM visits v
-  `, [], (errV, visitRows) => {
+    SELECT patient_id, MIN(date(visit_date)) as first_visit_date, strftime('%Y-%m', MIN(visit_date)) as first_month_key
+    FROM visits
+    WHERE patient_id IS NOT NULL
+    GROUP BY patient_id
+  `, [], (errFirst, firstVisits = []) => {
+    if (errFirst) return res.status(500).json({ error: errFirst.message });
+
+    const firstVisitMap = {};
+    firstVisits.forEach(fv => {
+      if (fv.patient_id) firstVisitMap[fv.patient_id] = fv;
+    });
+
+    db.all(`
+      SELECT v.id, v.patient_id, v.consultation_fee, date(v.visit_date) as visit_date, strftime('%Y-%m', v.visit_date) as month_key
+      FROM visits v
+    `, [], (errV, visitRows) => {
     if (errV) return res.status(500).json({ error: errV.message });
 
     db.all(`
@@ -3478,6 +3492,16 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
           const todayMedUnitsSold = todayMeds.reduce((s, m) => s + parseMedicineDetails(m.details).qty, 0);
           const todayTotalClinicSale = todayConsultationRevenue + todayProcRevenue + todayMedRevenue;
 
+          // Today's patient footfall calculation
+          const todayPatientSet = new Set(todayVisits.filter(v => v.patient_id).map(v => v.patient_id));
+          let todayNewPatients = 0;
+          todayPatientSet.forEach(pId => {
+            const fv = firstVisitMap[pId];
+            if (fv && fv.first_visit_date === todayStr) {
+              todayNewPatients++;
+            }
+          });
+
           const todayStats = {
             totalClinicSale: todayTotalClinicSale,
             packageRedemptionValue: todayRedeemedSessionsValue,
@@ -3487,7 +3511,10 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
             procedureSessions: todayProcSessions,
             medicineRevenue: todayMedRevenue,
             medicineTransactions: todayMedTransactions,
-            medicineUnitsSold: todayMedUnitsSold
+            medicineUnitsSold: todayMedUnitsSold,
+            totalPatients: todayPatientSet.size,
+            newPatients: todayNewPatients,
+            returningPatients: Math.max(0, todayPatientSet.size - todayNewPatients)
           };
 
           // 2. MONTHS MAP
@@ -3507,6 +3534,11 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
                 medicineTransactions: 0,
                 medicineUnitsSold: 0,
                 totalClinicSale: 0,
+                totalPatients: 0,
+                newPatients: 0,
+                returningPatients: 0,
+                patientSet: new Set(),
+                newPatientSet: new Set(),
                 procedures: {},
                 medicines: {},
                 dailyMap: {}
@@ -3519,10 +3551,18 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
           getOrInitMonth(currMonthKey);
           getOrInitMonth(prevMonthKey);
 
-          // Process Consultations
+          // Process Consultations & Patient Footfall
           visits.forEach(v => {
             const mKey = v.month_key || currMonthKey;
             const mObj = getOrInitMonth(mKey);
+
+            if (v.patient_id) {
+              mObj.patientSet.add(v.patient_id);
+              const fv = firstVisitMap[v.patient_id];
+              if (fv && fv.first_month_key === mKey) {
+                mObj.newPatientSet.add(v.patient_id);
+              }
+            }
             const cFee = parseFloat(v.consultation_fee) || 0;
             if (cFee > 0) {
               mObj.consultationRevenue += cFee;
@@ -3595,6 +3635,11 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
         mObj.totalSale = mObj.procedureRevenue + mObj.medicineRevenue;
         mObj.totalClinicSale = mObj.totalSale;
         mObj.avgMedicineSale = mObj.medicineTransactions > 0 ? (mObj.medicineRevenue / mObj.medicineTransactions) : 0;
+        mObj.totalPatients = mObj.patientSet ? mObj.patientSet.size : 0;
+        mObj.newPatients = mObj.newPatientSet ? mObj.newPatientSet.size : 0;
+        mObj.returningPatients = Math.max(0, mObj.totalPatients - mObj.newPatients);
+        delete mObj.patientSet;
+        delete mObj.newPatientSet;
 
         // Procedure Rankings
         const procList = Object.values(mObj.procedures).map(p => ({
@@ -3646,6 +3691,8 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
         totalSale: { curr: currMonthObj.totalClinicSale, prev: prevMonthObj.totalClinicSale, ...calcChange(currMonthObj.totalClinicSale, prevMonthObj.totalClinicSale) },
         procedureRevenue: { curr: currMonthObj.procedureRevenue, prev: prevMonthObj.procedureRevenue, ...calcChange(currMonthObj.procedureRevenue, prevMonthObj.procedureRevenue) },
         medicineRevenue: { curr: currMonthObj.medicineRevenue, prev: prevMonthObj.medicineRevenue, ...calcChange(currMonthObj.medicineRevenue, prevMonthObj.medicineRevenue) },
+        totalPatients: { curr: currMonthObj.totalPatients || 0, prev: prevMonthObj.totalPatients || 0, ...calcChange(currMonthObj.totalPatients || 0, prevMonthObj.totalPatients || 0) },
+        newPatients: { curr: currMonthObj.newPatients || 0, prev: prevMonthObj.newPatients || 0, ...calcChange(currMonthObj.newPatients || 0, prevMonthObj.newPatients || 0) },
         procedureSessions: { curr: currMonthObj.procedureSessions, prev: prevMonthObj.procedureSessions, ...calcChange(currMonthObj.procedureSessions, prevMonthObj.procedureSessions) },
         medicineTransactions: { curr: currMonthObj.medicineTransactions, prev: prevMonthObj.medicineTransactions, ...calcChange(currMonthObj.medicineTransactions, prevMonthObj.medicineTransactions) }
       };
@@ -3667,6 +3714,7 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
         months: {},
         years: {}
       });
+    });
     });
   });
   });
