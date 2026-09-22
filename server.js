@@ -3858,6 +3858,11 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                       badge_color: '#3b82f6',
                       time: time,
                       patient_id: v.patient_id,
+                      first_name: v.first_name,
+                      last_name: v.last_name,
+                      skinssence_id: v.skinssence_id,
+                      mobile: v.mobile,
+                      patient_name: pName,
                       visit_id: v.visit_id
                     });
                   }
@@ -3885,6 +3890,11 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                       badge_color: '#8b5cf6',
                       time: time,
                       patient_id: v ? v.patient_id : null,
+                      first_name: v ? v.first_name : null,
+                      last_name: v ? v.last_name : null,
+                      skinssence_id: v ? v.skinssence_id : null,
+                      mobile: v ? v.mobile : null,
+                      patient_name: pName,
                       visit_id: p.visit_id
                     });
                   } else if (nameUpper.includes('[REDEEMED SESSION') || amt === 0) {
@@ -3941,6 +3951,11 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                     badge_color: '#d97706',
                     time: time,
                     patient_id: v ? v.patient_id : null,
+                    first_name: v ? v.first_name : null,
+                    last_name: v ? v.last_name : null,
+                    skinssence_id: v ? v.skinssence_id : null,
+                    mobile: v ? v.mobile : null,
+                    patient_name: pName,
                     visit_id: m.visit_id,
                     medicine_id: m.id
                   });
@@ -3966,6 +3981,11 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                     badge_color: '#16a34a',
                     time: time,
                     patient_id: pay.patient_id,
+                    first_name: pay.first_name,
+                    last_name: pay.last_name,
+                    skinssence_id: pay.skinssence_id,
+                    mobile: pay.mobile,
+                    patient_name: pName,
                     visit_id: pay.visit_id,
                     payment_id: pay.id,
                     payment_mode: mode
