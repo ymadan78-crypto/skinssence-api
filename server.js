@@ -3418,18 +3418,20 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
   const d = new Date(parseInt(currMonthKey.split('-')[0], 10), parseInt(currMonthKey.split('-')[1], 10) - 2, 1);
   const prevMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-  // First fetch first visit ever for every patient to accurately identify New (first time) patients
+  // Fetch patient registration date (when S-number was created)
   db.all(`
-    SELECT patient_id, MIN(date(visit_date)) as first_visit_date, strftime('%Y-%m', MIN(visit_date)) as first_month_key
-    FROM visits
-    WHERE patient_id IS NOT NULL
-    GROUP BY patient_id
-  `, [], (errFirst, firstVisits = []) => {
-    if (errFirst) return res.status(500).json({ error: errFirst.message });
+    SELECT id as patient_id, skinssence_id, date(created_at) as reg_date, strftime('%Y-%m', created_at) as reg_month_key
+    FROM patients
+  `, [], (errPatients, patientRegRows = []) => {
+    if (errPatients) return res.status(500).json({ error: errPatients.message });
 
-    const firstVisitMap = {};
-    firstVisits.forEach(fv => {
-      if (fv.patient_id) firstVisitMap[fv.patient_id] = fv;
+    const patientRegMap = {};
+    const registrationsPerMonth = {};
+    (patientRegRows || []).forEach(p => {
+      patientRegMap[p.patient_id] = p;
+      if (p.reg_month_key) {
+        registrationsPerMonth[p.reg_month_key] = (registrationsPerMonth[p.reg_month_key] || 0) + 1;
+      }
     });
 
     db.all(`
@@ -3503,11 +3505,12 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
           const todayPatientSet = new Set(todayVisits.filter(v => v.patient_id).map(v => v.patient_id));
           let todayNewPatients = 0;
           todayPatientSet.forEach(pId => {
-            const fv = firstVisitMap[pId];
-            if (fv && fv.first_visit_date === todayStr) {
+            const preg = patientRegMap[pId];
+            if (preg && preg.reg_date === todayStr) {
               todayNewPatients++;
             }
           });
+          const todayRegistrations = (patientRegRows || []).filter(p => p.reg_date === todayStr).length;
 
           let todayClinicUseAmt = 0;
           let todayClinicUseQty = 0;
@@ -3534,7 +3537,8 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
             medicineUnitsSold: todayMedUnitsSold,
             totalPatients: todayPatientSet.size,
             newPatients: todayNewPatients,
-            returningPatients: Math.max(0, todayPatientSet.size - todayNewPatients)
+            returningPatients: Math.max(0, todayPatientSet.size - todayNewPatients),
+            totalRegistrations: todayRegistrations
           };
 
           // 2. MONTHS MAP
@@ -3603,8 +3607,8 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
 
             if (v.patient_id) {
               mObj.patientSet.add(v.patient_id);
-              const fv = firstVisitMap[v.patient_id];
-              if (fv && fv.first_month_key === mKey) {
+              const preg = patientRegMap[v.patient_id];
+              if (preg && preg.reg_month_key === mKey) {
                 mObj.newPatientSet.add(v.patient_id);
               }
             }
@@ -3683,6 +3687,7 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
         mObj.totalPatients = mObj.patientSet ? mObj.patientSet.size : 0;
         mObj.newPatients = mObj.newPatientSet ? mObj.newPatientSet.size : 0;
         mObj.returningPatients = Math.max(0, mObj.totalPatients - mObj.newPatients);
+        mObj.totalRegistrations = registrationsPerMonth[mKey] || 0;
         delete mObj.patientSet;
         delete mObj.newPatientSet;
 
