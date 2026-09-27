@@ -1753,35 +1753,72 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
     ? (parseFloat(rawNetPayable) || 0) 
     : Math.max(0, finalSubtotal - finalDiscAmt);
 
-  // Rapid duplicate submission protection (if exact sale for patient was created in last 45s)
-  const fortyFiveSecsAgo = new Date(Date.now() - 45 * 1000).toISOString();
-  db.get(
-    `SELECT v.id as visit_id FROM visits v
+  // Enhanced duplicate submission protection: prevents same-day duplicate bills and updates uncollected bills
+  const todayDateStr = (finalVisitDate || '').split('T')[0];
+  db.all(
+    `SELECT v.id as visit_id, v.visit_date, v.net_payable, COALESCE(p.amount_received, 0) as paid_amount, p.id as payment_id
+     FROM visits v
+     LEFT JOIN payments p ON p.visit_id = v.id
      WHERE v.patient_id = ? AND v.planned_procedures = 'PHARMACY SALE'
-       AND v.visit_date >= ?
-     ORDER BY v.id DESC LIMIT 1`,
-    [patient_id, fortyFiveSecsAgo],
-    (errDup, dupVisit) => {
-      if (dupVisit && !existing_visit_id) {
-        db.all(`SELECT id, amount FROM medicines WHERE visit_id = ?`, [dupVisit.visit_id], (errM, recentMeds) => {
-          const recentTotal = (recentMeds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-          const reqTotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-          if (recentMeds && recentMeds.length === medicines_sold.length && Math.abs(recentTotal - reqTotal) < 1) {
-            console.log(`[Deduplication] Blocked duplicate pharmacy sale for patient ${patient_id}. Returning existing visit #${dupVisit.visit_id}`);
+       AND (date(v.visit_date) = date(?) OR v.visit_date LIKE ?)
+     ORDER BY v.id DESC`,
+    [patient_id, todayDateStr, `${todayDateStr}%`],
+    (errDup, todayPharmVisits) => {
+      if (errDup || !todayPharmVisits || todayPharmVisits.length === 0 || existing_visit_id) {
+        return executeSale();
+      }
+
+      const targetVisit = todayPharmVisits[0];
+      db.all(`SELECT id, details, amount FROM medicines WHERE visit_id = ?`, [targetVisit.visit_id], (errM, recentMeds) => {
+        const recentTotal = (recentMeds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+        const reqTotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+        const itemsMatch = recentMeds && recentMeds.length === medicines_sold.length && Math.abs(recentTotal - reqTotal) < 1;
+
+        if (itemsMatch) {
+          const payAmount = (amount_received !== undefined && amount_received !== null)
+            ? (parseFloat(amount_received) || 0)
+            : finalNetPayable;
+
+          // Case 1: If previous same-day bill was uncollected (paid 0) and now payment is received, update existing bill
+          if (targetVisit.paid_amount == 0 && payAmount > 0) {
+            console.log(`[Deduplication] Updating uncollected pharmacy sale #${targetVisit.visit_id} with payment of ₹${payAmount} (${payment_mode}) for patient ${patient_id}`);
+            if (targetVisit.payment_id) {
+              db.run(`UPDATE payments SET mode = ?, amount_received = ?, payment_date = ? WHERE id = ?`,
+                [payment_mode || 'CASH', payAmount, finalVisitDate, targetVisit.payment_id]);
+            } else {
+              db.run(`INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)`,
+                [targetVisit.visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY']);
+            }
+            db.run(`UPDATE visits SET net_payable = ?, subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ? WHERE id = ?`,
+              [finalNetPayable, finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, targetVisit.visit_id]);
+
             return res.json({
-              message: 'Pharmacy sale already recorded successfully!',
-              visit_id: dupVisit.visit_id,
+              message: 'Pharmacy sale payment recorded successfully (updated existing bill)!',
+              visit_id: targetVisit.visit_id,
               duplicate_prevented: true,
               subtotal: finalSubtotal,
               discount_amount: finalDiscAmt,
               net_payable: finalNetPayable
             });
           }
-          executeSale();
-        });
-      } else {
+
+          // Case 2: Exact duplicate already recorded and paid today
+          const timeDiffMs = Math.abs(new Date(finalVisitDate) - new Date(targetVisit.visit_date));
+          if (timeDiffMs < 15 * 60 * 1000 || (targetVisit.paid_amount > 0 && Math.abs(targetVisit.paid_amount - reqTotal) < 1)) {
+            console.log(`[Deduplication] Blocked duplicate pharmacy sale for patient ${patient_id}. Returning existing visit #${targetVisit.visit_id}`);
+            return res.json({
+              message: 'Pharmacy sale already recorded successfully!',
+              visit_id: targetVisit.visit_id,
+              duplicate_prevented: true,
+              subtotal: finalSubtotal,
+              discount_amount: finalDiscAmt,
+              net_payable: finalNetPayable
+            });
+          }
+        }
+
         executeSale();
-      }
+      });
     }
   );
 
@@ -6036,8 +6073,18 @@ app.delete('/api/admin/pharmacy/sales/:visit_id/items/:medicine_id', authenticat
           const newTotal = totRow ? parseFloat(totRow.remaining_total) : 0;
           const remainingCount = totRow ? parseInt(totRow.remaining_count, 10) : 0;
 
-          // Adjust payment amount
+          // Adjust payment amount and visit totals
           db.run(`UPDATE payments SET amount_received = ? WHERE visit_id = ?`, [newTotal, visitId], () => {
+            db.run(`UPDATE visits SET subtotal = ?, net_payable = ? WHERE id = ?`, [newTotal, newTotal, visitId], () => {
+              if (remainingCount === 0) {
+                db.get(`SELECT consultation_fee, planned_procedures FROM visits WHERE id = ?`, [visitId], (errV, vRow) => {
+                  if (vRow && (parseFloat(vRow.consultation_fee) || 0) === 0 && vRow.planned_procedures === 'PHARMACY SALE') {
+                    db.run(`DELETE FROM payments WHERE visit_id = ? AND (amount_received = 0 OR amount_received IS NULL)`, [visitId]);
+                    db.run(`DELETE FROM visits WHERE id = ?`, [visitId]);
+                  }
+                });
+              }
+            });
             // Also adjust invoice if exists
             db.get(`SELECT * FROM invoices WHERE visit_id = ?`, [visitId], (errInv, invoice) => {
               if (invoice) {
