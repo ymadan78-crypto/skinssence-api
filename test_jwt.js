@@ -1,6 +1,8 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = 'super_secret_jwt_key_for_local_testing';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_only_jwt_secret_for_local_offline_testing';
 const token = jwt.sign({ id: 1, username: 'admin', role: 'DOCTOR' }, JWT_SECRET, { expiresIn: '7d' });
 
 console.log('Generated Doctor JWT token with correct secret');
