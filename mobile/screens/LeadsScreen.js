@@ -85,6 +85,75 @@ function LeadsScreenInner({ navigation }) {
   const [recordingPickerVisible, setRecordingPickerVisible] = useState(false);
   const [pendingCallForPicker, setPendingCallForPicker] = useState(null);
 
+  const extractTimestampFromFilename = (fileName) => {
+    if (!fileName) return null;
+    const digitsOnly = fileName.replace(/\D/g, '');
+    const yearIdx = digitsOnly.indexOf('202');
+    if (yearIdx !== -1 && digitsOnly.length >= yearIdx + 14) {
+      const timeStr = digitsOnly.substring(yearIdx, yearIdx + 14);
+      const yr = parseInt(timeStr.substring(0, 4), 10);
+      const mo = parseInt(timeStr.substring(4, 6), 10) - 1;
+      const dy = parseInt(timeStr.substring(6, 8), 10);
+      const hr = parseInt(timeStr.substring(8, 10), 10);
+      const mn = parseInt(timeStr.substring(10, 12), 10);
+      const sc = parseInt(timeStr.substring(12, 14), 10);
+      const t = new Date(yr, mo, dy, hr, mn, sc).getTime();
+      return isNaN(t) ? null : t;
+    }
+    return null;
+  };
+
+  const matchRecordingFromList = (files, mobile, callTimestamp, processedSet = null) => {
+    if (!files || !Array.isArray(files) || files.length === 0) return null;
+    const norm = normalizeMobileForMatching(mobile);
+
+    // Filter candidate pool to prefer unprocessed files if available
+    const pool = processedSet ? files.filter(f => !processedSet.has(f.name)) : files;
+    const searchFiles = pool.length > 0 ? pool : files;
+
+    if (norm && norm.length >= 10) {
+      const numberMatches = searchFiles.filter(f => f.name && f.name.includes(norm));
+      if (numberMatches.length === 1) {
+        return numberMatches[0];
+      }
+      if (numberMatches.length > 1) {
+        if (callTimestamp) {
+          const callTime = new Date(callTimestamp).getTime();
+          if (!isNaN(callTime)) {
+            let closest = numberMatches[0];
+            let minDiff = Infinity;
+            for (const f of numberMatches) {
+              const fileTime = extractTimestampFromFilename(f.name);
+              if (fileTime) {
+                const diff = Math.abs(fileTime - callTime);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closest = f;
+                }
+              }
+            }
+            return closest;
+          }
+        }
+        return numberMatches[0];
+      }
+    }
+
+    // Proximity fallback if mobile number wasn't directly in filename
+    if (callTimestamp) {
+      const callTime = new Date(callTimestamp).getTime();
+      if (!isNaN(callTime)) {
+        for (const f of searchFiles) {
+          const fileTime = extractTimestampFromFilename(f.name);
+          if (fileTime && Math.abs(fileTime - callTime) < 15 * 60 * 1000) {
+            return f;
+          }
+        }
+      }
+    }
+    return null;
+  };
+
   const refreshRecordings = async (autoProcess = false, currentCalls = recentCalls) => {
     try {
       setScanningRecordings(true);
@@ -103,19 +172,21 @@ function LeadsScreenInner({ navigation }) {
         const existingDrafts = draftsJson ? JSON.parse(draftsJson) : [];
         setAiDrafts(existingDrafts);
 
-        // Auto-detect new recording matching recent call
+        // Auto-detect new recordings matching recent calls consecutively
         if (autoProcess && files.length > 0 && currentCalls && currentCalls.length > 0) {
-          for (const call of currentCalls.slice(0, 4)) {
+          const draftedNames = new Set(existingDrafts.map(d => d.recording_file_name));
+          for (const call of currentCalls.slice(0, 10)) {
             const norm = normalizeMobileForMatching(call.phoneNumber || call.normalizedMobile);
             if (!norm || norm.length < 10) continue;
 
-            const matchedRec = files.find(f => f.name.includes(norm));
-            if (matchedRec && !processedSet.has(matchedRec.name)) {
-              const alreadyDrafted = existingDrafts.some(d => d.recording_file_name === matchedRec.name);
-              if (!alreadyDrafted) {
-                console.log('Auto-analyzing new recording:', matchedRec.name);
+            const matchedRec = matchRecordingFromList(files, norm, call.timestamp, processedSet);
+            if (matchedRec && !processedSet.has(matchedRec.name) && !draftedNames.has(matchedRec.name)) {
+              draftedNames.add(matchedRec.name);
+              console.log('Auto-analyzing recording:', matchedRec.name);
+              try {
                 await runAiAnalysisForRecording(call, matchedRec, true);
-                break;
+              } catch (recErr) {
+                console.warn('Error auto-analyzing recording:', matchedRec.name, recErr);
               }
             }
           }
@@ -161,38 +232,6 @@ function LeadsScreenInner({ navigation }) {
         }
       ]
     );
-  };
-
-  const matchRecordingFromList = (files, mobile, callTimestamp) => {
-    if (!files || !Array.isArray(files) || files.length === 0) return null;
-    const norm = normalizeMobileForMatching(mobile);
-    if (norm && norm.length >= 10) {
-      const match = files.find(f => f.name && f.name.includes(norm));
-      if (match) return match;
-    }
-    if (callTimestamp) {
-      const callTime = new Date(callTimestamp).getTime();
-      if (!isNaN(callTime)) {
-        for (const f of files) {
-          const digitsOnly = (f.name || '').replace(/\D/g, '');
-          const yearIdx = digitsOnly.indexOf('202');
-          if (yearIdx !== -1 && digitsOnly.length >= yearIdx + 14) {
-            const timeStr = digitsOnly.substring(yearIdx, yearIdx + 14);
-            const yr = parseInt(timeStr.substring(0, 4), 10);
-            const mo = parseInt(timeStr.substring(4, 6), 10) - 1;
-            const dy = parseInt(timeStr.substring(6, 8), 10);
-            const hr = parseInt(timeStr.substring(8, 10), 10);
-            const mn = parseInt(timeStr.substring(10, 12), 10);
-            const sc = parseInt(timeStr.substring(12, 14), 10);
-            const fileTime = new Date(yr, mo, dy, hr, mn, sc).getTime();
-            if (!isNaN(fileTime) && Math.abs(fileTime - callTime) < 15 * 60 * 1000) {
-              return f;
-            }
-          }
-        }
-      }
-    }
-    return null;
   };
 
   const runAiAnalysisForRecording = async (arg1, arg2, isAuto = false) => {
@@ -245,7 +284,7 @@ function LeadsScreenInner({ navigation }) {
       const name = callItem?.name || '';
 
       const res = await axios.post(
-        'https://skinssence-api.onrender.com/api/leads/ai-transcribe-call',
+        `${API_BASE}/ai-transcribe-call`,
         {
           audio_base64: base64Audio,
           recording_file_name: recFile.name,
@@ -316,28 +355,86 @@ function LeadsScreenInner({ navigation }) {
     }
   };
 
-  const handleAttachExistingPatientCall = async (draft) => {
+  const handleAttachExistingPatientCall = async (draftOrSummary = null, customRecFile = null) => {
     try {
-      const patient = draft.ai_summary?.existing_patient;
-      if (!patient) return;
+      setAiConfirming(true);
+      const isDraft = draftOrSummary && draftOrSummary.ai_summary;
+      const summary = isDraft ? draftOrSummary.ai_summary : (draftOrSummary || aiSummary);
+      const recFile = isDraft 
+        ? { name: draftOrSummary.recording_file_name, uri: draftOrSummary.rec_uri } 
+        : (customRecFile || selectedRecordingFile);
+      const draftId = isDraft ? draftOrSummary.id : null;
+
+      const patient = summary?.existing_patient;
+      if (!patient) {
+        Alert.alert('No Patient Found', 'Could not locate existing patient details to attach.');
+        return;
+      }
 
       const token = await AsyncStorage.getItem('userToken');
+      const payload = {
+        patient_id: patient.id,
+        skinssence_id: patient.skinssence_id,
+        mobile: summary.phone_number || patient.mobile,
+        call_type: summary.call_type || 'Incoming Call',
+        call_outcome: `Existing Patient Call: ${summary.service_interest || 'Consultation inquiry'}`,
+        notes: `AI Summary: ${summary.main_concern || ''}\nQuestions: ${(summary.questions_asked || []).join(', ')}\nAction: ${summary.staff_action_required || ''}\nNotes: ${summary.important_notes || ''}`,
+        ai_transcript: summary.transcript || '',
+        ai_summary_json: summary,
+        recording_file_name: recFile?.name || ''
+      };
+
       await axios.post(
-        'https://skinssence-api.onrender.com/api/leads/log-patient-call',
-        {
-          patient_id: patient.id,
-          skinssence_id: patient.skinssence_id,
-          call_type: draft.ai_summary.call_type || 'Incoming Call',
-          call_outcome: `Existing Patient Call: ${draft.ai_summary.service_interest || 'Consultation inquiry'}`,
-          notes: `AI Summary: ${draft.ai_summary.main_concern || ''}\nQuestions: ${(draft.ai_summary.questions_asked || []).join(', ')}\nAction: ${draft.ai_summary.staff_action_required || ''}`
-        },
+        `${API_BASE}/log-patient-call`,
+        payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      Alert.alert('Attached to Patient Profile', `Call notes attached to existing patient ${patient.name} (${patient.skinssence_id}). No duplicate lead was created.`);
-      handleDiscardDraft(draft.id, draft.recording_file_name);
+      if (recFile?.name) {
+        const processedJson = await AsyncStorage.getItem('clinic_processed_recordings');
+        const processedSet = new Set(processedJson ? JSON.parse(processedJson) : []);
+        processedSet.add(recFile.name);
+        await AsyncStorage.setItem('clinic_processed_recordings', JSON.stringify(Array.from(processedSet)));
+
+        const updatedDrafts = aiDrafts.filter(d => d.recording_file_name !== recFile.name && (!draftId || d.id !== draftId));
+        setAiDrafts(updatedDrafts);
+        await AsyncStorage.setItem('clinic_ai_call_drafts', JSON.stringify(updatedDrafts));
+      }
+
+      setAiModalVisible(false);
+      Alert.alert(
+        'Attached to Patient Profile',
+        `Call notes and recording attached to existing patient ${patient.name} (${patient.skinssence_id}). Patient record preserved and no duplicate lead was created.`
+      );
     } catch (e) {
       Alert.alert('Error', e.response?.data?.error || e.message);
+    } finally {
+      setAiConfirming(false);
+    }
+  };
+
+  const handleDismissNonLeadCall = async (classification = 'Dismissed') => {
+    try {
+      const recFile = selectedRecordingFile;
+      if (recFile?.name) {
+        const processedJson = await AsyncStorage.getItem('clinic_processed_recordings');
+        const processedSet = new Set(processedJson ? JSON.parse(processedJson) : []);
+        processedSet.add(recFile.name);
+        await AsyncStorage.setItem('clinic_processed_recordings', JSON.stringify(Array.from(processedSet)));
+
+        const updatedDrafts = aiDrafts.filter(d => d.recording_file_name !== recFile.name);
+        setAiDrafts(updatedDrafts);
+        await AsyncStorage.setItem('clinic_ai_call_drafts', JSON.stringify(updatedDrafts));
+      }
+
+      setAiModalVisible(false);
+      Alert.alert(
+        'Call Dismissed',
+        `Marked as ${String(classification).replace(/_/g, ' ')}. Recording archived and not added to Leads.`
+      );
+    } catch (e) {
+      console.warn('Error dismissing non-lead call:', e);
+      setAiModalVisible(false);
     }
   };
 
@@ -366,7 +463,7 @@ function LeadsScreenInner({ navigation }) {
       };
 
       const res = await axios.post(
-        'https://skinssence-api.onrender.com/api/leads/ai-confirm-lead',
+        `${API_BASE}/ai-confirm-lead`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -409,7 +506,6 @@ function LeadsScreenInner({ navigation }) {
     }
   };
 
-  
   const fetchRecentCalls = async (promptUser = false) => {
     try {
       setLoadingCalls(true);
@@ -417,8 +513,10 @@ function LeadsScreenInner({ navigation }) {
         const perm = await requestCallLogPermission(promptUser);
         setCallLogPermGranted(!!perm);
         if (perm && typeof getRecentClinicCalls === 'function') {
-          const calls = await getRecentClinicCalls(6);
-          setRecentCalls(Array.isArray(calls) ? calls : []);
+          const calls = await getRecentClinicCalls(10);
+          const safeCalls = Array.isArray(calls) ? calls : [];
+          setRecentCalls(safeCalls);
+          await refreshRecordings(true, safeCalls);
         }
       }
     } catch (e) {
@@ -488,15 +586,21 @@ function LeadsScreenInner({ navigation }) {
       try {
         if (typeof checkCallLogPermission === 'function') {
           checkCallLogPermission()
-            .then((granted) => {
+            .then(async (granted) => {
               setCallLogPermGranted(!!granted);
-              if (granted) fetchRecentCalls(false);
+              if (granted) {
+                await fetchRecentCalls(false);
+              } else {
+                await refreshRecordings(false);
+              }
             })
             .catch((err) => {
               console.warn('checkCallLogPermission error:', err);
+              refreshRecordings(false);
             });
+        } else {
+          refreshRecordings(false);
         }
-        refreshRecordings(true);
       } catch (e) {
         console.warn('Could not check call log permission:', e);
       }
@@ -509,8 +613,9 @@ function LeadsScreenInner({ navigation }) {
     try {
       if (deviceRole.isDesignatedClinicPhone && typeof fetchRecentCalls === 'function') {
         fetchRecentCalls(false);
+      } else {
+        refreshRecordings(true);
       }
-      refreshRecordings(true);
     } catch (e) {}
   };
 
@@ -1654,25 +1759,92 @@ function LeadsScreenInner({ navigation }) {
               )}
             </View>
 
+            {/* Existing Patient Detection Banner */}
+            {(aiSummary?.existing_patient || aiSummary?.call_classification === 'EXISTING_CLIENT') && (
+              <View style={{ backgroundColor: '#eff6ff', borderRadius: 10, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16 }}>👤</Text>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#1e40af' }}>
+                    Registered Clinic Patient: {aiSummary?.existing_patient?.name || aiSummary?.lead_name}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: '#2563eb', marginBottom: 2 }}>
+                  ID: {aiSummary?.existing_patient?.skinssence_id || 'Registered'} • Phone: {aiSummary?.phone_number}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#64748b' }}>
+                  Attaching preserves patient records and avoids duplicate entries in Potential Leads.
+                </Text>
+              </View>
+            )}
+
             {/* Bottom Actions */}
             <View style={{ marginBottom: 40, marginTop: 10 }}>
-              <TouchableOpacity
-                style={styles.confirmSaveBtn}
-                onPress={handleConfirmAiLead}
-                disabled={aiConfirming}
-              >
-                {aiConfirming ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.confirmSaveBtnText}>✅ Confirm & Save to Potential Leads</Text>
-                )}
-              </TouchableOpacity>
+              {(aiSummary?.existing_patient || aiSummary?.call_classification === 'EXISTING_CLIENT') ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.confirmSaveBtn, { backgroundColor: '#0284c7', marginBottom: 10 }]}
+                    onPress={() => handleAttachExistingPatientCall()}
+                    disabled={aiConfirming}
+                  >
+                    {aiConfirming ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.confirmSaveBtnText}>
+                        📋 Attach to Patient Profile ({aiSummary?.existing_patient?.skinssence_id || 'Patient'})
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.cancelModalBtn, { borderColor: '#cbd5e1', marginBottom: 10 }]}
+                    onPress={handleConfirmAiLead}
+                    disabled={aiConfirming}
+                  >
+                    <Text style={[styles.cancelModalBtnText, { color: '#475569' }]}>
+                      ➕ Save as New Potential Lead Anyway
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (aiSummary?.call_classification === 'SPAM_WRONG_NUMBER' || aiSummary?.call_classification === 'SUPPLIER_VENDOR' || aiSummary?.call_classification === 'STAFF_INTERNAL') ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.confirmSaveBtn, { backgroundColor: '#dc2626', marginBottom: 10 }]}
+                    onPress={() => handleDismissNonLeadCall(aiSummary?.call_classification)}
+                  >
+                    <Text style={styles.confirmSaveBtnText}>
+                      🚫 Dismiss & Mark as {aiSummary?.call_classification?.replace(/_/g, ' ')}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.cancelModalBtn, { borderColor: '#cbd5e1', marginBottom: 10 }]}
+                    onPress={handleConfirmAiLead}
+                    disabled={aiConfirming}
+                  >
+                    <Text style={[styles.cancelModalBtnText, { color: '#475569' }]}>
+                      ➕ Save as Potential Lead Anyway
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.confirmSaveBtn}
+                  onPress={handleConfirmAiLead}
+                  disabled={aiConfirming}
+                >
+                  {aiConfirming ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.confirmSaveBtnText}>✅ Confirm & Save to Potential Leads</Text>
+                  )}
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.cancelModalBtn}
                 onPress={() => setAiModalVisible(false)}
               >
-                <Text style={styles.cancelModalBtnText}>Cancel</Text>
+                <Text style={styles.cancelModalBtnText}>Close Modal</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>

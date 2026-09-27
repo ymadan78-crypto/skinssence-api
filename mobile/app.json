@@ -2,7 +2,7 @@
   "expo": {
     "name": "Skinssence",
     "slug": "mobile",
-    "version": "1.44.0",
+    "version": "1.52.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,7 +10,7 @@
       "supportsTablet": true
     },
     "android": {
-      "versionCode": 44,
+      "versionCode": 52,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -19,7 +19,9 @@
       },
       "package": "com.skinssence.app",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.READ_CALL_LOG"
       ]
     },
     "web": {
@@ -30,9 +32,7 @@
         "projectId": "46652322-d121-4423-bc91-53931c0f0ef1"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.52.0",
     "updates": {
       "url": "https://u.expo.dev/46652322-d121-4423-bc91-53931c0f0ef1"
     },

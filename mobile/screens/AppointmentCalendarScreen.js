@@ -18,11 +18,14 @@ export default function AppointmentCalendarScreen({ navigation, route }) {
 
   // Form State
   const [formData, setFormData] = useState({
-    patient_name: route.params?.patient?.first_name ? `${route.params.patient.first_name} ${route.params.patient.last_name || ''}`.trim() : '',
-    mobile: route.params?.patient?.mobile || '',
-    patient_id: route.params?.patient?.skinssence_id || '',
+    patient_name: route.params?.patient?.first_name 
+      ? `${route.params.patient.first_name} ${route.params.patient.last_name || ''}`.trim() 
+      : (route.params?.lead?.name || ''),
+    mobile: route.params?.patient?.mobile || (route.params?.lead?.mobile || ''),
+    patient_id: route.params?.patient?.skinssence_id || (route.params?.lead?.lead_id || ''),
     appointment_time: '11:00 AM'
   });
+
 
   const generateTimeSlots = (dateStr) => {
     const isSunday = new Date(dateStr).getDay() === 0;

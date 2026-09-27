@@ -100,14 +100,22 @@ export default function UserManagementScreen({ navigation }) {
     try {
       let perms = {};
       if (user.permissions) {
-        try { perms = JSON.parse(user.permissions); } catch(e){}
+        try {
+          perms = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
+        } catch(e){}
       }
       perms[permissionKey] = !perms[permissionKey];
 
       const token = await AsyncStorage.getItem('userToken');
-      await axios.put(`https://skinssence-api.onrender.com/api/users/${user.id}/permissions`, { permissions: perms }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      try {
+        await axios.put(`https://skinssence-api.onrender.com/api/users/${user.id}/permissions`, { permissions: perms }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (cloudErr) {
+        await axios.put(`http://localhost:3000/api/users/${user.id}/permissions`, { permissions: perms }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
       fetchUsers();
     } catch (e) {
       Alert.alert('Error', 'Failed to update permissions');
@@ -117,7 +125,7 @@ export default function UserManagementScreen({ navigation }) {
   const getPerm = (user, key) => {
     if (!user.permissions) return false;
     try {
-       const p = JSON.parse(user.permissions);
+       const p = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
        return !!p[key];
     } catch(e) { return false; }
   };
@@ -186,14 +194,27 @@ export default function UserManagementScreen({ navigation }) {
                 <View style={styles.permissionsBox}>
                   <Text style={styles.permHeader}>Staff Permissions (Toggles)</Text>
                   {[
+                    { key: 'can_see_daily_diary', label: '📖 Can See Daily Diary', isPrimary: true },
                     { key: 'can_delete', label: 'Can Delete Visits/Bills' },
                     { key: 'can_view_reports', label: 'Can View Financial Reports' },
                     { key: 'can_add_stock', label: 'Can Add Pharmacy Stock' },
                     { key: 'can_manage_hr', label: 'Can Manage HR/Salaries' }
                   ].map(p => (
-                    <View key={p.key} style={styles.toggleRow}>
-                      <Text style={styles.toggleLabel}>{p.label}</Text>
-                      <Switch value={getPerm(user, p.key)} onValueChange={() => togglePermission(user, p.key)} />
+                    <View key={p.key} style={[styles.toggleRow, p.isPrimary && styles.primaryToggleRow]}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={[styles.toggleLabel, p.isPrimary && styles.primaryToggleLabel]}>{p.label}</Text>
+                        {p.isPrimary && (
+                          <Text style={styles.primaryToggleSub}>
+                            {getPerm(user, p.key) ? '🟢 Toggle ON (Visible on Staff Dashboard)' : '⚪ Toggle OFF (Hidden from Staff Dashboard)'}
+                          </Text>
+                        )}
+                      </View>
+                      <Switch
+                        value={getPerm(user, p.key)}
+                        onValueChange={() => togglePermission(user, p.key)}
+                        trackColor={{ false: '#cbd5e1', true: '#86efac' }}
+                        thumbColor={getPerm(user, p.key) ? '#16a34a' : '#f4f3f4'}
+                      />
                     </View>
                   ))}
                 </View>
@@ -268,6 +289,25 @@ const styles = StyleSheet.create({
   permHeader: { fontSize: 14, fontWeight: 'bold', color: '#4b5563', marginBottom: 8 },
   toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
   toggleLabel: { fontSize: 14, color: '#374151' },
+  primaryToggleRow: {
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginVertical: 4,
+    borderBottomWidth: 0,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  primaryToggleLabel: {
+    fontWeight: 'bold',
+    color: '#166534',
+    fontSize: 14,
+  },
+  primaryToggleSub: {
+    fontSize: 11,
+    color: '#15803d',
+    marginTop: 2,
+  },
 
   actionRow: { flexDirection: 'row', justifyContent: 'flex-start' },
   actionBtnReset: { backgroundColor: '#f3f4f6', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 6, marginRight: 10 },

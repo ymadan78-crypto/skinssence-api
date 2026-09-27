@@ -24,11 +24,14 @@ export default function LoginScreen({ navigation }) {
       // If testing via web emulator, localhost is fine.
       const response = await axios.post(API_URL, { username, password });
       
-      const { token, role, name } = response.data;
+      const { token, role, name, permissions } = response.data;
       
       await AsyncStorage.setItem('userToken', token);
       await AsyncStorage.setItem('userRole', role);
       await AsyncStorage.setItem('userName', name);
+      if (permissions) {
+        await AsyncStorage.setItem('userPermissions', JSON.stringify(permissions));
+      }
 
       if (role.toUpperCase() === 'DOCTOR' || role.toUpperCase() === 'ADMIN') {
         navigation.replace('DoctorDashboard');

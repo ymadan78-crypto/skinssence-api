@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
+import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 export default function TodayPatientsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -13,6 +14,8 @@ export default function TodayPatientsScreen({ navigation }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [correctingVisitId, setCorrectingVisitId] = useState(null);
   const [correctionModalVisible, setCorrectionModalVisible] = useState(false);
+  const [reminderModalVisible, setReminderModalVisible] = useState(false);
+  const [selectedFollowupPatient, setSelectedFollowupPatient] = useState(null);
 
   const fetchTodayVisits = async () => {
     try {
@@ -58,6 +61,7 @@ export default function TodayPatientsScreen({ navigation }) {
   const totalPharmacyRevenue = visits.reduce((sum, v) => sum + (parseFloat(v.medicine_total) || 0), 0);
   const totalGrandBilled = visits.reduce((sum, v) => sum + (parseFloat(v.total_amount) || 0), 0);
   const totalCollectedPaid = visits.reduce((sum, v) => sum + (parseFloat(v.amount_paid) || 0), 0);
+  const pendingFollowupsCount = visits.filter(v => (parseInt(v.future_appointments_count, 10) || 0) === 0 && v.followup_status !== 'NOT_REQUIRED').length;
 
   const formatVisitTime = (dateStr) => {
     if (!dateStr) return '';
@@ -211,6 +215,42 @@ export default function TodayPatientsScreen({ navigation }) {
           </View>
         </View>
 
+        {/* FOLLOW-UP STATUS STRIP - Only shown when follow-up is pending */}
+        {item.computed_followup_status === 'PENDING' && (
+          <View style={{ 
+            marginTop: 8, 
+            flexDirection: 'row', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            backgroundColor: '#f8fafc', 
+            paddingHorizontal: 10, 
+            paddingVertical: 6, 
+            borderRadius: 6, 
+            borderWidth: 1, 
+            borderColor: '#e2e8f0' 
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <Ionicons 
+                name="calendar-outline" 
+                size={14} 
+                color="#475569" 
+                style={{ marginRight: 5 }} 
+              />
+              <Text style={{ fontSize: 11.5, fontWeight: '500', color: '#1e293b' }}>
+                Follow-up pending
+              </Text>
+            </View>
+            <TouchableOpacity 
+              style={{ backgroundColor: '#5C0B0B', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 4 }}
+              onPress={() => {
+                setSelectedFollowupPatient([item]);
+                setReminderModalVisible(true);
+              }}>
+              <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: 'bold' }}>Book Follow-up ›</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* PAYMENT EDIT BUTTON FOR PHARMACY / VISIT */}
         {item.visit_id ? (
           <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
@@ -301,6 +341,22 @@ export default function TodayPatientsScreen({ navigation }) {
             <Text style={styles.metricBlockLabel}>TOTAL COLLECTED</Text>
             <Text style={[styles.metricBlockVal, { color: '#166534' }]}>₹ {totalCollectedPaid.toFixed(0)}</Text>
           </View>
+
+          <View style={styles.metricBlockDivider} />
+
+          <TouchableOpacity 
+            style={[styles.metricBlock, { backgroundColor: pendingFollowupsCount > 0 ? '#fff1f2' : '#f0fdf4', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }]}
+            onPress={() => {
+              setSelectedFollowupPatient(null);
+              setReminderModalVisible(true);
+            }}>
+            <Text style={[styles.metricBlockLabel, { color: pendingFollowupsCount > 0 ? '#991b1b' : '#166534' }]}>
+              FOLLOW-UPS PENDING
+            </Text>
+            <Text style={[styles.metricBlockVal, { color: pendingFollowupsCount > 0 ? '#b91c1c' : '#15803d' }]}>
+              {pendingFollowupsCount} {pendingFollowupsCount > 0 ? '›' : '✓'}
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
 
@@ -347,6 +403,14 @@ export default function TodayPatientsScreen({ navigation }) {
         visitId={correctingVisitId}
         onClose={() => setCorrectionModalVisible(false)}
         onUpdated={fetchTodayVisits}
+      />
+
+      <PendingFollowupReminderModal
+        visible={reminderModalVisible}
+        onClose={() => setReminderModalVisible(false)}
+        navigation={navigation}
+        onUpdated={fetchTodayVisits}
+        initialPatients={selectedFollowupPatient}
       />
     </View>
   );

@@ -32,6 +32,9 @@ function InventoryManagementScreenContent({ navigation }) {
 
   // Dedicated Stock Adjustment Modal
   const [isAdjustModalVisible, setIsAdjustModalVisible] = useState(false);
+  const [isClinicUseModalVisible, setIsClinicUseModalVisible] = useState(false);
+  const [clinicUseSummary, setClinicUseSummary] = useState(null);
+  const [clinicUseLoading, setClinicUseLoading] = useState(false);
   const [adjustForm, setAdjustForm] = useState({ direction: 'REDUCE', quantity: '', reason_type: 'Damaged', notes: '' });
   const [adjustLoading, setAdjustLoading] = useState(false);
 
@@ -162,10 +165,28 @@ function InventoryManagementScreenContent({ navigation }) {
     setAdjustForm({
       direction: isStaff ? 'ADD' : 'REDUCE',
       quantity: '',
-      reason_type: isStaff ? 'Stock count correction' : 'Damaged',
+      unit_price: selectedHistoryItem.mrp ? String(selectedHistoryItem.mrp) : '0',
+      reason_type: isStaff ? 'Stock count correction' : '🏥 Clinic Use',
       notes: ''
     });
     setIsAdjustModalVisible(true);
+  };
+
+  const openClinicUseSummaryModal = async () => {
+    setIsClinicUseModalVisible(true);
+    setClinicUseLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.get('https://skinssence-api.onrender.com/api/inventory/clinic-use/summary', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setClinicUseSummary(res.data);
+    } catch (e) {
+      console.error('Failed to load clinic use summary:', e);
+      Alert.alert('Error', 'Unable to fetch clinic consumption statistics.');
+    } finally {
+      setClinicUseLoading(false);
+    }
   };
 
   const handleSaveAdjust = async () => {
@@ -186,6 +207,7 @@ function InventoryManagementScreenContent({ navigation }) {
         {
           quantity: signedQty,
           reason_type: adjustForm.reason_type,
+          unit_price: parseFloat(adjustForm.unit_price) || parseFloat(selectedHistoryItem.mrp) || 0,
           notes: adjustForm.notes
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -496,6 +518,11 @@ Do you want to proceed?`,
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>Manage Stock ({inventory.length})</Text>
         <View style={{flexDirection: 'row', gap: 6}}>
+          {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
+            <TouchableOpacity onPress={openClinicUseSummaryModal} style={[styles.addBtn, { backgroundColor: '#6d28d9', paddingHorizontal: 10 }]}>
+              <Text style={styles.addBtnText}>🏥 Clinic Use</Text>
+            </TouchableOpacity>
+          )}
           {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
             <TouchableOpacity onPress={openReconciliationModal} style={[styles.addBtn, { backgroundColor: '#4338ca', paddingHorizontal: 10 }]}>
               <Text style={styles.addBtnText}>🔄 Reconcile</Text>
@@ -969,6 +996,20 @@ Do you want to proceed?`,
                       <Text style={{ fontSize: 9, color: '#9f1239', marginTop: 2 }} numberOfLines={1}>Red: -{itemHistoryData?.summary?.total_reduced ?? 0}</Text>
                     </View>
                   </View>
+
+                  {/* CLINIC USE CARD */}
+                  <View style={{ backgroundColor: '#f5f3ff', padding: 10, borderRadius: 6, borderWidth: 1, borderColor: '#ddd6fe', marginTop: 6 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 11, color: '#6d28d9', fontWeight: 'bold' }}>🏥 Clinic / In-House Use</Text>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#7c3aed' }}>
+                        Total Value: ₹{(itemHistoryData?.summary?.total_clinic_use_amount || 0).toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#6d28d9', marginTop: 2 }}>
+                      -{itemHistoryData?.summary?.total_clinic_use ?? 0} {itemHistoryData?.summary?.unit || 'units'}
+                    </Text>
+                    <Text style={{ fontSize: 9, color: '#7c3aed', marginTop: 1 }}>Consumed for clinic procedures and treatments (non-sale)</Text>
+                  </View>
                 </View>
 
                 {/* Quick Actions: Add Stock & Stock Adjustment */}
@@ -993,9 +1034,10 @@ Do you want to proceed?`,
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
                     {[
                       { key: 'ALL', label: `All (${itemHistoryData?.movements?.length || 0})` },
-                      { key: 'ADDED', label: 'Added' },
+                      { key: 'CLINIC_USE', label: '🏥 Clinic Use' },
                       { key: 'SOLD', label: 'Sold' },
-                      { key: 'REDUCED_OR_ADJUSTED', label: 'Reduced / Adjust' }
+                      { key: 'ADDED', label: 'Added' },
+                      { key: 'REDUCED_OR_ADJUSTED', label: 'Other Adjust' }
                     ].map(f => (
                       <TouchableOpacity
                         key={f.key}
@@ -1045,8 +1087,9 @@ Do you want to proceed?`,
                   itemHistoryData.movements.map((m, idx) => {
                     const isPositive = m.quantity > 0;
                     const deltaStr = isPositive ? `+${m.quantity}` : `${m.quantity}`;
-                    const badgeBg = m.movement_type === 'OPENING_STOCK' ? '#f3e8ff' : (m.movement_type === 'ADDED' ? '#dcfce7' : (m.movement_type === 'SOLD' ? '#dbeafe' : '#fee2e2'));
-                    const badgeColor = m.movement_type === 'OPENING_STOCK' ? '#6b21a8' : (m.movement_type === 'ADDED' ? '#15803d' : (m.movement_type === 'SOLD' ? '#1e40af' : '#b91c1c'));
+                    const isClinic = m.movement_type === 'CLINIC_USE' || (m.reason && m.reason.includes('Clinic'));
+                    const badgeBg = isClinic ? '#ede9fe' : (m.movement_type === 'OPENING_STOCK' ? '#f3e8ff' : (m.movement_type === 'ADDED' ? '#dcfce7' : (m.movement_type === 'SOLD' ? '#dbeafe' : '#fee2e2')));
+                    const badgeColor = isClinic ? '#6d28d9' : (m.movement_type === 'OPENING_STOCK' ? '#6b21a8' : (m.movement_type === 'ADDED' ? '#15803d' : (m.movement_type === 'SOLD' ? '#1e40af' : '#b91c1c')));
 
                     return (
                       <View key={m.id || idx} style={{ backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', padding: 10, marginBottom: 8 }}>
@@ -1319,7 +1362,7 @@ Do you want to proceed?`,
                 Adjustment Reason *
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {['Stock count correction', 'Damaged', 'Expired', 'Wastage', 'Returned to supplier', 'Other'].map(r => (
+                {['🏥 Clinic Use', 'Stock count correction', 'Damaged', 'Expired', 'Wastage', 'Returned to supplier', 'Other'].map(r => (
                   <TouchableOpacity
                     key={r}
                     onPress={() => setAdjustForm({ ...adjustForm, reason_type: r })}
@@ -1344,10 +1387,41 @@ Do you want to proceed?`,
               </Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Broken seal, expired batch inspection, shelf audit"
+                placeholder={adjustForm.reason_type.includes('Clinic') ? 'e.g. Doctor procedure, in-house chemical peel, PRP session' : 'e.g. Broken seal, expired batch inspection, shelf audit'}
                 value={adjustForm.notes}
                 onChangeText={(v) => setAdjustForm({ ...adjustForm, notes: v })}
               />
+
+              {adjustForm.reason_type.includes('Clinic') && (
+                <View style={{ backgroundColor: '#f5f3ff', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#c4b5fd', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#5b21b6', marginBottom: 6 }}>
+                    🏥 Clinic Use Valuation (Cost / MRP)
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ fontSize: 12, color: '#6d28d9', fontWeight: '500' }}>Item Unit MRP (₹):</Text>
+                    <TextInput
+                      style={[styles.input, { flex: 1, marginBottom: 0, paddingVertical: 4, height: 34, fontSize: 13, fontWeight: 'bold', color: '#5b21b6' }]}
+                      keyboardType="numeric"
+                      placeholder="0"
+                      value={adjustForm.unit_price}
+                      onChangeText={(v) => setAdjustForm({ ...adjustForm, unit_price: v })}
+                    />
+                  </View>
+                  {(() => {
+                    const q = parseFloat(adjustForm.quantity) || 0;
+                    const u = parseFloat(adjustForm.unit_price) || 0;
+                    const totalVal = Math.round(q * u);
+                    return (
+                      <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#ddd6fe', flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 11, color: '#6d28d9' }}>Total Consumed Value:</Text>
+                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#7c3aed' }}>
+                          ₹{totalVal.toLocaleString('en-IN')} (Non-sale)
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+              )}
 
               {/* Result Preview */}
               {(() => {

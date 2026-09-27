@@ -4,6 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
+import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 export default function StaffDashboard({ navigation }) {
   const [userName, setUserName] = useState('');
@@ -14,7 +16,26 @@ export default function StaffDashboard({ navigation }) {
     procedure_collection: 0,
     medicine_collection: 0
   });
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
+  const [pendingFollowupPatients, setPendingFollowupPatients] = useState([]);
+  const [followupModalVisible, setFollowupModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [canSeeDailyDiary, setCanSeeDailyDiary] = useState(false);
+
+  const checkHourlyReminder = async (count) => {
+    try {
+      if (!count || count <= 0) return;
+      const lastTime = await AsyncStorage.getItem('@last_followup_reminder_time');
+      const now = Date.now();
+      const ONE_HOUR = 60 * 60 * 1000;
+      if (!lastTime || (now - parseInt(lastTime, 10)) >= ONE_HOUR) {
+        setFollowupModalVisible(true);
+        await AsyncStorage.setItem('@last_followup_reminder_time', now.toString());
+      }
+    } catch (e) {
+      console.log('Error checking hourly reminder', e);
+    }
+  };
 
   const loadStaffData = async () => {
     try {
@@ -22,6 +43,36 @@ export default function StaffDashboard({ navigation }) {
       if (name) setUserName(name);
 
       const token = await AsyncStorage.getItem('userToken');
+
+      // Fetch user profile & staff permissions
+      try {
+        let meRes;
+        try {
+          meRes = await axios.get('https://skinssence-api.onrender.com/api/users/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        } catch (cloudErr) {
+          meRes = await axios.get('http://localhost:3000/api/users/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        }
+        if (meRes.data && meRes.data.permissions) {
+          const perms = meRes.data.permissions;
+          const allowed = !!(perms.can_see_daily_diary || perms.can_view_diary);
+          setCanSeeDailyDiary(allowed);
+          await AsyncStorage.setItem('userPermissions', JSON.stringify(perms));
+        }
+      } catch (permErr) {
+        // Fallback to cached permissions
+        const cached = await AsyncStorage.getItem('userPermissions');
+        if (cached) {
+          try {
+            const cp = JSON.parse(cached);
+            setCanSeeDailyDiary(!!(cp.can_see_daily_diary || cp.can_view_diary));
+          } catch (e) {}
+        }
+      }
+
       const [analyticsRes, todayRes] = await Promise.all([
         axios.get('https://skinssence-api.onrender.com/api/inventory/analytics', { headers: { Authorization: `Bearer ${token}` } }),
         axios.get('https://skinssence-api.onrender.com/api/dashboard/today', { headers: { Authorization: `Bearer ${token}` } })
@@ -36,6 +87,13 @@ export default function StaffDashboard({ navigation }) {
           procedure_collection: todayRes.data.procedure_collection || 0,
           medicine_collection: todayRes.data.medicine_collection || 0
         });
+        const pCount = todayRes.data.pending_followups_count || 0;
+        const pList = todayRes.data.pending_followup_patients || [];
+        setPendingFollowupsCount(pCount);
+        setPendingFollowupPatients(pList);
+        if (pCount > 0) {
+          checkHourlyReminder(pCount);
+        }
       }
     } catch (e) {
       console.log('Error loading staff dashboard', e);
@@ -124,6 +182,23 @@ export default function StaffDashboard({ navigation }) {
           </TouchableOpacity>
         )}
 
+        {/* PENDING FOLLOW-UP REMINDER BANNER */}
+        {pendingFollowupsCount > 0 && (
+          <TouchableOpacity 
+            style={styles.followupBanner}
+            onPress={() => setFollowupModalVisible(true)}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="calendar-outline" size={17} color="#334155" style={{ marginRight: 8 }} />
+                <Text style={styles.followupBannerTitle}>
+                  Follow-ups pending: <Text style={{ fontWeight: 'bold' }}>{pendingFollowupsCount}</Text>
+                </Text>
+              </View>
+              <Text style={styles.followupActionText}>Review ›</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* TOP STATS CARDS */}
         <View style={styles.statsRow}>
           <TouchableOpacity style={styles.statCard} onPress={() => navigation.navigate('TodayPatients')}>
@@ -152,17 +227,24 @@ export default function StaffDashboard({ navigation }) {
             <Text style={[styles.cardText, { color: '#10b981' }]}>Attendance History</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={[styles.card, { backgroundColor: '#fff7ed', borderColor: '#f97316', borderWidth: 1.5 }]} onPress={() => navigation.navigate('Leads')}>
+            <Text style={[styles.cardText, { color: '#c2410c', fontWeight: 'bold' }]}>🎯 Potential Clients / Leads</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('PatientRegistration')}>
             <Text style={styles.cardText}>+ New Patient</Text>
           </TouchableOpacity>
+
           
           <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('SearchPatient')}>
             <Text style={styles.cardText}>Search Patient</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.card, { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1 }]} onPress={() => navigation.navigate('DailyDiary')}>
-            <Text style={[styles.cardText, { color: '#5C0B0B', fontWeight: 'bold' }]}>📖 Daily Diary</Text>
-          </TouchableOpacity>
+          {canSeeDailyDiary && (
+            <TouchableOpacity style={[styles.card, { backgroundColor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1 }]} onPress={() => navigation.navigate('DailyDiary')}>
+              <Text style={[styles.cardText, { color: '#5C0B0B', fontWeight: 'bold' }]}>📖 Daily Diary</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('TodayPatients')}>
             <Text style={[styles.cardText, { color: '#5C0B0B' }]}>👥 Today's Visits</Text>
@@ -197,6 +279,14 @@ export default function StaffDashboard({ navigation }) {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <PendingFollowupReminderModal
+        visible={followupModalVisible}
+        onClose={() => setFollowupModalVisible(false)}
+        navigation={navigation}
+        onUpdated={loadStaffData}
+        initialPatients={pendingFollowupPatients}
+      />
     </View>
   );
 }
@@ -213,6 +303,26 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
   headerSubtitle: { fontSize: 16, color: '#e2e8f0', marginTop: 5 },
+  followupBanner: {
+    backgroundColor: '#f8fafc',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginHorizontal: 20,
+    marginTop: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  followupBannerTitle: {
+    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '500'
+  },
+  followupActionText: {
+    color: '#475569',
+    fontWeight: '600',
+    fontSize: 12
+  },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

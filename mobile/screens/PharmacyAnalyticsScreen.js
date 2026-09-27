@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 export default function PharmacyAnalyticsScreen({ navigation }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState('');
   const [activeMainTab, setActiveMainTab] = useState('expiry'); // 'expiry' or 'deadStock'
   const [expiryFilter, setExpiryFilter] = useState('ALL'); // 'ALL', 'EXPIRED', '3M', '3_6M', '6_12M', 'OVER_12M', 'INVALID'
   const [searchQuery, setSearchQuery] = useState('');
@@ -14,6 +15,7 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
 
   useEffect(() => {
     fetchAnalytics();
+    AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
   }, []);
 
   const fetchAnalytics = async () => {
@@ -102,6 +104,30 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
     totalMedicines: 0
   };
 
+  const isAdmin = userRole === 'ADMIN' || userRole === 'DOCTOR';
+
+  let totalInStockMrpValue = 0;
+  let totalInStockUnits = 0;
+  let expiredStockMrpValue = 0;
+  let validStockMrpValue = 0;
+
+  if (isAdmin && data?.allSorted) {
+    data.allSorted.forEach(item => {
+      const qty = Number(item.quantity) || 0;
+      const mrp = Number(item.mrp) || 0;
+      if (qty > 0) {
+        totalInStockUnits += qty;
+        const val = qty * mrp;
+        totalInStockMrpValue += val;
+        if (item.status === 'EXPIRED') {
+          expiredStockMrpValue += val;
+        } else {
+          validStockMrpValue += val;
+        }
+      }
+    });
+  }
+
   const filteredMedicines = getFilteredExpiryList();
 
   return (
@@ -142,6 +168,41 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
       ) : activeMainTab === 'expiry' ? (
         <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 40 }}>
           
+          {/* ADMIN-ONLY TOTAL IN-STOCK MRP VALUE HERO CARD */}
+          {isAdmin && (
+            <View style={styles.adminValuationCard}>
+              <View style={styles.adminValuationHeader}>
+                <View>
+                  <Text style={styles.adminValuationBadge}>👑 ADMIN ONLY</Text>
+                  <Text style={styles.adminValuationTitle}>Total In-Stock MRP Value</Text>
+                </View>
+                <Text style={styles.adminValuationAmount}>
+                  ₹{totalInStockMrpValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                </Text>
+              </View>
+              <View style={styles.adminValuationStatsRow}>
+                <View style={styles.adminValuationStatItem}>
+                  <Text style={styles.adminValuationStatLabel}>In-Stock Units</Text>
+                  <Text style={styles.adminValuationStatVal}>{totalInStockUnits.toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.adminValuationDivider} />
+                <View style={styles.adminValuationStatItem}>
+                  <Text style={styles.adminValuationStatLabel}>Valid Stock (>3M)</Text>
+                  <Text style={[styles.adminValuationStatVal, { color: '#059669' }]}>
+                    ₹{validStockMrpValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+                <View style={styles.adminValuationDivider} />
+                <View style={styles.adminValuationStatItem}>
+                  <Text style={styles.adminValuationStatLabel}>Expired Stock</Text>
+                  <Text style={[styles.adminValuationStatVal, { color: '#b91c1c' }]}>
+                    ₹{expiredStockMrpValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           {/* SUMMARY CARDS GRID */}
           <View style={styles.summaryGrid}>
             <TouchableOpacity 
@@ -353,6 +414,73 @@ const styles = StyleSheet.create({
   itemRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#F1F3F5' },
   itemName: { fontSize: 15, fontWeight: '600', color: '#212529' },
   itemSub: { fontSize: 12, color: '#6C757D', marginTop: 2 },
-  itemExpiry: { fontSize: 12, color: '#DC3545', fontWeight: 'bold' },
-  emptyText: { padding: 15, fontStyle: 'italic', color: '#ADB5BD', textAlign: 'center' }
+  emptyText: { padding: 15, fontStyle: 'italic', color: '#ADB5BD', textAlign: 'center' },
+  adminValuationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  adminValuationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  adminValuationBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#b91c1c',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 3,
+  },
+  adminValuationTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4b5563',
+  },
+  adminValuationAmount: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#065f46',
+  },
+  adminValuationStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  adminValuationStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  adminValuationDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#e2e8f0',
+  },
+  adminValuationStatLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    marginBottom: 2,
+  },
+  adminValuationStatVal: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#0f172a',
+  },
 });

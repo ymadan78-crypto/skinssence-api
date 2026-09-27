@@ -18,7 +18,7 @@ import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 
-export default function DailyDiaryScreen({ navigation, route }) {
+function DailyDiaryScreenContent({ navigation, route }) {
   // Helper to format Date to YYYY-MM-DD
   const formatDateToYMD = (dateObj) => {
     const y = dateObj.getFullYear();
@@ -67,6 +67,14 @@ export default function DailyDiaryScreen({ navigation, route }) {
       setDiaryData(res.data);
     } catch (e) {
       console.log('Error fetching diary data from cloud:', e?.response?.data || e.message);
+      if (e?.response && e.response.status === 403) {
+        Alert.alert(
+          'Access Restricted',
+          e.response.data?.error || 'Daily Diary viewing is disabled for your staff account. Please ask Doctor / Admin to enable it in Manage Staff Accounts.',
+          [{ text: 'Go Back', onPress: () => navigation.goBack() }]
+        );
+        return;
+      }
       // Fallback local API if testing locally
       try {
         const token = await AsyncStorage.getItem('userToken');
@@ -75,6 +83,14 @@ export default function DailyDiaryScreen({ navigation, route }) {
         });
         setDiaryData(fallbackRes.data);
       } catch (err2) {
+        if (err2?.response && err2.response.status === 403) {
+          Alert.alert(
+            'Access Restricted',
+            err2.response.data?.error || 'Daily Diary viewing is disabled for your staff account. Please ask Doctor / Admin to enable it in Manage Staff Accounts.',
+            [{ text: 'Go Back', onPress: () => navigation.goBack() }]
+          );
+          return;
+        }
         Alert.alert('Error', 'Unable to fetch Daily Diary data. Please check your network connection.');
       }
     } finally {
@@ -163,6 +179,22 @@ export default function DailyDiaryScreen({ navigation, route }) {
 
   const isToday = selectedDate === formatDateToYMD(new Date());
 
+  const navigateToPatient = (item) => {
+    if (!item?.patient_id) return;
+    const fallbackPatient = {
+      id: item.patient_id,
+      first_name: item.first_name || item.patient_name?.split(' ')[0] || 'Patient',
+      last_name: item.last_name || item.patient_name?.split(' ').slice(1).join(' ') || '',
+      skinssence_id: item.skinssence_id || '',
+      mobile: item.mobile || ''
+    };
+    navigation.navigate('PatientProfile', {
+      patientId: item.patient_id,
+      patient: fallbackPatient
+    });
+  };
+
+
   const renderTimelineItem = ({ item }) => {
     const isClickable = !!item.patient_id;
 
@@ -171,9 +203,7 @@ export default function DailyDiaryScreen({ navigation, route }) {
         style={styles.entryCard}
         activeOpacity={isClickable ? 0.7 : 1}
         onPress={() => {
-          if (item.patient_id) {
-            navigation.navigate('PatientProfile', { patientId: item.patient_id });
-          }
+          navigateToPatient(item);
         }}
       >
         <View style={styles.entryHeader}>
@@ -202,7 +232,7 @@ export default function DailyDiaryScreen({ navigation, route }) {
 
         <View style={styles.entryFooter}>
           {isClickable ? (
-            <TouchableOpacity onPress={() => navigation.navigate('PatientProfile', { patientId: item.patient_id })}>
+            <TouchableOpacity onPress={() => navigateToPatient(item)}>
               <Text style={styles.viewProfileLink}>View Patient Profile ›</Text>
             </TouchableOpacity>
           ) : <View />}
@@ -457,6 +487,46 @@ export default function DailyDiaryScreen({ navigation, route }) {
         }}
       />
     </View>
+  );
+}
+
+class DailyDiaryErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[DailyDiary] Error caught by boundary:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#f8fafc' }}>
+          <Ionicons name="alert-circle-outline" size={60} color="#dc2626" />
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginTop: 14, marginBottom: 8, textAlign: 'center' }}>
+            Daily Diary Error
+          </Text>
+          <Text style={{ fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 18 }}>
+            An unexpected error occurred while loading this date\'s timeline. The screen was safely kept from going blank.
+          </Text>
+          <TouchableOpacity 
+            style={{ backgroundColor: '#5C0B0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
+            onPress={() => this.props.navigation?.goBack()}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>← Go Back Safely</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function DailyDiaryScreen(props) {
+  return (
+    <DailyDiaryErrorBoundary navigation={props.navigation}>
+      <DailyDiaryScreenContent {...props} />
+    </DailyDiaryErrorBoundary>
   );
 }
 

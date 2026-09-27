@@ -24,7 +24,12 @@ import InventoryManagementScreen from './screens/InventoryManagementScreen';
 import TodayPatientsScreen from './screens/TodayPatientsScreen';
 import MasterProcedureCatalogScreen from './screens/MasterProcedureCatalogScreen';
 import DailyDiaryScreen from './screens/DailyDiaryScreen';
+import LeadsScreen from './screens/LeadsScreen';
+import AddLeadScreen from './screens/AddLeadScreen';
+import LeadDetailScreen from './screens/LeadDetailScreen';
+import LeadFollowupsScreen from './screens/LeadFollowupsScreen';
 import axios from 'axios';
+
 
 // Bypass Localtunnel Warning Page for mobile requests
 axios.defaults.headers.common['Bypass-Tunnel-Reminder'] = 'true';
@@ -32,9 +37,53 @@ axios.defaults.headers.common['ngrok-skip-browser-warning'] = 'true';
 
 const Stack = createNativeStackNavigator();
 
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+
+class GlobalErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('[GlobalErrorBoundary] Caught unexpected crash:', error, info);
+  }
+
+  handleRestart = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 28, backgroundColor: '#f8fafc' }}>
+          <Ionicons name="alert-circle" size={64} color="#dc2626" />
+          <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1e293b', marginTop: 16, marginBottom: 8, textAlign: 'center' }}>
+            Oops! An error occurred
+          </Text>
+          <Text style={{ fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 18, paddingHorizontal: 10 }}>
+            The app encountered an unexpected condition and safely prevented a white screen freeze.
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#5C0B0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, elevation: 2 }}
+            onPress={this.handleRestart}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Return to App</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+
 export default function App() {
   return (
-    <NavigationContainer>
+    <GlobalErrorBoundary>
+      <NavigationContainer>
       <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="StaffDashboard" component={StaffDashboard} />
@@ -59,7 +108,13 @@ export default function App() {
         <Stack.Screen name="TodayPatients" component={TodayPatientsScreen} />
         <Stack.Screen name="MasterProcedureCatalog" component={MasterProcedureCatalogScreen} />
         <Stack.Screen name="DailyDiary" component={DailyDiaryScreen} />
+        <Stack.Screen name="Leads" component={LeadsScreen} />
+        <Stack.Screen name="AddLead" component={AddLeadScreen} />
+        <Stack.Screen name="LeadDetail" component={LeadDetailScreen} />
+        <Stack.Screen name="LeadFollowups" component={LeadFollowupsScreen} />
       </Stack.Navigator>
-    </NavigationContainer>
+
+      </NavigationContainer>
+    </GlobalErrorBoundary>
   );
 }

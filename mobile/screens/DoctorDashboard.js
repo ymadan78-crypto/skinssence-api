@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, RefreshC
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { Ionicons } from '@expo/vector-icons';
+import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 export default function DoctorDashboard({ navigation }) {
   const [userName, setUserName] = useState('');
@@ -13,7 +15,25 @@ export default function DoctorDashboard({ navigation }) {
     procedure_collection: 0,
     medicine_collection: 0
   });
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
+  const [pendingFollowupPatients, setPendingFollowupPatients] = useState([]);
+  const [followupModalVisible, setFollowupModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  const checkHourlyReminder = async (count) => {
+    try {
+      if (!count || count <= 0) return;
+      const lastTime = await AsyncStorage.getItem('@last_followup_reminder_time');
+      const now = Date.now();
+      const ONE_HOUR = 60 * 60 * 1000;
+      if (!lastTime || (now - parseInt(lastTime, 10)) >= ONE_HOUR) {
+        setFollowupModalVisible(true);
+        await AsyncStorage.setItem('@last_followup_reminder_time', now.toString());
+      }
+    } catch (e) {
+      console.log('Error checking hourly reminder', e);
+    }
+  };
 
   const loadDashboardData = async () => {
     try {
@@ -35,6 +55,13 @@ export default function DoctorDashboard({ navigation }) {
           procedure_collection: todayRes.data.procedure_collection || 0,
           medicine_collection: todayRes.data.medicine_collection || 0
         });
+        const pCount = todayRes.data.pending_followups_count || 0;
+        const pList = todayRes.data.pending_followup_patients || [];
+        setPendingFollowupsCount(pCount);
+        setPendingFollowupPatients(pList);
+        if (pCount > 0) {
+          checkHourlyReminder(pCount);
+        }
       }
     } catch (e) {
       console.log('Error loading doctor dashboard', e);
@@ -103,6 +130,23 @@ export default function DoctorDashboard({ navigation }) {
           </TouchableOpacity>
         )}
 
+        {/* PENDING FOLLOW-UP REMINDER BANNER */}
+        {pendingFollowupsCount > 0 && (
+          <TouchableOpacity 
+            style={styles.followupBanner}
+            onPress={() => setFollowupModalVisible(true)}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="calendar-outline" size={17} color="#334155" style={{ marginRight: 8 }} />
+                <Text style={styles.followupBannerTitle}>
+                  Follow-ups pending: <Text style={{ fontWeight: 'bold' }}>{pendingFollowupsCount}</Text>
+                </Text>
+              </View>
+              <Text style={styles.followupActionText}>Review ›</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* METRICS CARDS */}
         <View style={styles.dashboardCards}>
           <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('TodayPatients')}>
@@ -144,9 +188,13 @@ export default function DoctorDashboard({ navigation }) {
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('UpcomingEvents')}>
             <Text style={styles.listText}>Upcoming Events (10 Days)</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.listItem, { backgroundColor: '#fff7ed', paddingHorizontal: 8, borderRadius: 8, marginVertical: 4 }]} onPress={() => navigation.navigate('Leads')}>
+            <Text style={[styles.listText, { color: '#c2410c', fontWeight: 'bold' }]}>🎯 Potential Clients / Leads & Follow-ups</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('AppointmentCalendar')}>
             <Text style={styles.listText}>Appointment Calendar</Text>
           </TouchableOpacity>
+
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('AppointmentReminders')}>
             <Text style={[styles.listText, { color: '#059669', fontWeight: 'bold' }]}>📞 Call & Follow-up Reminders</Text>
           </TouchableOpacity>
@@ -183,6 +231,14 @@ export default function DoctorDashboard({ navigation }) {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <PendingFollowupReminderModal
+        visible={followupModalVisible}
+        onClose={() => setFollowupModalVisible(false)}
+        navigation={navigation}
+        onUpdated={loadDashboardData}
+        initialPatients={pendingFollowupPatients}
+      />
     </View>
   );
 }
@@ -192,6 +248,26 @@ const styles = StyleSheet.create({
   header: { backgroundColor: '#5C0B0B', padding: 20, paddingTop: 50, borderBottomLeftRadius: 15, borderBottomRightRadius: 15 },
   headerText: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
   welcomeText: { fontSize: 18, fontWeight: 'bold', margin: 20, color: '#333' },
+  followupBanner: {
+    backgroundColor: '#f8fafc',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginHorizontal: 15,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  followupBannerTitle: {
+    color: '#1e293b',
+    fontSize: 13,
+    fontWeight: '500'
+  },
+  followupActionText: {
+    color: '#475569',
+    fontWeight: '600',
+    fontSize: 12
+  },
   dashboardCards: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 15 },
   card: { backgroundColor: '#fff', width: '48%', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 3, borderLeftWidth: 4, borderLeftColor: '#5C0B0B' },
   cardTitle: { color: '#666', fontSize: 13, fontWeight: 'bold' },

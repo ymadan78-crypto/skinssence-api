@@ -10,6 +10,35 @@ export default function SearchPatientScreen({ navigation }) {
 
   const API_URL = 'https://skinssence-api.onrender.com/api/patients/search';
 
+  function parsePatientRegistrationTimestamp(dStr) {
+    if (!dStr || typeof dStr !== 'string') return 0;
+    const s = dStr.trim();
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+      const parts = s.split(' ');
+      const dParts = parts[0].split('/');
+      const tParts = parts[1] ? parts[1].split(':') : ['00', '00', '00'];
+      const dt = new Date(
+        parseInt(dParts[2], 10),
+        parseInt(dParts[1], 10) - 1,
+        parseInt(dParts[0], 10),
+        parseInt(tParts[0] || 0, 10),
+        parseInt(tParts[1] || 0, 10),
+        parseInt(tParts[2] || 0, 10)
+      ).getTime();
+      return isNaN(dt) ? 0 : dt;
+    }
+    const t = new Date(s).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+
+  function formatPatientDate(dStr) {
+    if (!dStr) return '';
+    const ts = parsePatientRegistrationTimestamp(dStr);
+    if (!ts) return String(dStr);
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   const handleSearch = async () => {
     if (!query) return;
     setLoading(true);
@@ -18,7 +47,17 @@ export default function SearchPatientScreen({ navigation }) {
       const response = await axios.get(`${API_URL}?query=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setResults(response.data);
+      const data = Array.isArray(response.data) ? response.data : [];
+      // Always show most recently registered/added clients first
+      const sorted = [...data].sort((a, b) => {
+        const timeA = parsePatientRegistrationTimestamp(a.created_at);
+        const timeB = parsePatientRegistrationTimestamp(b.created_at);
+        if (timeB !== timeA && timeA > 0 && timeB > 0) {
+          return timeB - timeA;
+        }
+        return (b.id || 0) - (a.id || 0);
+      });
+      setResults(sorted);
     } catch (error) {
       console.error(error);
     } finally {
@@ -37,6 +76,11 @@ export default function SearchPatientScreen({ navigation }) {
       </View>
       <Text style={styles.patientDetail}>Mobile: {item.mobile}</Text>
       <Text style={styles.patientDetail}>DOB: {item.dob} | City: {item.city}</Text>
+      {item.created_at ? (
+        <Text style={styles.patientDateTag}>
+          Registered: {formatPatientDate(item.created_at)}
+        </Text>
+      ) : null}
     </TouchableOpacity>
   );
 
@@ -95,5 +139,6 @@ const styles = StyleSheet.create({
   patientName: { fontSize: 18, fontWeight: 'bold', color: '#1f2937' },
   patientId: { fontSize: 14, fontWeight: 'bold', color: '#5C0B0B' },
   patientDetail: { fontSize: 14, color: '#6b7280', marginTop: 2 },
+  patientDateTag: { fontSize: 12, color: '#15803d', fontWeight: '600', marginTop: 4 },
   emptyText: { textAlign: 'center', marginTop: 50, color: '#6b7280', fontSize: 16 }
 });

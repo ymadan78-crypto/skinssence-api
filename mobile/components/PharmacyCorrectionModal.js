@@ -240,20 +240,20 @@ export default function PharmacyCorrectionModal({ visible, visitId, onClose, onU
               <View style={styles.infoCard}>
                 <View style={styles.infoRow}>
                   <Text style={styles.patientName}>
-                    {visit.first_name} {visit.last_name || ''}
+                    {visit?.first_name || 'Patient'} {visit?.last_name || ''}
                   </Text>
                   <View style={styles.badgeId}>
-                    <Text style={styles.badgeIdText}>{visit.skinssence_id || `ID: ${visit.patient_id}`}</Text>
+                    <Text style={styles.badgeIdText}>{visit?.skinssence_id || (visit?.patient_id ? `ID: ${visit.patient_id}` : '')}</Text>
                   </View>
                 </View>
                 <Text style={styles.infoSub}>
-                  📞 {visit.mobile || 'No mobile'} • Visit #{visit.id}
+                  📞 {visit?.mobile || 'No mobile'} • Visit #{visit?.id || visitId}
                 </Text>
                 <Text style={styles.infoDate}>
-                  📅 {new Date(visit.visit_date).toLocaleString('en-IN', {
+                  📅 {visit?.visit_date ? new Date(visit.visit_date).toLocaleString('en-IN', {
                     dateStyle: 'medium',
                     timeStyle: 'short'
-                  })}
+                  }) : 'N/A'}
                 </Text>
               </View>
 

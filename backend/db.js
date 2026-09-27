@@ -1,10 +1,20 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config();
 const { createClient } = require('@libsql/client');
 const bcrypt = require('bcrypt');
 
-// The user's Turso credentials
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoToken = process.env.TURSO_AUTH_TOKEN;
+
+if (!tursoUrl || !tursoToken) {
+  console.error('[CRITICAL DATABASE CONFIG] Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.');
+  console.error('Please configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your .env file or environment settings.');
+}
+
 const client = createClient({
-  url: 'libsql://skinssence-skinssence.aws-ap-south-1.turso.io',
-  authToken: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc1NzI5MTMsImlkIjoiMDFhMDMzOWEtMTQwMS03OWFjLTlhNDQtY2MxNDQ5NGJjNTcyIiwia2lkIjoiR2FCTDVNaHZBYy1XRDh3SVBXbWlxcm9ZZ2ZxZmgxWGx5ajNORWpHVVc4MCIsInJpZCI6ImEwMWU3MTVhLTdiM2MtNDBiMS1iYWVlLWNjODJjMzU4MDI2NyJ9.iMhg3KM_Y-s1OyOfN5xisfSuZlE3i3dvyxjMgBC_vfwWs18Hb-btL6RSfpUQ_FvpMPnf7uDyJ3LT-CPI-7kpBQ'
+  url: tursoUrl,
+  authToken: tursoToken
 });
 
 function cleanParams(params) {
@@ -29,6 +39,19 @@ function cleanParams(params) {
     return cleanObj;
   }
   return params;
+}
+
+function sanitizeDbError(err) {
+  if (!err) return err;
+  const rawMsg = String(err.message || '');
+  const isUnique = rawMsg.toUpperCase().includes('UNIQUE');
+
+  // Safe client-facing message
+  const safeErr = new Error(isUnique ? 'UNIQUE constraint failed' : 'Internal server error');
+  safeErr.originalMessage = rawMsg;
+  safeErr.isDatabaseError = true;
+  safeErr.isUniqueConstraint = isUnique;
+  return safeErr;
 }
 
 class TursoSQLiteWrapper {
@@ -60,7 +83,7 @@ class TursoSQLiteWrapper {
       })
       .catch(err => {
         console.error('Turso DB Error (run):', err.message);
-        if (callback) callback(err);
+        if (callback) callback(sanitizeDbError(err));
       });
     return this;
   }
@@ -77,7 +100,7 @@ class TursoSQLiteWrapper {
       })
       .catch(err => {
         console.error('Turso DB Error (all):', err.message);
-        if (callback) callback(err);
+        if (callback) callback(sanitizeDbError(err));
       });
     return this;
   }
@@ -94,7 +117,7 @@ class TursoSQLiteWrapper {
       })
       .catch(err => {
         console.error('Turso DB Error (get):', err.message);
-        if (callback) callback(err);
+        if (callback) callback(sanitizeDbError(err));
       });
     return this;
   }

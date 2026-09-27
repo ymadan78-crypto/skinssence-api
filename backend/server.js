@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { rateLimit } = require('express-rate-limit');
+const helmet = require('helmet');
 let xlsx = null;
 try {
   xlsx = require('xlsx');
@@ -15,13 +17,97 @@ const db = require('./db');
 try {
   db.run('ALTER TABLE inventory_stock_movements ADD COLUMN unit_price REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE inventory_stock_movements ADD COLUMN total_amount REAL DEFAULT 0', () => {});
+  db.run('ALTER TABLE visits ADD COLUMN followup_status TEXT DEFAULT NULL', () => {});
+  db.run('ALTER TABLE visits ADD COLUMN followup_reason TEXT DEFAULT NULL', () => {});
 } catch (eMigration) {}
 
 
 const app = express();
-app.use(cors());
+app.use(helmet());
+
+// Phase 2C: Conservative CORS Configuration
+// Primary client is React Native native mobile app (non-browser), which does not send Origin headers.
+// For web clients (e.g. local Expo web or future configured web origins), restrict to verified origins.
+const configuredOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim().replace(/\/$/, '')).filter(Boolean)
+  : (process.env.NODE_ENV === 'production'
+      ? []
+      : [
+          'http://localhost:8081',
+          'http://localhost:19006',
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:8081'
+        ]);
+
+app.use(cors({
+  origin: configuredOrigins,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
+}));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Phase 3A: Response Error Sanitizer Middleware
+// Intercepts error responses (status >= 500) to ensure raw database details, SQL statements,
+// table/column names, stack traces, and internal driver errors are never returned to clients.
+function isInternalErrorDetails(val) {
+  if (!val) return false;
+  if (typeof val !== 'string') return true;
+  const rawPatterns = [
+    /sqlite/i,
+    /libsql/i,
+    /turso/i,
+    /syntax\s+error/i,
+    /no\s+such\s+(table|column)/i,
+    /constraint\s+failed/i,
+    /at\s+offset\s+\d+/i,
+    /database\s+is\s+locked/i,
+    /failed\s+to\s+prepare/i,
+    /prepare\s+error/i,
+    /execute\s+error/i,
+    /\b(select|insert|update|delete|drop|alter|create|table|from|where)\b/i,
+    /econnrefused/i,
+    /econnreset/i,
+    /etimedout/i,
+    /enotfound/i,
+    /node_modules/i,
+    /stack\s+trace/i,
+    /\.js:\d+/i,
+    /at\s+[\w.<>]+(?:\s+\(.*?\))?:\d+:\d+/i
+  ];
+  return rawPatterns.some(rx => rx.test(val));
+}
+
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  const originalSend = res.send.bind(res);
+
+  res.json = (body) => {
+    if (res.statusCode >= 500 && body && typeof body === 'object') {
+      if (body.error && isInternalErrorDetails(body.error)) {
+        console.error(`[Internal Error Sanitized] ${req.method} ${req.path}:`, body.error);
+        body.error = 'Internal server error';
+      }
+      if (body.message && isInternalErrorDetails(body.message)) {
+        console.error(`[Internal Error Sanitized] ${req.method} ${req.path}:`, body.message);
+        body.message = 'Internal server error';
+      }
+    }
+    return originalJson(body);
+  };
+
+  res.send = (body) => {
+    if (res.statusCode >= 500 && typeof body === 'string' && isInternalErrorDetails(body)) {
+      console.error(`[Internal Error Sanitized] ${req.method} ${req.path}:`, body);
+      return originalSend('Internal server error');
+    }
+    return originalSend(body);
+  };
+
+  next();
+});
 
 // ============================================================================
 // EMBEDDED SMART PHARMACY CAMERA SERVICE (Self-contained for zero-dependency deploys)
@@ -589,7 +675,23 @@ async function createDraftFromImage({
 
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_for_local_testing';
+
+// JWT Secret Configuration
+const isProduction = process.env.NODE_ENV === 'production';
+let JWT_SECRET = process.env.JWT_SECRET;
+
+if (isProduction) {
+  if (!JWT_SECRET || JWT_SECRET === 'super_secret_jwt_key_for_local_testing' || JWT_SECRET === 'replace_with_a_long_random_secret') {
+    console.error('[CRITICAL SECURITY CONFIG] In production, JWT_SECRET must be explicitly set to a unique, secure secret.');
+    console.error('The server refuses to start without a valid production JWT_SECRET environment variable.');
+    process.exit(1);
+  }
+} else {
+  if (!JWT_SECRET) {
+    console.warn('[SECURITY NOTICE] No JWT_SECRET found in environment. Using local development fallback.');
+    JWT_SECRET = 'dev_only_jwt_secret_for_local_offline_testing';
+  }
+}
 
 // Ensure permissions column exists
 db.run("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'", () => {});
@@ -810,7 +912,22 @@ const authorizeRole = (role) => {
 
 // --- AUTH ROUTES ---
 
-app.post('/api/login', (req, res) => {
+// Dedicated Login Rate Limiter (Brute-force protection)
+// - Policy: 5 failed attempts per 1-minute window per IP.
+// - skipSuccessfulRequests: true ensures legitimate logins NEVER consume attempts.
+// - Resets automatically after 1 minute; no permanent locks.
+const loginLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 5, // 5 failed attempts per IP per minute
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Too many login attempts. Please try again later.'
+  }
+});
+
+const handleLogin = (req, res) => {
   const { username, password } = req.body;
   
   db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
@@ -832,7 +949,10 @@ app.post('/api/login', (req, res) => {
       }
     });
   });
-});
+};
+
+app.post('/api/login', loginLimiter, handleLogin);
+app.post('/api/auth/login', loginLimiter, handleLogin);
 
 // --- PATIENT ROUTES ---
 
@@ -3363,6 +3483,55 @@ function getDailyCollectionBreakdown(targetDate, callback) {
   });
 }
 
+// Helper to calculate pending follow-up appointments for patients who visited on a given date (default today IST)
+function getPendingFollowupsData(targetDate, callback) {
+  const dateStr = targetDate || getISTDate();
+  const sql = `
+    SELECT p.id as patient_id, p.skinssence_id, p.first_name, p.last_name, p.mobile,
+           MAX(v.id) as latest_visit_id,
+           MAX(v.visit_date) as visit_date,
+           MAX(COALESCE(v.followup_status, '')) as followup_status,
+           MAX(COALESCE(v.followup_reason, '')) as followup_reason,
+           (
+             SELECT COUNT(*) 
+             FROM appointments a 
+             WHERE (a.patient_id = p.skinssence_id OR a.patient_id = CAST(p.id AS TEXT) OR a.mobile = p.mobile)
+               AND date(a.appointment_date) > date(?)
+               AND (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'NO_SHOW'))
+           ) as future_appointments_count,
+           (
+             SELECT MIN(a.appointment_date)
+             FROM appointments a
+             WHERE (a.patient_id = p.skinssence_id OR a.patient_id = CAST(p.id AS TEXT) OR a.mobile = p.mobile)
+               AND date(a.appointment_date) > date(?)
+               AND (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'NO_SHOW'))
+           ) as next_appointment_date
+    FROM visits v
+    JOIN patients p ON v.patient_id = p.id
+    WHERE (date(v.visit_date) = ? OR v.visit_date LIKE ?)
+      AND (v.planned_procedures IS NULL OR (v.planned_procedures NOT LIKE '%CANCEL%' AND v.planned_procedures NOT LIKE '%VOID%'))
+    GROUP BY p.id, p.skinssence_id, p.first_name, p.last_name, p.mobile
+    ORDER BY latest_visit_id DESC
+  `;
+
+  db.all(sql, [dateStr, dateStr, dateStr, `${dateStr}%`], (err, rows = []) => {
+    if (err) return callback(err);
+
+    const pendingPatients = rows.filter(r => 
+      (parseInt(r.future_appointments_count, 10) || 0) === 0 && 
+      r.followup_status !== 'NOT_REQUIRED'
+    );
+
+    callback(null, {
+      date: dateStr,
+      totalVisited: rows.length,
+      pendingCount: pendingPatients.length,
+      pendingPatients: pendingPatients,
+      allVisitedPatients: rows
+    });
+  });
+}
+
 // 1. Staff: Today's Collection
 app.get('/api/staff/collection/today', authenticateToken, (req, res) => {
   const today = req.query.date || getISTDate();
@@ -3752,17 +3921,20 @@ app.get('/api/admin/reports', authenticateToken, authorizeRole('DOCTOR'), (req, 
         label: monthsMap[k].fullMonthLabel
       }));
 
-      res.json({
-        today: todayStats,
-        currentMonth: currMonthObj,
-        previousMonth: prevMonthObj,
-        comparison,
-        monthWiseSales,
-        availableMonths,
-        // Legacy fields for backwards compatibility
-        todayLegacy: { clinic_points: todayProcRevenue, medicine_points: todayMedRevenue, expense: 0 },
-        months: {},
-        years: {}
+      getPendingFollowupsData(todayStr, (errF, fData) => {
+        todayStats.pendingFollowupsCount = fData ? fData.pendingCount : 0;
+        res.json({
+          today: todayStats,
+          currentMonth: currMonthObj,
+          previousMonth: prevMonthObj,
+          comparison,
+          monthWiseSales,
+          availableMonths,
+          // Legacy fields for backwards compatibility
+          todayLegacy: { clinic_points: todayProcRevenue, medicine_points: todayMedRevenue, expense: 0 },
+          months: {},
+          years: {}
+        });
       });
     });
     });
@@ -4268,7 +4440,9 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
                 total_collection: colData?.total_collection || 0,
                 procedure_collection: colData?.procedure_collection || 0,
                 medicine_collection: colData?.medicine_collection || 0,
-                modes: colData?.modes || []
+                modes: colData?.modes || [],
+                pending_followups_count: 0,
+                pending_followup_patients: []
               });
             }
 
@@ -4305,19 +4479,23 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
 
                   const adminTotalSale = cFeeTotal + procTotal + medTotal + redeemedPkgTotal;
 
-                  res.json({
-                    patients: patRow?.patients || 0,
-                    total_sale: adminTotalSale,
-                    total_service_value: adminTotalSale,
-                    package_redemption_value: redeemedPkgTotal,
-                    consultation_sale: cFeeTotal,
-                    procedure_sale: procTotal,
-                    medicine_sale: medTotal,
-                    collection: colData?.total_collection || 0,
-                    total_collection: colData?.total_collection || 0,
-                    procedure_collection: colData?.procedure_collection || 0,
-                    medicine_collection: colData?.medicine_collection || 0,
-                    modes: colData?.modes || []
+                  getPendingFollowupsData(today, (errF, fData) => {
+                    res.json({
+                      patients: patRow?.patients || 0,
+                      total_sale: adminTotalSale,
+                      total_service_value: adminTotalSale,
+                      package_redemption_value: redeemedPkgTotal,
+                      consultation_sale: cFeeTotal,
+                      procedure_sale: procTotal,
+                      medicine_sale: medTotal,
+                      collection: colData?.total_collection || 0,
+                      total_collection: colData?.total_collection || 0,
+                      procedure_collection: colData?.procedure_collection || 0,
+                      medicine_collection: colData?.medicine_collection || 0,
+                      modes: colData?.modes || [],
+                      pending_followups_count: fData ? fData.pendingCount : 0,
+                      pending_followup_patients: fData ? fData.pendingPatients : []
+                    });
                   });
                 });
               });
@@ -4335,6 +4513,7 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
 
   const sql = `
     SELECT v.id as visit_id, v.patient_id, v.visit_date, v.consultation_fee, v.planned_procedures,
+           v.followup_status, v.followup_reason,
            p.first_name, p.last_name, p.skinssence_id, p.mobile, u.name as staff_name
     FROM visits v
     JOIN patients p ON v.patient_id = p.id
@@ -4373,6 +4552,8 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
                 visit_date: v.visit_date,
                 planned_procedures: v.planned_procedures || '',
                 staff_name: v.staff_name,
+                followup_status: v.followup_status || null,
+                followup_reason: v.followup_reason || null,
                 consultation_fee: 0,
                 procedures: [],
                 medicines: [],
@@ -4386,6 +4567,10 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
 
             const pat = patientMap.get(v.patient_id);
             pat.visit_ids.push(v.visit_id);
+            if (v.followup_status) {
+              pat.followup_status = v.followup_status;
+              pat.followup_reason = v.followup_reason;
+            }
 
             const cFee = parseFloat(v.consultation_fee) || 0;
             pat.consultation_fee += cFee;
@@ -4413,12 +4598,35 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
             }
           });
 
-          const consolidated = Array.from(patientMap.values()).map(pat => {
-            pat.total_amount = pat.consultation_fee + pat.procedure_total + pat.medicine_total;
-            return pat;
-          });
+          db.all(
+            `SELECT a.patient_id, a.mobile, MIN(a.appointment_date) as next_appointment_date, COUNT(*) as cnt
+             FROM appointments a
+             WHERE date(a.appointment_date) > date(?)
+               AND (a.status IS NULL OR a.status NOT IN ('CANCELLED', 'NO_SHOW'))
+             GROUP BY a.patient_id, a.mobile`,
+            [today],
+            (errA, apptRows = []) => {
+              const consolidated = Array.from(patientMap.values()).map(pat => {
+                pat.total_amount = pat.consultation_fee + pat.procedure_total + pat.medicine_total;
+                const appt = (apptRows || []).find(a => 
+                  (a.patient_id && (a.patient_id === pat.skinssence_id || a.patient_id === String(pat.patient_id))) ||
+                  (a.mobile && pat.mobile && a.mobile === pat.mobile)
+                );
+                pat.future_appointments_count = appt ? appt.cnt : 0;
+                pat.next_appointment_date = appt ? appt.next_appointment_date : null;
+                if (pat.future_appointments_count > 0) {
+                  pat.computed_followup_status = 'BOOKED';
+                } else if (pat.followup_status === 'NOT_REQUIRED') {
+                  pat.computed_followup_status = 'NOT_REQUIRED';
+                } else {
+                  pat.computed_followup_status = 'PENDING';
+                }
+                return pat;
+              });
 
-          res.json(consolidated);
+              res.json(consolidated);
+            }
+          );
         });
       });
     });
@@ -4610,6 +4818,39 @@ app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
       }
     );
   }
+});
+
+// --- PENDING FOLLOW-UP REMINDER ROUTES ---
+// 1. Fetch pending follow-up appointments for today's visited patients
+app.get('/api/appointments/pending-followups', authenticateToken, (req, res) => {
+  const dateStr = req.query.date || getISTDate();
+  getPendingFollowupsData(dateStr, (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(data);
+  });
+});
+
+// 2. Mark patient's today's visit as Follow-up Not Required
+app.post('/api/appointments/followup-not-required', authenticateToken, (req, res) => {
+  const { patient_id, visit_id, reason, notes } = req.body;
+  if (!patient_id && !visit_id) {
+    return res.status(400).json({ error: 'patient_id or visit_id is required' });
+  }
+
+  const today = getISTDate();
+  const trimmedReason = (reason || 'Follow-up Not Required').trim();
+  const fullReason = notes && notes.trim() ? `${trimmedReason}: ${notes.trim()}` : trimmedReason;
+
+  db.run(
+    `UPDATE visits 
+     SET followup_status = 'NOT_REQUIRED', followup_reason = ? 
+     WHERE (id = ? AND id IS NOT NULL) OR (patient_id = ? AND (date(visit_date) = ? OR visit_date LIKE ?))`,
+    [fullReason, visit_id || null, patient_id || null, today, `${today}%`],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, message: 'Follow-up marked as not required' });
+    }
+  );
 });
 
 // --- USER & HR MANAGEMENT (ADMIN ONLY) ---
@@ -5917,3 +6158,13 @@ app.get('/api/admin/reconciliation/status', authenticateToken, (req, res) => {
     });
   });
 });
+
+// Phase 3A: Centralized Express Error Handler (catches unhandled exceptions and next(err))
+app.use((err, req, res, next) => {
+  console.error(`[Unhandled Server Error] ${req.method} ${req.path}:`, err?.message || err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({ error: 'Internal server error' });
+});
+
