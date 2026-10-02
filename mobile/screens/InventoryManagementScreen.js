@@ -163,10 +163,10 @@ function InventoryManagementScreenContent({ navigation }) {
     if (!selectedHistoryItem) return;
     const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
     setAdjustForm({
-      direction: isStaff ? 'ADD' : 'REDUCE',
-      quantity: '',
+      direction: 'REDUCE',
+      quantity: isStaff ? '1' : '',
       unit_price: selectedHistoryItem.mrp ? String(selectedHistoryItem.mrp) : '0',
-      reason_type: isStaff ? 'Stock count correction' : '🏥 Clinic Use',
+      reason_type: '🏥 Clinic Use',
       notes: ''
     });
     setIsAdjustModalVisible(true);
@@ -196,8 +196,15 @@ function InventoryManagementScreenContent({ navigation }) {
     }
     const signedQty = adjustForm.direction === 'REDUCE' ? -rawQty : rawQty;
     const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
+    const isClinicUse = adjustForm.reason_type && adjustForm.reason_type.includes('Clinic');
+
     if (isStaff && signedQty < 0) {
-      return Alert.alert('Permission Denied', 'Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.');
+      if (!isClinicUse) {
+        return Alert.alert('Permission Denied', 'Staff cannot reduce stock quantity for this reason. Only Admin or Doctor can reduce stock.');
+      }
+      if (rawQty !== 1) {
+        return Alert.alert('Quantity Limit', 'Staff is only allowed to deduct exactly 1 unit at a time for Clinic Use. For bulk quantities, please contact Doctor or Admin.');
+      }
     }
     setAdjustLoading(true);
     try {
@@ -221,6 +228,46 @@ function InventoryManagementScreenContent({ navigation }) {
     } finally {
       setAdjustLoading(false);
     }
+  };
+
+  const handleQuickClinicUse = (item) => {
+    if (!item) return;
+    const currentQty = parseFloat(item.quantity) || 0;
+    if (currentQty <= 0) {
+      return Alert.alert('Out of Stock', `Cannot deduct "${item.medicine_name}". Current stock is 0.`);
+    }
+
+    Alert.alert(
+      '🏥 Confirm Clinic Use',
+      `Deduct 1 ${item.unit || 'unit'} of "${item.medicine_name}" (Batch: ${item.batch_number || 'N/A'}) for in-house Clinic Use?\n\nCurrent stock: ${currentQty}\nNew stock will be: ${currentQty - 1}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm Deduct (-1)',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              const res = await axios.post(
+                `${BASE_URL}/${item.id}/adjust`,
+                {
+                  quantity: -1,
+                  reason_type: '🏥 Clinic Use',
+                  unit_price: parseFloat(item.mrp) || 0,
+                  notes: 'Quick clinic consumption logged by staff'
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              Alert.alert('✅ Stock Updated', `1 ${item.unit || 'unit'} of "${item.medicine_name}" deducted for Clinic Use!\n\nNew stock: ${res.data.newQuantity}`);
+              fetchInventory();
+            } catch (err) {
+              console.error('Quick clinic use error:', err);
+              Alert.alert('Adjustment Failed', err.response?.data?.error || err.message || 'Could not adjust stock.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const fetchInventory = async () => {
@@ -518,11 +565,9 @@ Do you want to proceed?`,
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
         <Text style={styles.headerTitle}>Manage Stock ({inventory.length})</Text>
         <View style={{flexDirection: 'row', gap: 6}}>
-          {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
-            <TouchableOpacity onPress={openClinicUseSummaryModal} style={[styles.addBtn, { backgroundColor: '#6d28d9', paddingHorizontal: 10 }]}>
-              <Text style={styles.addBtnText}>🏥 Clinic Use</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={openClinicUseSummaryModal} style={[styles.addBtn, { backgroundColor: '#6d28d9', paddingHorizontal: 10 }]}>
+            <Text style={styles.addBtnText}>🏥 Clinic Use</Text>
+          </TouchableOpacity>
           {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
             <TouchableOpacity onPress={openReconciliationModal} style={[styles.addBtn, { backgroundColor: '#4338ca', paddingHorizontal: 10 }]}>
               <Text style={styles.addBtnText}>🔄 Reconcile</Text>
@@ -618,6 +663,9 @@ Do you want to proceed?`,
                 ) : null}
               </View>
               <View style={styles.itemActions}>
+                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#7c3aed', marginBottom: 6}]} onPress={() => handleQuickClinicUse(item)}>
+                  <Text style={styles.actionBtnText}>🏥 Use 1</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#4338ca', marginBottom: 6}]} onPress={() => openItemHistoryModal(item)}>
                   <Text style={styles.actionBtnText}>History</Text>
                 </TouchableOpacity>
@@ -1303,10 +1351,13 @@ Do you want to proceed?`,
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
                 <TouchableOpacity
                   onPress={() => {
-                    if (userRole !== 'ADMIN' && userRole !== 'DOCTOR') {
-                      return Alert.alert('Permission Denied', 'Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.');
-                    }
-                    setAdjustForm({ ...adjustForm, direction: 'REDUCE' });
+                    const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
+                    setAdjustForm({
+                      ...adjustForm,
+                      direction: 'REDUCE',
+                      reason_type: isStaff ? '🏥 Clinic Use' : adjustForm.reason_type,
+                      quantity: isStaff ? '1' : adjustForm.quantity
+                    });
                   }}
                   style={{
                     flex: 1,
@@ -1342,9 +1393,11 @@ Do you want to proceed?`,
               </View>
 
               {userRole !== 'ADMIN' && userRole !== 'DOCTOR' && (
-                <Text style={{ fontSize: 11, color: '#dc2626', marginBottom: 10, fontWeight: '500' }}>
-                  🔒 Staff rule: Only Admin or Doctor can reduce stock. Staff can only make positive count corrections.
-                </Text>
+                <View style={{ backgroundColor: '#f5f3ff', padding: 8, borderRadius: 6, marginBottom: 10, borderWidth: 1, borderColor: '#ddd6fe' }}>
+                  <Text style={{ fontSize: 11, color: '#6d28d9', fontWeight: '500' }}>
+                    🏥 Staff rule: You are authorized to deduct <Text style={{ fontWeight: 'bold' }}>1 unit at a time</Text> for <Text style={{ fontWeight: 'bold' }}>🏥 Clinic Use</Text>. For other reasons or bulk quantities, contact Doctor/Admin.
+                  </Text>
+                </View>
               )}
 
               <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
@@ -1352,34 +1405,49 @@ Do you want to proceed?`,
               </Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. 2, 5, 10..."
+                placeholder={userRole !== 'ADMIN' && userRole !== 'DOCTOR' && adjustForm.direction === 'REDUCE' ? '1 (Staff limit: 1 unit)' : 'e.g. 1, 2, 5...'}
                 keyboardType="numeric"
                 value={adjustForm.quantity}
                 onChangeText={(v) => setAdjustForm({ ...adjustForm, quantity: v })}
               />
+              {userRole !== 'ADMIN' && userRole !== 'DOCTOR' && adjustForm.direction === 'REDUCE' && (
+                <Text style={{ fontSize: 10, color: '#7c3aed', marginBottom: 8, marginTop: -4 }}>
+                  ℹ️ Staff limit: Exactly 1 unit per clinic use entry
+                </Text>
+              )}
 
               <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
                 Adjustment Reason *
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {['🏥 Clinic Use', 'Stock count correction', 'Damaged', 'Expired', 'Wastage', 'Returned to supplier', 'Other'].map(r => (
-                  <TouchableOpacity
-                    key={r}
-                    onPress={() => setAdjustForm({ ...adjustForm, reason_type: r })}
-                    style={{
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      backgroundColor: adjustForm.reason_type === r ? '#b45309' : '#f3f4f6',
-                      borderWidth: 1,
-                      borderColor: adjustForm.reason_type === r ? '#b45309' : '#e5e7eb'
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: adjustForm.reason_type === r ? '#fff' : '#4b5563', fontWeight: adjustForm.reason_type === r ? 'bold' : 'normal' }}>
-                      {r}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {['🏥 Clinic Use', 'Stock count correction', 'Damaged', 'Expired', 'Wastage', 'Returned to supplier', 'Other'].map(r => {
+                  const isStaff = userRole !== 'ADMIN' && userRole !== 'DOCTOR';
+                  const isRestrictedForStaff = isStaff && adjustForm.direction === 'REDUCE' && !r.includes('Clinic');
+                  return (
+                    <TouchableOpacity
+                      key={r}
+                      onPress={() => {
+                        if (isRestrictedForStaff) {
+                          return Alert.alert('Staff Restriction', 'Staff can only reduce stock for 🏥 Clinic Use (1 unit at a time). Other reduction reasons require Doctor or Admin.');
+                        }
+                        setAdjustForm({ ...adjustForm, reason_type: r });
+                      }}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 12,
+                        backgroundColor: adjustForm.reason_type === r ? '#b45309' : '#f3f4f6',
+                        borderWidth: 1,
+                        borderColor: adjustForm.reason_type === r ? '#b45309' : '#e5e7eb',
+                        opacity: isRestrictedForStaff ? 0.45 : 1
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, color: adjustForm.reason_type === r ? '#fff' : (isRestrictedForStaff ? '#9ca3af' : '#4b5563'), fontWeight: adjustForm.reason_type === r ? 'bold' : 'normal' }}>
+                        {r}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>
