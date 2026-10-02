@@ -1095,10 +1095,11 @@ app.delete('/api/patients/:id', authenticateToken, (req, res) => {
     // Actually, SQLite doesn't natively do ON DELETE CASCADE unless enabled, but we can do a simplified delete if they are explicitly deleting a patient
     db.all('SELECT id FROM visits WHERE patient_id = ?', [id], (err, rows) => {
       if (!err && rows && rows.length > 0) {
-        const vIds = rows.map(r => r.id).join(',');
-        db.run(`DELETE FROM procedures WHERE visit_id IN (${vIds})`);
-        db.run(`DELETE FROM medicines WHERE visit_id IN (${vIds})`);
-        db.run(`DELETE FROM payments WHERE visit_id IN (${vIds})`);
+        const placeholders = rows.map(() => '?').join(',');
+        const visitIds = rows.map(r => r.id);
+        db.run(`DELETE FROM procedures WHERE visit_id IN (${placeholders})`, visitIds);
+        db.run(`DELETE FROM medicines WHERE visit_id IN (${placeholders})`, visitIds);
+        db.run(`DELETE FROM payments WHERE visit_id IN (${placeholders})`, visitIds);
         db.run(`DELETE FROM visits WHERE patient_id = ?`, [id]);
       }
       
@@ -1511,11 +1512,50 @@ app.post('/api/visits', authenticateToken, (req, res) => {
     net_payable: rawNetPayable 
   } = req.body;
 
+  if (!patient_id) {
+    return res.status(400).json({ error: 'Patient ID is required' });
+  }
+
+  // Financial validation for procedures
+  if (req.body.procedures && Array.isArray(req.body.procedures)) {
+    for (const p of req.body.procedures) {
+      const pAmt = parseFloat(p.amount);
+      if (!Number.isFinite(pAmt) || pAmt < 0) {
+        return res.status(400).json({ error: 'Procedure amount must be a valid non-negative number' });
+      }
+    }
+  } else if (procedure_amount !== undefined && procedure_amount !== null && procedure_amount !== '') {
+    const pAmt = parseFloat(procedure_amount);
+    if (!Number.isFinite(pAmt) || pAmt < 0) {
+      return res.status(400).json({ error: 'Procedure amount must be a valid non-negative number' });
+    }
+  }
+
+  // Financial validation for medicine amount
+  if (medicine_amount !== undefined && medicine_amount !== null && medicine_amount !== '') {
+    const mAmt = parseFloat(medicine_amount);
+    if (!Number.isFinite(mAmt) || mAmt < 0) {
+      return res.status(400).json({ error: 'Medicine amount must be a valid non-negative number' });
+    }
+  }
+
+  // Financial validation for package sold
+  if (package_sold) {
+    const pkgAmt = parseFloat(package_sold.amount);
+    const pkgSessions = parseInt(package_sold.total_sessions, 10);
+    if (!Number.isFinite(pkgAmt) || pkgAmt < 0) {
+      return res.status(400).json({ error: 'Package amount must be a valid non-negative number' });
+    }
+    if (!Number.isFinite(pkgSessions) || pkgSessions <= 0) {
+      return res.status(400).json({ error: 'Package total sessions must be at least 1' });
+    }
+  }
+
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     
     let consultation_fee = parseFloat(req.body.consultation_fee);
-    if (isNaN(consultation_fee)) consultation_fee = 0;
+    if (!Number.isFinite(consultation_fee) || consultation_fee < 0) consultation_fee = 0;
 
     // Clinic Rule: If any procedure is performed with fee, consultation fee is automatically zero
     let hasProcWithFee = false;
@@ -1539,137 +1579,180 @@ app.post('/api/visits', authenticateToken, (req, res) => {
       procSum = parseFloat(req.body.procedure_amount) || 0;
     }
 
-    // Check if pharmacy sale already exists for this patient on this date
-    // to prevent duplicate medicine records and double billing
-    db.get(
-      `SELECT id FROM visits WHERE patient_id = ? AND planned_procedures = 'PHARMACY SALE' AND date(visit_date) = date(?) LIMIT 1`,
-      [patient_id, targetDateStr],
-      (errChk, existingPharmVisit) => {
-        if (errChk) return db.run('ROLLBACK', () => res.status(500).json({ error: errChk.message }));
-
-        const isSeparatePharmacySale = !!existingPharmVisit;
-        const medSum = isSeparatePharmacySale ? 0 : (parseFloat(req.body.medicine_amount) || 0);
-        const calculatedSubtotal = consultation_fee + procSum + medSum;
-        const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null 
-          ? (isSeparatePharmacySale && rawSubtotal > procSum + consultation_fee ? (procSum + consultation_fee) : (parseFloat(rawSubtotal) || 0))
-          : calculatedSubtotal;
-
-        const finalDiscType = (discount_type || 'NONE').toUpperCase();
-        const finalDiscVal = parseFloat(discount_value) || 0;
-        const finalDiscAmt = parseFloat(discount_amount) || 0;
-        const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
-          ? (isSeparatePharmacySale && rawNetPayable > finalSubtotal ? finalSubtotal : (parseFloat(rawNetPayable) || 0))
-          : Math.max(0, finalSubtotal - finalDiscAmt);
-
-        const onVisitReady = (visit_id) => {
-          // 2. Add Procedures (array)
-          if (req.body.procedures && Array.isArray(req.body.procedures)) {
-            req.body.procedures.forEach(p => {
-              if (p.name && p.name.trim() !== '') {
-                db.run('INSERT INTO procedures (visit_id, procedure_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?, ?)', 
-                  [visit_id, p.procedure_id || null, p.name.trim(), notes || '', parseFloat(p.amount) || 0, p.area || '']);
-              }
-            });
-          } else if (req.body.procedure_name && req.body.procedure_name.trim() !== '') {
-            db.run('INSERT INTO procedures (visit_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?)', 
-              [visit_id, req.body.procedure_name.trim(), notes || '', parseFloat(req.body.procedure_amount) || 0, req.body.area || '']);
+    // Verify package redemption validity if package_redeemed_id provided
+    const checkRedeemedPackage = (nextCheck) => {
+      if (!package_redeemed_id) return nextCheck();
+      db.get(
+        'SELECT id, patient_id, total_sessions, sessions_used FROM patient_packages WHERE id = ?',
+        [package_redeemed_id],
+        (errPkg, pkgRow) => {
+          if (errPkg) return db.run('ROLLBACK', () => res.status(500).json({ error: errPkg.message }));
+          if (!pkgRow) return db.run('ROLLBACK', () => res.status(400).json({ error: 'Redeemed package not found' }));
+          if (String(pkgRow.patient_id) !== String(patient_id)) {
+            return db.run('ROLLBACK', () => res.status(400).json({ error: 'Redeemed package does not belong to this patient' }));
           }
-          
-          // 3. Package Redeemed? Update usage count
-          if (package_redeemed_id) {
-            db.run('UPDATE patient_packages SET sessions_used = sessions_used + 1 WHERE id = ?', [package_redeemed_id]);
+          if ((pkgRow.sessions_used || 0) >= (pkgRow.total_sessions || 0)) {
+            return db.run('ROLLBACK', () => res.status(400).json({ error: 'Package has no remaining sessions to redeem' }));
           }
+          nextCheck();
+        }
+      );
+    };
 
-          // 4. Package Sold? Register as procedure for income, and create package row
-          if (package_sold) {
-            db.run('INSERT INTO procedures (visit_id, name, notes, amount) VALUES (?, ?, ?, ?)', 
-              [visit_id, `[Package Sold] ${package_sold.name}`, 'Prepaid Package', package_sold.amount]);
-            db.run('INSERT INTO packages (patient_id, package_name, total_sessions) VALUES (?, ?, ?)',
-              [patient_id, package_sold.name, package_sold.total_sessions]);
-            db.run('INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)',
-              [patient_id, package_sold.name, package_sold.total_sessions, package_sold.amount, payment_mode || 'CASH', staff_id, finalVisitDate]);
-          }
-          
-          // 5. Add Medicine (only if not already recorded under a separate pharmacy visit)
-          if (medicine_details && !isSeparatePharmacySale) {
-            db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
-              [visit_id, medicine_details, parseFloat(medicine_amount) || 0]);
-          }
-          
-          // 6. Add Payment (if any)
-          const payAmount = parseFloat(amount_received) || 0;
-          
-          // Check if previous payments exist for this visit (e.g. from registration)
-          db.get('SELECT COALESCE(SUM(amount_received), 0) as already_paid FROM payments WHERE visit_id = ?', [visit_id], (errPrev, prevRow) => {
-            const alreadyPaid = prevRow ? (parseFloat(prevRow.already_paid) || 0) : 0;
-            const netToRecord = payAmount - alreadyPaid;
+    checkRedeemedPackage(() => {
+      // Check if pharmacy sale already exists for this patient on this date
+      // to prevent duplicate medicine records and double billing
+      db.get(
+        `SELECT id FROM visits WHERE patient_id = ? AND planned_procedures = 'PHARMACY SALE' AND date(visit_date) = date(?) LIMIT 1`,
+        [patient_id, targetDateStr],
+        (errChk, existingPharmVisit) => {
+          if (errChk) return db.run('ROLLBACK', () => res.status(500).json({ error: errChk.message }));
 
-            if (netToRecord > 0 && payment_mode !== 'PACKAGE_REDEMPTION') {
-              db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
-                [visit_id, patient_id, payment_mode, netToRecord, finalVisitDate, 'VISIT']);
-                
-              if (payment_mode === 'PREPAID_WALLET') {
-                db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [netToRecord, patient_id]);
-                db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                  [patient_id, netToRecord, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
-              }
+          const isSeparatePharmacySale = !!existingPharmVisit;
+          const medSum = isSeparatePharmacySale ? 0 : (parseFloat(req.body.medicine_amount) || 0);
+          const calculatedSubtotal = consultation_fee + procSum + medSum;
+          const rawSubNum = parseFloat(rawSubtotal);
+          const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null && Number.isFinite(rawSubNum) && rawSubNum >= 0
+            ? (isSeparatePharmacySale && rawSubNum > procSum + consultation_fee ? (procSum + consultation_fee) : rawSubNum)
+            : calculatedSubtotal;
+
+          const finalDiscType = (discount_type || 'NONE').toUpperCase();
+          const rawDiscVal = parseFloat(discount_value);
+          const finalDiscVal = Number.isFinite(rawDiscVal) && rawDiscVal >= 0 ? (finalDiscType === 'PERCENTAGE' ? Math.min(100, rawDiscVal) : rawDiscVal) : 0;
+          const rawDiscAmt = parseFloat(discount_amount);
+          const finalDiscAmt = Number.isFinite(rawDiscAmt) && rawDiscAmt >= 0 ? Math.min(finalSubtotal, rawDiscAmt) : 0;
+          const rawNet = parseFloat(rawNetPayable);
+          const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null && Number.isFinite(rawNet) && rawNet >= 0
+            ? (isSeparatePharmacySale && rawNet > finalSubtotal ? finalSubtotal : rawNet)
+            : Math.max(0, finalSubtotal - finalDiscAmt);
+
+          const onVisitReady = (visit_id) => {
+            // 2. Add Procedures (array)
+            if (req.body.procedures && Array.isArray(req.body.procedures)) {
+              req.body.procedures.forEach(p => {
+                if (p.name && p.name.trim() !== '') {
+                  db.run('INSERT INTO procedures (visit_id, procedure_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?, ?)', 
+                    [visit_id, p.procedure_id || null, p.name.trim(), notes || '', parseFloat(p.amount) || 0, p.area || '']);
+                }
+              });
+            } else if (req.body.procedure_name && req.body.procedure_name.trim() !== '') {
+              db.run('INSERT INTO procedures (visit_id, name, notes, amount, area) VALUES (?, ?, ?, ?, ?)', 
+                [visit_id, req.body.procedure_name.trim(), notes || '', parseFloat(req.body.procedure_amount) || 0, req.body.area || '']);
+            }
+            
+            // 3. Package Redeemed? Update usage count
+            if (package_redeemed_id) {
+              db.run('UPDATE patient_packages SET sessions_used = sessions_used + 1 WHERE id = ?', [package_redeemed_id]);
             }
 
-            db.run('COMMIT', (err) => {
-              if (err) return res.status(500).json({ error: 'Commit failed' });
-              res.json({ 
-                message: 'Visit recorded successfully!', 
-                visit_id,
-                subtotal: finalSubtotal,
-                discount_amount: finalDiscAmt,
-                net_payable: finalNetPayable
-              });
-            });
-          });
-        };
+            // 4. Package Sold? Register as procedure for income, and create package row
+            if (package_sold) {
+              db.run('INSERT INTO procedures (visit_id, name, notes, amount) VALUES (?, ?, ?, ?)', 
+                [visit_id, `[Package Sold] ${package_sold.name}`, 'Prepaid Package', package_sold.amount]);
+              db.run('INSERT INTO packages (patient_id, package_name, total_sessions) VALUES (?, ?, ?)',
+                [patient_id, package_sold.name, package_sold.total_sessions]);
+              db.run('INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)',
+                [patient_id, package_sold.name, package_sold.total_sessions, package_sold.amount, payment_mode || 'CASH', staff_id, finalVisitDate]);
+            }
+            
+            // 5. Add Medicine (only if not already recorded under a separate pharmacy visit)
+            if (medicine_details && !isSeparatePharmacySale) {
+              db.run('INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)', 
+                [visit_id, medicine_details, parseFloat(medicine_amount) || 0]);
+            }
+            
+            // 6. Add Payment (if any)
+            const payAmount = Math.max(0, parseFloat(amount_received) || 0);
+            
+            // Check if previous payments exist for this visit (e.g. from registration)
+            db.get('SELECT COALESCE(SUM(amount_received), 0) as already_paid FROM payments WHERE visit_id = ?', [visit_id], (errPrev, prevRow) => {
+              const alreadyPaid = prevRow ? (parseFloat(prevRow.already_paid) || 0) : 0;
+              const netToRecord = payAmount - alreadyPaid;
 
-        if (existing_visit_id) {
-          // Update existing enrollment visit
-          const updateQ = `
-            UPDATE visits SET
-              staff_id = ?,
-              planned_procedures = ?,
-              consultation_fee = ?,
-              subtotal = ?,
-              discount_type = ?,
-              discount_value = ?,
-              discount_amount = ?,
-              net_payable = ?
-            WHERE id = ?
-          `;
-          db.run(updateQ, [
-            staff_id, planned_procedures || 'CONSULTATION', consultation_fee,
-            finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable,
-            existing_visit_id
-          ], function(errUp) {
-            if (errUp) return db.run('ROLLBACK', () => res.status(500).json({ error: errUp.message }));
-            onVisitReady(existing_visit_id);
-          });
-        } else {
-          // 1. Create Visit with consultation_fee, visit_date, and discount fields
-          const q = `
-            INSERT INTO visits (
-              patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
-              subtotal, discount_type, discount_value, discount_amount, net_payable
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `;
-          const params = [
-            patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate,
-            finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
-          ];
-          
-          db.run(q, params, function(err) {
-            if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-            onVisitReady(this.lastID);
-          });
+              const recordPaymentAndCommit = () => {
+                if (netToRecord > 0 && payment_mode !== 'PACKAGE_REDEMPTION') {
+                  db.run('INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)', 
+                    [visit_id, patient_id, payment_mode, netToRecord, finalVisitDate, 'VISIT']);
+                    
+                  if (payment_mode === 'PREPAID_WALLET') {
+                    db.run('UPDATE patients SET wallet_balance = wallet_balance - ? WHERE id = ?', [netToRecord, patient_id]);
+                    db.run('INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                      [patient_id, netToRecord, 'DEBIT', 'Used for Visit #' + visit_id, 'SYSTEM', staff_id, finalVisitDate]);
+                  }
+                }
+
+                db.run('COMMIT', (err) => {
+                  if (err) return res.status(500).json({ error: 'Commit failed' });
+                  res.json({ 
+                    message: 'Visit recorded successfully!', 
+                    visit_id,
+                    subtotal: finalSubtotal,
+                    discount_amount: finalDiscAmt,
+                    net_payable: finalNetPayable
+                  });
+                });
+              };
+
+              if (payment_mode === 'PREPAID_WALLET' && netToRecord > 0) {
+                db.get('SELECT wallet_balance FROM patients WHERE id = ?', [patient_id], (errWal, patRow) => {
+                  if (errWal) return db.run('ROLLBACK', () => res.status(500).json({ error: errWal.message }));
+                  const curBal = patRow ? (parseFloat(patRow.wallet_balance) || 0) : 0;
+                  if (curBal < netToRecord) {
+                    return db.run('ROLLBACK', () => res.status(400).json({ 
+                      error: `Insufficient wallet balance (₹${curBal.toFixed(2)}) for payment of ₹${netToRecord.toFixed(2)}` 
+                    }));
+                  }
+                  recordPaymentAndCommit();
+                });
+              } else {
+                recordPaymentAndCommit();
+              }
+            });
+          };
+
+          if (existing_visit_id) {
+            // Update existing enrollment visit
+            const updateQ = `
+              UPDATE visits SET
+                staff_id = ?,
+                planned_procedures = ?,
+                consultation_fee = ?,
+                subtotal = ?,
+                discount_type = ?,
+                discount_value = ?,
+                discount_amount = ?,
+                net_payable = ?
+              WHERE id = ?
+            `;
+            db.run(updateQ, [
+              staff_id, planned_procedures || 'CONSULTATION', consultation_fee,
+              finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable,
+              existing_visit_id
+            ], function(errUp) {
+              if (errUp) return db.run('ROLLBACK', () => res.status(500).json({ error: errUp.message }));
+              onVisitReady(existing_visit_id);
+            });
+          } else {
+            // 1. Create Visit with consultation_fee, visit_date, and discount fields
+            const q = `
+              INSERT INTO visits (
+                patient_id, staff_id, planned_procedures, consultation_fee, visit_date,
+                subtotal, discount_type, discount_value, discount_amount, net_payable
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            const params = [
+              patient_id, staff_id, planned_procedures || '', consultation_fee, finalVisitDate,
+              finalSubtotal, finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
+            ];
+            
+            db.run(q, params, function(err) {
+              if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
+              onVisitReady(this.lastID);
+            });
+          }
         }
-      }
-    );
+      );
+    });
   });
 });
 
@@ -1741,16 +1824,37 @@ app.post('/api/pharmacy/sell', authenticateToken, (req, res) => {
   const staff_id = req.user.id;
   const finalVisitDate = visit_date || new Date().toISOString();
 
-  if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'No medicines selected' });
+  if (!patient_id) return res.status(400).json({ error: 'Patient ID is required' });
+  if (!medicines_sold || !Array.isArray(medicines_sold) || medicines_sold.length === 0) {
+    return res.status(400).json({ error: 'No medicines selected' });
+  }
+
+  // Validate each sold medicine
+  for (const m of medicines_sold) {
+    const qty = parseFloat(m.quantity);
+    const amt = parseFloat(m.amount);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ error: `Invalid quantity for medicine "${m.medicine_name || 'Item'}". Must be greater than 0.` });
+    }
+    if (!Number.isFinite(amt) || amt < 0) {
+      return res.status(400).json({ error: `Invalid amount for medicine "${m.medicine_name || 'Item'}". Cannot be negative.` });
+    }
+  }
 
   // Calculate items subtotal and net payable
   const itemsSubtotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null ? (parseFloat(rawSubtotal) || 0) : itemsSubtotal;
+  const rawSubNum = parseFloat(rawSubtotal);
+  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null && Number.isFinite(rawSubNum) && rawSubNum >= 0
+    ? rawSubNum
+    : itemsSubtotal;
   const finalDiscType = (discount_type || 'NONE').toUpperCase();
-  const finalDiscVal = parseFloat(discount_value) || 0;
-  const finalDiscAmt = parseFloat(discount_amount) || 0;
-  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
-    ? (parseFloat(rawNetPayable) || 0) 
+  const rawDiscVal = parseFloat(discount_value);
+  const finalDiscVal = Number.isFinite(rawDiscVal) && rawDiscVal >= 0 ? (finalDiscType === 'PERCENTAGE' ? Math.min(100, rawDiscVal) : rawDiscVal) : 0;
+  const rawDiscAmt = parseFloat(discount_amount);
+  const finalDiscAmt = Number.isFinite(rawDiscAmt) && rawDiscAmt >= 0 ? Math.min(finalSubtotal, rawDiscAmt) : 0;
+  const rawNet = parseFloat(rawNetPayable);
+  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null && Number.isFinite(rawNet) && rawNet >= 0
+    ? rawNet
     : Math.max(0, finalSubtotal - finalDiscAmt);
 
   // Enhanced duplicate submission protection: prevents same-day duplicate bills and updates uncollected bills
@@ -2034,15 +2138,35 @@ app.post('/api/pharmacy/camera/confirm', authenticateToken, (req, res) => {
   const staff_id = req.user.id;
 
   if (!patient_id) return res.status(400).json({ error: 'Patient is required to finalize bill.' });
-  if (!medicines_sold || medicines_sold.length === 0) return res.status(400).json({ error: 'Cart has no medicines.' });
+  if (!medicines_sold || !Array.isArray(medicines_sold) || medicines_sold.length === 0) {
+    return res.status(400).json({ error: 'Cart has no medicines.' });
+  }
+
+  // Validate each sold medicine
+  for (const m of medicines_sold) {
+    const qty = parseFloat(m.quantity);
+    const amt = parseFloat(m.amount);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ error: `Invalid quantity for medicine "${m.medicine_name || 'Item'}". Must be greater than 0.` });
+    }
+    if (!Number.isFinite(amt) || amt < 0) {
+      return res.status(400).json({ error: `Invalid amount for medicine "${m.medicine_name || 'Item'}". Cannot be negative.` });
+    }
+  }
 
   const itemsSubtotal = medicines_sold.reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null ? (parseFloat(rawSubtotal) || 0) : itemsSubtotal;
+  const rawSubNum = parseFloat(rawSubtotal);
+  const finalSubtotal = rawSubtotal !== undefined && rawSubtotal !== null && Number.isFinite(rawSubNum) && rawSubNum >= 0
+    ? rawSubNum
+    : itemsSubtotal;
   const finalDiscType = (discount_type || 'NONE').toUpperCase();
-  const finalDiscVal = parseFloat(discount_value) || 0;
-  const finalDiscAmt = parseFloat(discount_amount) || 0;
-  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null 
-    ? (parseFloat(rawNetPayable) || 0) 
+  const rawDiscVal = parseFloat(discount_value);
+  const finalDiscVal = Number.isFinite(rawDiscVal) && rawDiscVal >= 0 ? (finalDiscType === 'PERCENTAGE' ? Math.min(100, rawDiscVal) : rawDiscVal) : 0;
+  const rawDiscAmt = parseFloat(discount_amount);
+  const finalDiscAmt = Number.isFinite(rawDiscAmt) && rawDiscAmt >= 0 ? Math.min(finalSubtotal, rawDiscAmt) : 0;
+  const rawNet = parseFloat(rawNetPayable);
+  const finalNetPayable = rawNetPayable !== undefined && rawNetPayable !== null && Number.isFinite(rawNet) && rawNet >= 0
+    ? rawNet
     : Math.max(0, finalSubtotal - finalDiscAmt);
   const finalVisitDate = new Date().toISOString();
 
@@ -2202,11 +2326,12 @@ app.get('/api/patients/:id/pharmacy-by-date', authenticateToken, (req, res) => {
         return res.json({ found: false, medicines: [], total_amount: 0, amount_paid: 0, payments: [] });
       }
 
-      const visitIds = visits.map(v => v.visit_id).join(',');
-      db.all(`SELECT * FROM medicines WHERE visit_id IN (${visitIds})`, [], (errM, meds) => {
+      const placeholders = visits.map(() => '?').join(',');
+      const vIdList = visits.map(v => v.visit_id);
+      db.all(`SELECT * FROM medicines WHERE visit_id IN (${placeholders})`, vIdList, (errM, meds) => {
         if (errM) return res.status(500).json({ error: errM.message });
 
-        db.all(`SELECT * FROM payments WHERE visit_id IN (${visitIds})`, [], (errP, pays) => {
+        db.all(`SELECT * FROM payments WHERE visit_id IN (${placeholders})`, vIdList, (errP, pays) => {
           if (errP) return res.status(500).json({ error: errP.message });
 
           const medicines = meds || [];
@@ -2239,14 +2364,24 @@ app.get('/api/inventory/all', authenticateToken, (req, res) => {
 
 app.post('/api/inventory', authenticateToken, (req, res) => {
   const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '', unit = 'units', reorder_level = 5 } = req.body;
-  if (!medicine_name) return res.status(400).json({ error: 'Medicine name required' });
+  if (!medicine_name || !medicine_name.trim()) return res.status(400).json({ error: 'Medicine name required' });
 
   const initialQty = parseFloat(quantity) || 0;
+  if (!Number.isFinite(initialQty) || initialQty < 0) {
+    return res.status(400).json({ error: 'Quantity must be a valid non-negative number' });
+  }
+  const parsedMrp = parseFloat(mrp) || 0;
+  if (!Number.isFinite(parsedMrp) || parsedMrp < 0) {
+    return res.status(400).json({ error: 'MRP must be a valid non-negative number' });
+  }
+  const parsedReorder = parseInt(reorder_level, 10);
+  const finalReorder = Number.isFinite(parsedReorder) && parsedReorder >= 0 ? parsedReorder : 5;
+
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
 
   db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions, unit, reorder_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [medicine_name, batch_number, mrp || 0, initialQty, expiry_date, default_instructions, unit || 'units', parseInt(reorder_level, 10) || 5],
+    [medicine_name.trim(), batch_number, parsedMrp, initialQty, expiry_date, default_instructions, unit || 'units', finalReorder],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       const newItemId = this.lastID;
@@ -2258,7 +2393,7 @@ app.post('/api/inventory', authenticateToken, (req, res) => {
             previous_quantity, new_quantity, reason, reference_type, reference_id,
             user_id, user_name, created_at
           ) VALUES (?, ?, ?, 'OPENING_STOCK', ?, 0, ?, 'Initial opening stock', 'OPENING_STOCK', ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [newItemId, medicine_name, batch_number, initialQty, initialQty, String(newItemId), userId, userName],
+          [newItemId, medicine_name.trim(), batch_number, initialQty, initialQty, String(newItemId), userId, userName],
           (errMov) => {
             if (errMov) console.error('Failed to log opening stock movement:', errMov);
             res.json({ id: newItemId, message: 'Item created with opening stock' });
@@ -2285,6 +2420,10 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
     const existingQty = parseFloat(existingRow.quantity) || 0;
     const newQty = (quantity !== undefined && quantity !== null) ? parseFloat(quantity) : existingQty;
 
+    if (!Number.isFinite(newQty) || newQty < 0) {
+      return res.status(400).json({ error: 'Stock quantity must be a valid non-negative number.' });
+    }
+
     // Staff cannot reduce already entered stock quantity
     if (!isPrivileged && newQty < existingQty) {
       return res.status(403).json({
@@ -2292,15 +2431,17 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
       });
     }
 
-    if (newQty < 0) {
-      return res.status(400).json({ error: 'Stock quantity cannot be negative.' });
+    const parsedMrp = mrp !== undefined ? parseFloat(mrp) : parseFloat(existingRow.mrp || 0);
+    if (!Number.isFinite(parsedMrp) || parsedMrp < 0) {
+      return res.status(400).json({ error: 'MRP must be a valid non-negative number.' });
     }
 
     const finalUnit = unit !== undefined ? unit : (existingRow.unit || 'units');
-    const finalReorder = reorder_level !== undefined ? parseInt(reorder_level, 10) : (existingRow.reorder_level || 5);
+    const parsedReorder = reorder_level !== undefined ? parseInt(reorder_level, 10) : parseInt(existingRow.reorder_level || 5, 10);
+    const finalReorder = Number.isFinite(parsedReorder) && parsedReorder >= 0 ? parsedReorder : 5;
     const finalName = medicine_name || existingRow.medicine_name;
     const finalBatch = batch_number !== undefined ? batch_number : existingRow.batch_number;
-    const finalMrp = mrp !== undefined ? mrp : existingRow.mrp;
+    const finalMrp = parsedMrp;
     const finalExp = expiry_date !== undefined ? expiry_date : existingRow.expiry_date;
     const finalInst = default_instructions !== undefined ? default_instructions : existingRow.default_instructions;
 
@@ -2340,7 +2481,7 @@ app.post('/api/inventory/:id/add-stock', authenticateToken, (req, res) => {
   const { quantity, batch_number, expiry_date, reason = '', notes = '' } = req.body;
   const addQty = parseFloat(quantity);
 
-  if (isNaN(addQty) || addQty <= 0) {
+  if (!Number.isFinite(addQty) || addQty <= 0) {
     return res.status(400).json({ error: 'Quantity to add must be greater than zero.' });
   }
 
@@ -2412,18 +2553,27 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
   const { quantity, reason_type = 'Stock count correction', notes = '', unit_price: reqUnitPrice } = req.body;
   const delta = parseFloat(quantity);
 
-  if (isNaN(delta) || delta === 0) {
+  if (!Number.isFinite(delta) || delta === 0) {
     return res.status(400).json({ error: 'Adjustment quantity cannot be zero.' });
   }
 
-  // Staff cannot reduce stock unless it is a clinic consumption authorized by doctor
+  const isClinicUse = (reason_type && (reason_type.includes('Clinic') || reason_type.includes('Procedure')));
+
+  // Staff permission check:
+  // Staff cannot reduce stock unless it is a clinic consumption authorized by doctor, limited to 1 unit at a time
   if (!isPrivileged && delta < 0) {
-    return res.status(403).json({
-      error: 'Permission denied: Staff cannot reduce stock quantity. Only Admin or Doctor can reduce stock.'
-    });
+    if (!isClinicUse) {
+      return res.status(403).json({
+        error: 'Permission denied: Staff cannot reduce stock quantity for this reason. Only Admin or Doctor can reduce stock.'
+      });
+    }
+    if (Math.abs(delta) !== 1) {
+      return res.status(400).json({
+        error: 'Staff permission limit: Staff can only deduct 1 unit at a time for Clinic Use. For bulk consumption, contact Doctor/Admin.'
+      });
+    }
   }
 
-  const isClinicUse = (reason_type && (reason_type.includes('Clinic') || reason_type.includes('Procedure')));
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
 
@@ -2453,7 +2603,8 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
             return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
           }
 
-          const unitVal = parseFloat(reqUnitPrice) || parseFloat(item.mrp) || 0;
+          const reqVal = reqUnitPrice !== undefined && reqUnitPrice !== null ? parseFloat(reqUnitPrice) : null;
+          const unitVal = (reqVal !== null && Number.isFinite(reqVal) && reqVal >= 0) ? reqVal : (parseFloat(item.mrp) || 0);
           const totalVal = Math.abs(delta) * unitVal;
           const movementType = isClinicUse ? 'CLINIC_USE' : (delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT'));
           const valueText = totalVal > 0 ? `Value: ₹${Math.round(totalVal)} (@₹${unitVal}/unit)` : '';
@@ -3159,8 +3310,28 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
   const { category, vendor, amount, expense_date, notes, raw_ocr_text, inventory_items, update_inventory } = req.body;
   const staff_id = req.user.id;
 
-  if (!category || !amount) {
-    return res.status(400).json({ error: 'Category and Amount are mandatory' });
+  if (!category || !category.trim()) {
+    return res.status(400).json({ error: 'Category is required' });
+  }
+
+  const parsedAmount = parseFloat(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Amount must be a valid positive number' });
+  }
+
+  if (category === 'Pharmacy' && inventory_items && inventory_items.length > 0 && update_inventory) {
+    for (const item of inventory_items) {
+      const iQty = parseFloat(item.quantity);
+      if (!Number.isFinite(iQty) || iQty <= 0) {
+        return res.status(400).json({ error: `Invalid quantity for item "${item.medicine_name || 'Item'}". Must be greater than 0.` });
+      }
+      if (item.mrp !== undefined && item.mrp !== null && item.mrp !== '') {
+        const iMrp = parseFloat(item.mrp);
+        if (!Number.isFinite(iMrp) || iMrp < 0) {
+          return res.status(400).json({ error: `Invalid MRP for item "${item.medicine_name || 'Item'}". Cannot be negative.` });
+        }
+      }
+    }
   }
 
   db.serialize(() => {
@@ -3169,7 +3340,7 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
     db.run(
       `INSERT INTO expenses (category, vendor, amount, expense_date, notes, raw_ocr_text, staff_id) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [category, vendor, amount, expense_date, notes, raw_ocr_text, staff_id],
+      [category.trim(), vendor, parsedAmount, expense_date, notes, raw_ocr_text, staff_id],
       function(err) {
         if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
         
@@ -3299,7 +3470,8 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                 return;
               }
 
-              const allIds = allVisits.map(v => v.visit_id).join(',');
+              const placeholders = allVisits.map(() => '?').join(',');
+              const allVisitIds = allVisits.map(v => v.visit_id);
               let procedures = [], medicines = [], payments = [];
               let nextAppt = null;
               let pending = 4;
@@ -3387,15 +3559,15 @@ app.get('/api/patients/:id/visits', authenticateToken, (req, res) => {
                 }
               };
 
-              db.all(`SELECT * FROM procedures WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+              db.all(`SELECT * FROM procedures WHERE visit_id IN (${placeholders})`, allVisitIds, (err, rows) => {
                 if (!err) procedures = rows;
                 checkDone();
               });
-              db.all(`SELECT * FROM medicines WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+              db.all(`SELECT * FROM medicines WHERE visit_id IN (${placeholders})`, allVisitIds, (err, rows) => {
                 if (!err) medicines = rows;
                 checkDone();
               });
-              db.all(`SELECT * FROM payments WHERE visit_id IN (${allIds})`, [], (err, rows) => {
+              db.all(`SELECT * FROM payments WHERE visit_id IN (${placeholders})`, allVisitIds, (err, rows) => {
                 if (!err) payments = rows;
                 checkDone();
               });
@@ -4057,14 +4229,15 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
     if (errV) return res.status(500).json({ error: errV.message });
 
     const vIds = visits.map(v => v.visit_id);
-    const inClause = vIds.length > 0 ? vIds.join(',') : '0';
+    const queryIds = vIds.length > 0 ? vIds : [0];
+    const placeholders = queryIds.map(() => '?').join(',');
 
     // 2. Procedures for visits
-    db.all(`SELECT * FROM procedures WHERE visit_id IN (${inClause})`, [], (errP, procs = []) => {
+    db.all(`SELECT * FROM procedures WHERE visit_id IN (${placeholders})`, queryIds, (errP, procs = []) => {
       if (errP) return res.status(500).json({ error: errP.message });
 
       // 3. Medicines for visits
-      db.all(`SELECT * FROM medicines WHERE visit_id IN (${inClause})`, [], (errM, meds = []) => {
+      db.all(`SELECT * FROM medicines WHERE visit_id IN (${placeholders})`, queryIds, (errM, meds = []) => {
         if (errM) return res.status(500).json({ error: errM.message });
 
         // 4. Standalone Packages booked on this date
@@ -4483,8 +4656,9 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
               });
             }
 
-            db.all(`SELECT * FROM procedures WHERE visit_id IN (${vIds.join(',')})`, [], (errP, pRows = []) => {
-              db.all(`SELECT * FROM medicines WHERE visit_id IN (${vIds.join(',')})`, [], (errM, mRows = []) => {
+            const vPlaceholders = vIds.map(() => '?').join(',');
+            db.all(`SELECT * FROM procedures WHERE visit_id IN (${vPlaceholders})`, vIds, (errP, pRows = []) => {
+              db.all(`SELECT * FROM medicines WHERE visit_id IN (${vPlaceholders})`, vIds, (errM, mRows = []) => {
                 db.all(`SELECT id, patient_id, package_name, price_paid, total_sessions FROM patient_packages`, [], (errPkg, allPkgs = []) => {
                   const medTotal = (mRows || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
                   let procTotal = 0;
@@ -4563,15 +4737,16 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!visits || visits.length === 0) return res.json([]);
 
-    const vIds = visits.map(v => v.visit_id).join(',');
+    const placeholders = visits.map(() => '?').join(',');
+    const vIdList = visits.map(v => v.visit_id);
 
-    db.all(`SELECT * FROM procedures WHERE visit_id IN (${vIds})`, [], (errP, procs) => {
+    db.all(`SELECT * FROM procedures WHERE visit_id IN (${placeholders})`, vIdList, (errP, procs) => {
       if (errP) return res.status(500).json({ error: errP.message });
 
-      db.all(`SELECT * FROM medicines WHERE visit_id IN (${vIds})`, [], (errM, meds) => {
+      db.all(`SELECT * FROM medicines WHERE visit_id IN (${placeholders})`, vIdList, (errM, meds) => {
         if (errM) return res.status(500).json({ error: errM.message });
 
-        db.all(`SELECT * FROM payments WHERE visit_id IN (${vIds})`, [], (errPay, pays) => {
+        db.all(`SELECT * FROM payments WHERE visit_id IN (${placeholders})`, vIdList, (errPay, pays) => {
           if (errPay) return res.status(500).json({ error: errPay.message });
 
           const patientMap = new Map();
@@ -4943,7 +5118,11 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 
 app.put('/api/users/:id/salary', authenticateToken, (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
-  db.run('UPDATE users SET monthly_salary = ? WHERE id = ?', [req.body.monthly_salary, req.params.id], function(err) {
+  const salary = parseFloat(req.body.monthly_salary);
+  if (!Number.isFinite(salary) || salary < 0) {
+    return res.status(400).json({ error: 'Monthly salary must be a valid non-negative number' });
+  }
+  db.run('UPDATE users SET monthly_salary = ? WHERE id = ?', [salary, req.params.id], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: 'Salary updated' });
   });
@@ -5283,19 +5462,43 @@ app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
   const { amount, type, description, mode } = req.body; 
   const staffId = req.user.id;
 
-  db.run(
-    `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patientId, amount, type, description, mode || 'CASH', staffId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const balanceChange = type === 'CREDIT' ? amount : -amount;
-      db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ message: 'Wallet updated successfully' });
+  const parsedAmount = parseFloat(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Amount must be a valid positive number' });
+  }
+
+  const txType = (type || '').toUpperCase();
+  if (txType !== 'CREDIT' && txType !== 'DEBIT') {
+    return res.status(400).json({ error: 'Transaction type must be CREDIT or DEBIT' });
+  }
+
+  db.get('SELECT wallet_balance FROM patients WHERE id = ?', [patientId], (errPat, pat) => {
+    if (errPat) return res.status(500).json({ error: errPat.message });
+    if (!pat) return res.status(404).json({ error: 'Patient not found' });
+
+    const curBal = parseFloat(pat.wallet_balance) || 0;
+    if (txType === 'DEBIT' && curBal < parsedAmount) {
+      return res.status(400).json({ 
+        error: `Insufficient wallet balance (₹${curBal.toFixed(2)}) for debit of ₹${parsedAmount.toFixed(2)}` 
       });
     }
-  );
+
+    const balanceChange = txType === 'CREDIT' ? parsedAmount : -parsedAmount;
+    db.serialize(() => {
+      db.run(
+        `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
+        [patientId, parsedAmount, txType, description || '', mode || 'CASH', staffId],
+        function(err) {
+          if (err) return res.status(500).json({ error: err.message });
+          
+          db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
+            if (err2) return res.status(500).json({ error: err2.message });
+            res.json({ message: 'Wallet updated successfully', balance: curBal + balanceChange });
+          });
+        }
+      );
+    });
+  });
 });
 
 app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
@@ -5478,27 +5681,6 @@ app.get('/api/reports/procedures', authenticateToken, authorizeRole('DOCTOR'), (
     });
   });
 
-// --- WALLET BALANCE ENDPOINTS ---
-app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
-  const patientId = req.params.id;
-  const { amount, type, description, mode } = req.body; 
-  const staffId = req.user.id;
-
-  db.run(
-    `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-    [patientId, amount, type, description, mode || 'CASH', staffId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      const balanceChange = type === 'CREDIT' ? amount : -amount;
-      db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ message: 'Wallet updated successfully' });
-      });
-    }
-  );
-});
-
 // --- PACKAGES ---
 app.get('/api/patients/:id/packages', authenticateToken, (req, res) => {
   db.all('SELECT * FROM patient_packages WHERE patient_id = ? ORDER BY created_at DESC', [req.params.id], (err, rows) => {
@@ -5512,6 +5694,25 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
   const staff_id = req.user?.id || 1;
   const { package_name, total_sessions, price_paid, mode, booking_date, sessions_used } = req.body;
   
+  if (!package_name || typeof package_name !== 'string' || !package_name.trim()) {
+    return res.status(400).json({ error: 'Package name is required' });
+  }
+
+  const total = parseInt(total_sessions, 10);
+  if (!Number.isFinite(total) || total <= 0) {
+    return res.status(400).json({ error: 'Total sessions must be at least 1' });
+  }
+
+  const price = parseFloat(price_paid);
+  if (!Number.isFinite(price) || price < 0) {
+    return res.status(400).json({ error: 'Price paid must be a valid non-negative number' });
+  }
+
+  const used = parseInt(sessions_used, 10) || 0;
+  if (!Number.isFinite(used) || used < 0 || used > total) {
+    return res.status(400).json({ error: 'Sessions used must be between 0 and total sessions' });
+  }
+
   let createdAtVal = new Date().toISOString().replace('T', ' ').substring(0, 19);
   if (booking_date && typeof booking_date === 'string' && booking_date.trim()) {
     const trimmed = booking_date.trim();
@@ -5522,11 +5723,9 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
     }
   }
 
-  const used = parseInt(sessions_used, 10) || 0;
-  
   db.run(
     `INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [patient_id, package_name, parseInt(total_sessions, 10), used, parseFloat(price_paid) || 0, mode || 'CASH', staff_id, createdAtVal],
+    [patient_id, package_name.trim(), total, used, price, mode || 'CASH', staff_id, createdAtVal],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Package added successfully', id: this.lastID });
@@ -5603,11 +5802,17 @@ app.post('/api/invoices', authenticateToken, (req, res) => {
     const seq = (row ? row.cnt + 1 : 1).toString().padStart(4, '0');
     const invoice_number = `SKN-${dateStr}-${seq}`;
 
-    const finalSubtotal = parseFloat(subtotal) || 0;
-    const finalDiscAmt = parseFloat(discount_amount !== undefined && discount_amount !== null ? discount_amount : discount) || 0;
+    const rawSub = parseFloat(subtotal);
+    const finalSubtotal = Number.isFinite(rawSub) && rawSub >= 0 ? rawSub : 0;
+    const rawDisc = parseFloat(discount_amount !== undefined && discount_amount !== null ? discount_amount : discount);
+    const finalDiscAmt = Number.isFinite(rawDisc) && rawDisc >= 0 ? Math.min(finalSubtotal, rawDisc) : 0;
     const finalDiscType = (discount_type || (finalDiscAmt > 0 ? 'FIXED' : 'NONE')).toUpperCase();
-    const finalDiscVal = parseFloat(discount_value) || finalDiscAmt;
-    const finalNetPayable = parseFloat(net_payable !== undefined && net_payable !== null ? net_payable : grand_total) || Math.max(0, finalSubtotal - finalDiscAmt);
+    const rawDiscVal = parseFloat(discount_value);
+    const finalDiscVal = Number.isFinite(rawDiscVal) && rawDiscVal >= 0 ? (finalDiscType === 'PERCENTAGE' ? Math.min(100, rawDiscVal) : rawDiscVal) : finalDiscAmt;
+    const rawNet = parseFloat(net_payable !== undefined && net_payable !== null ? net_payable : grand_total);
+    const finalNetPayable = Number.isFinite(rawNet) && rawNet >= 0 ? rawNet : Math.max(0, finalSubtotal - finalDiscAmt);
+    const rawPaid = parseFloat(amount_paid);
+    const finalAmountPaid = Number.isFinite(rawPaid) && rawPaid >= 0 ? rawPaid : finalNetPayable;
 
     db.run(
       `INSERT INTO invoices (
@@ -5617,7 +5822,7 @@ app.post('/api/invoices', authenticateToken, (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoice_number, patient_id, visit_id || null, JSON.stringify(items_json), 
-        finalSubtotal, finalDiscAmt, finalNetPayable, payment_mode, amount_paid || finalNetPayable, created_by,
+        finalSubtotal, finalDiscAmt, finalNetPayable, payment_mode, finalAmountPaid, created_by,
         finalDiscType, finalDiscVal, finalDiscAmt, finalNetPayable
       ],
       function(err) {
@@ -5754,9 +5959,22 @@ app.post('/api/consultation-fee-rules', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Admin only' });
   }
   const { min_days, max_days, fee, label } = req.body;
+  const parsedFee = parseFloat(fee);
+  if (!Number.isFinite(parsedFee) || parsedFee < 0) {
+    return res.status(400).json({ error: 'Fee must be a valid non-negative number' });
+  }
+  const minD = parseInt(min_days, 10);
+  if (!Number.isFinite(minD) || minD < 0) {
+    return res.status(400).json({ error: 'min_days must be a valid non-negative integer' });
+  }
+  const maxD = max_days !== undefined && max_days !== null && max_days !== '' ? parseInt(max_days, 10) : null;
+  if (maxD !== null && (!Number.isFinite(maxD) || maxD < minD)) {
+    return res.status(400).json({ error: 'max_days must be greater than or equal to min_days' });
+  }
+
   db.run(
     'INSERT INTO consultation_fee_rules (min_days, max_days, fee, label) VALUES (?, ?, ?, ?)',
-    [min_days, max_days || null, fee, label],
+    [minD, maxD, parsedFee, label || ''],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID });
@@ -5769,9 +5987,22 @@ app.put('/api/consultation-fee-rules/:id', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Admin only' });
   }
   const { min_days, max_days, fee, label, active } = req.body;
+  const parsedFee = parseFloat(fee);
+  if (!Number.isFinite(parsedFee) || parsedFee < 0) {
+    return res.status(400).json({ error: 'Fee must be a valid non-negative number' });
+  }
+  const minD = parseInt(min_days, 10);
+  if (!Number.isFinite(minD) || minD < 0) {
+    return res.status(400).json({ error: 'min_days must be a valid non-negative integer' });
+  }
+  const maxD = max_days !== undefined && max_days !== null && max_days !== '' ? parseInt(max_days, 10) : null;
+  if (maxD !== null && (!Number.isFinite(maxD) || maxD < minD)) {
+    return res.status(400).json({ error: 'max_days must be greater than or equal to min_days' });
+  }
+
   db.run(
     'UPDATE consultation_fee_rules SET min_days=?, max_days=?, fee=?, label=?, active=? WHERE id=?',
-    [min_days, max_days || null, fee, label, active !== undefined ? active : 1, req.params.id],
+    [minD, maxD, parsedFee, label || '', active !== undefined ? active : 1, req.params.id],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Updated' });
@@ -5889,8 +6120,13 @@ app.put('/api/admin/pharmacy/sales/:visit_id/consultation-fee', authenticateToke
   }
 
   const visitId = parseInt(req.params.visit_id, 10);
-  const newFee = Math.max(0, parseFloat(req.body.consultation_fee) || 0);
   if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  const rawFee = parseFloat(req.body.consultation_fee);
+  if (!Number.isFinite(rawFee) || rawFee < 0) {
+    return res.status(400).json({ error: 'Consultation fee must be a valid non-negative number' });
+  }
+  const newFee = rawFee;
 
   db.get(`SELECT * FROM visits WHERE id = ?`, [visitId], (errV, visit) => {
     if (errV) return res.status(500).json({ error: errV.message });
