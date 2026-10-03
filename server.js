@@ -19,6 +19,9 @@ try {
   db.run('ALTER TABLE inventory_stock_movements ADD COLUMN total_amount REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE visits ADD COLUMN followup_status TEXT DEFAULT NULL', () => {});
   db.run('ALTER TABLE visits ADD COLUMN followup_reason TEXT DEFAULT NULL', () => {});
+  db.run('ALTER TABLE patient_packages ADD COLUMN original_price REAL DEFAULT 0', () => {});
+  db.run('ALTER TABLE patient_packages ADD COLUMN discount_percent REAL DEFAULT 0', () => {});
+  db.run('ALTER TABLE patient_packages ADD COLUMN discount_amount REAL DEFAULT 0', () => {});
 } catch (eMigration) {}
 
 
@@ -5692,7 +5695,17 @@ app.get('/api/patients/:id/packages', authenticateToken, (req, res) => {
 app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
   const patient_id = req.params.id;
   const staff_id = req.user?.id || 1;
-  const { package_name, total_sessions, price_paid, mode, booking_date, sessions_used } = req.body;
+  const { 
+    package_name, 
+    total_sessions, 
+    price_paid, 
+    original_price, 
+    discount_percent, 
+    discount_amount, 
+    mode, 
+    booking_date, 
+    sessions_used 
+  } = req.body;
   
   if (!package_name || typeof package_name !== 'string' || !package_name.trim()) {
     return res.status(400).json({ error: 'Package name is required' });
@@ -5708,27 +5721,103 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Price paid must be a valid non-negative number' });
   }
 
+  const origPrice = parseFloat(original_price) || price;
+  const discPercent = parseFloat(discount_percent) || 0;
+  const discAmount = parseFloat(discount_amount) || Math.max(0, origPrice - price);
+
   const used = parseInt(sessions_used, 10) || 0;
   if (!Number.isFinite(used) || used < 0 || used > total) {
     return res.status(400).json({ error: 'Sessions used must be between 0 and total sessions' });
   }
 
   let createdAtVal = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  let visitIso = new Date().toISOString();
   if (booking_date && typeof booking_date === 'string' && booking_date.trim()) {
     const trimmed = booking_date.trim();
     if (trimmed.length === 10) {
       createdAtVal = `${trimmed} 12:00:00`;
+      visitIso = `${trimmed}T12:00:00.000Z`;
     } else {
       createdAtVal = trimmed;
+      try {
+        visitIso = new Date(trimmed).toISOString();
+      } catch (e) {}
     }
   }
 
   db.run(
-    `INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [patient_id, package_name.trim(), total, used, price, mode || 'CASH', staff_id, createdAtVal],
+    `INSERT INTO patient_packages (patient_id, package_name, total_sessions, sessions_used, price_paid, mode, staff_id, created_at, original_price, discount_percent, discount_amount) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [patient_id, package_name.trim(), total, used, price, mode || 'CASH', staff_id, createdAtVal, origPrice, discPercent, discAmount],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Package added successfully', id: this.lastID });
+      const pkgId = this.lastID;
+
+      // Automatically create a visit entry so this package transaction appears in Today's Patients, Diary, and Collections
+      const plannedProcTitle = used > 0 ? 'PACKAGE SOLD & SESSION REDEEMED' : 'PACKAGE SOLD';
+      const discType = discPercent > 0 ? 'PERCENT' : (discAmount > 0 ? 'FIXED' : 'NONE');
+      const discVal = discPercent > 0 ? discPercent : discAmount;
+
+      db.run(
+        `INSERT INTO visits (
+          patient_id, staff_id, visit_date, planned_procedures,
+          consultation_fee, discount_type, discount_value, discount_amount,
+          subtotal, net_payable, package_redeemed_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          patient_id, staff_id, visitIso, plannedProcTitle,
+          0, discType, discVal, discAmount,
+          origPrice, price, used > 0 ? pkgId : null
+        ],
+        function(errVis) {
+          if (errVis) {
+            console.error('Error auto-creating visit for package sale:', errVis.message);
+            return res.json({ message: 'Package added successfully', id: pkgId });
+          }
+          const visitId = this.lastID;
+
+          // Add procedure entry for the sold package
+          const procNotes = discAmount > 0 
+            ? `Package MRP: ₹${origPrice} (${discPercent > 0 ? discPercent + '% ' : ''}Discount: ₹${discAmount})`
+            : 'Prepaid Package';
+
+          db.run(
+            `INSERT INTO procedures (visit_id, name, notes, amount) VALUES (?, ?, ?, ?)`,
+            [visitId, `[Package Sold] ${package_name.trim()} (${total} Sessions)`, procNotes, price],
+            (errP1) => {
+              if (errP1) console.error('Error inserting package procedure:', errP1.message);
+
+              // If a session was redeemed today, also add the redeemed session procedure at ₹0
+              const finishVisit = () => {
+                // If payment was made, record payment entry
+                if (price > 0) {
+                  db.run(
+                    `INSERT INTO payments (visit_id, patient_id, amount_received, mode, purpose, payment_date)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [visitId, patient_id, price, mode || 'CASH', 'PROCEDURE', visitIso],
+                    (errPay) => {
+                      if (errPay) console.error('Error inserting package payment:', errPay.message);
+                      res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
+                    }
+                  );
+                } else {
+                  res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
+                }
+              };
+
+              if (used > 0) {
+                db.run(
+                  `INSERT INTO procedures (visit_id, name, notes, amount) VALUES (?, ?, ?, ?)`,
+                  [visitId, `[Redeemed Session 1 of ${total}] ${package_name.trim()}`, `Prepaid Package Session 1 of ${total} Redeemed`, 0],
+                  () => finishVisit()
+                );
+              } else {
+                finishVisit();
+              }
+            }
+          );
+        }
+      );
     }
   );
 });
