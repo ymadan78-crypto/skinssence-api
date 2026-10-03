@@ -1,7 +1,7 @@
 const jwt = require('../backend/node_modules/jsonwebtoken');
 const db = require('../backend/db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_for_local_testing';
+const JWT_SECRET = process.env.JWT_SECRET || 'process_env_fallback';
 const doctorToken = jwt.sign({ id: 1, username: 'admin', role: 'DOCTOR', name: 'Dr. Ashima' }, JWT_SECRET, { expiresIn: '7d' });
 
 async function verifyAll() {

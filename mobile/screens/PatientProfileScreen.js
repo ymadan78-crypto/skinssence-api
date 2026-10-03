@@ -73,6 +73,8 @@ function PatientProfileScreenContent({ route, navigation }) {
   const [pkgModalVisible, setPkgModalVisible] = useState(false);
   const [pkgName, setPkgName] = useState('');
   const [pkgSessions, setPkgSessions] = useState('');
+  const [pkgOriginalPrice, setPkgOriginalPrice] = useState('');
+  const [pkgDiscountVal, setPkgDiscountVal] = useState('0');
   const [pkgPrice, setPkgPrice] = useState('');
   const [pkgMode, setPkgMode] = useState('CASH');
   const [pkgDate, setPkgDate] = useState(new Date().toISOString().split('T')[0]);
@@ -218,11 +220,19 @@ function PatientProfileScreenContent({ route, navigation }) {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      const origP = parseFloat(pkgOriginalPrice) || parseFloat(pkgPrice);
+      const netP = parseFloat(pkgPrice);
+      const discAmt = Math.max(0, origP - netP);
+      const discPct = origP > 0 ? ((discAmt / origP) * 100) : 0;
+
       const token = await AsyncStorage.getItem('userToken');
       await axios.post(`https://skinssence-api.onrender.com/api/patients/${patient.id}/packages`, {
         package_name: pkgName,
         total_sessions: parseInt(pkgSessions, 10),
-        price_paid: parseFloat(pkgPrice),
+        original_price: origP,
+        discount_percent: Math.round(discPct * 10) / 10,
+        discount_amount: discAmt,
+        price_paid: netP,
         mode: pkgMode,
         booking_date: pkgDate || new Date().toISOString().split('T')[0],
         sessions_used: parseInt(pkgUsedSessions, 10) || 0
@@ -232,16 +242,20 @@ function PatientProfileScreenContent({ route, navigation }) {
       fetchPackages();
       setPkgName('');
       setPkgSessions('');
+      setPkgOriginalPrice('');
+      setPkgDiscountVal('0');
       setPkgPrice('');
       setPkgUsedSessions('0');
       setPkgDate(new Date().toISOString().split('T')[0]);
       setPkgModalVisible(false);
       
+      const discBreakdown = discAmt > 0
+        ? `\n• *Package MRP:* Rs. ${origP.toLocaleString('en-IN')}\n• *Discount:* ${Math.round(discPct)}% (Rs. ${discAmt.toLocaleString('en-IN')})\n• *Net Paid:* Rs. ${netP.toLocaleString('en-IN')}`
+        : `\n• *Total Paid:* Rs. ${netP.toLocaleString('en-IN')}`;
+
       Alert.alert(
         'Package Sold!',
-        `Rs. ${pkgPrice} received for ${pkgName} via ${pkgMode}.
-
-Send WhatsApp Confirmation?`,
+        `Rs. ${netP.toLocaleString('en-IN')} received for ${pkgName} via ${pkgMode}.${discAmt > 0 ? ` (Includes ${Math.round(discPct)}% discount)` : ''}\n\nSend WhatsApp Confirmation?`,
         [
           { text: 'Done', style: 'cancel' },
           {
@@ -249,7 +263,8 @@ Send WhatsApp Confirmation?`,
             onPress: () => {
               const msg = `Dear ${patient.first_name},
 
-Thank you for your payment of Rs. ${pkgPrice} for the *${pkgName}* package (${pkgSessions} Sessions).
+Thank you for your payment of Rs. ${netP.toLocaleString('en-IN')} for the *${pkgName}* package (${pkgSessions} Sessions).${discBreakdown}
+• *Payment Mode:* ${pkgMode}${parseInt(pkgUsedSessions, 10) > 0 ? `\n• *Session Taken Today:* 1 of ${pkgSessions}` : ''}
 
 *Terms & Conditions:*
 • Packages are non-transferable and non-refundable.
@@ -268,7 +283,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
         ]
       );
     } catch (e) {
-      Alert.alert('Error', 'Failed to sell package');
+      Alert.alert('Error', e.response?.data?.error || 'Failed to sell package');
     } finally {
       setIsSubmitting(false);
     }
@@ -1357,14 +1372,100 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
               </View>
             </View>
 
-            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Total Price Paid (Rs):</Text>
+            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Package Total MRP / Original Price (Rs):</Text>
             <TextInput 
               style={styles.modalInput} 
               keyboardType="numeric" 
-              placeholder="Total Price (e.g. 30000)" 
-              value={pkgPrice} 
-              onChangeText={setPkgPrice} 
+              placeholder="e.g. 15000" 
+              value={pkgOriginalPrice} 
+              onChangeText={(val) => {
+                setPkgOriginalPrice(val);
+                const orig = parseFloat(val) || 0;
+                const pct = parseFloat(pkgDiscountVal) || 0;
+                if (orig > 0 && pct > 0) {
+                  const disc = (orig * pct) / 100;
+                  setPkgPrice(String(Math.round(orig - disc)));
+                } else {
+                  setPkgPrice(val);
+                }
+              }} 
             />
+
+            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount % Preset:</Text>
+            <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10}}>
+              {[0, 5, 10, 15, 20].map((d) => (
+                <TouchableOpacity
+                  key={d}
+                  onPress={() => {
+                    setPkgDiscountVal(String(d));
+                    const orig = parseFloat(pkgOriginalPrice) || 0;
+                    if (orig > 0) {
+                      const disc = (orig * d) / 100;
+                      setPkgPrice(String(Math.round(orig - disc)));
+                    }
+                  }}
+                  style={{
+                    paddingVertical: 5,
+                    paddingHorizontal: 10,
+                    borderRadius: 6,
+                    backgroundColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#f3f4f6',
+                    borderWidth: 1,
+                    borderColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#d1d5db'
+                  }}
+                >
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: pkgDiscountVal === String(d) ? '#fff' : '#374151'}}>
+                    {d === 0 ? 'No Disc' : `${d}%`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={{flexDirection: 'row', gap: 10}}>
+              <View style={{flex: 1}}>
+                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount %:</Text>
+                <TextInput 
+                  style={styles.modalInput} 
+                  keyboardType="numeric" 
+                  placeholder="0" 
+                  value={pkgDiscountVal} 
+                  onChangeText={(val) => {
+                    setPkgDiscountVal(val);
+                    const orig = parseFloat(pkgOriginalPrice) || 0;
+                    const pct = parseFloat(val) || 0;
+                    if (orig > 0 && pct >= 0 && pct <= 100) {
+                      const disc = (orig * pct) / 100;
+                      setPkgPrice(String(Math.round(orig - disc)));
+                    }
+                  }} 
+                />
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 4}}>Net Price Paid (Rs):</Text>
+                <TextInput 
+                  style={[styles.modalInput, {borderColor: '#10b981', borderWidth: 1.5, fontWeight: 'bold'}]} 
+                  keyboardType="numeric" 
+                  placeholder="e.g. 13500" 
+                  value={pkgPrice} 
+                  onChangeText={(val) => {
+                    setPkgPrice(val);
+                    const orig = parseFloat(pkgOriginalPrice) || 0;
+                    const net = parseFloat(val) || 0;
+                    if (orig > 0 && net <= orig) {
+                      const pct = Math.round(((orig - net) / orig) * 100);
+                      setPkgDiscountVal(String(pct));
+                    }
+                  }} 
+                />
+              </View>
+            </View>
+
+            {parseFloat(pkgOriginalPrice) > 0 && parseFloat(pkgPrice) > 0 && parseFloat(pkgOriginalPrice) > parseFloat(pkgPrice) && (
+              <View style={{backgroundColor: '#f5f3ff', padding: 8, borderRadius: 6, marginBottom: 10, borderWidth: 1, borderColor: '#ddd6fe'}}>
+                <Text style={{fontSize: 12, color: '#6d28d9', fontWeight: 'bold'}}>
+                  🏷️ MRP: ₹{parseFloat(pkgOriginalPrice).toLocaleString('en-IN')}  •  Discount: {pkgDiscountVal}% (-₹{(parseFloat(pkgOriginalPrice) - parseFloat(pkgPrice)).toLocaleString('en-IN')})  •  Net: ₹{parseFloat(pkgPrice).toLocaleString('en-IN')}
+                </Text>
+              </View>
+            )}
 
             <Text style={{marginTop: 5, marginBottom: 5, fontWeight: 'bold', color: '#555'}}>Payment Mode:</Text>
             <View style={{flexDirection: 'row', justifyContent: 'space-around', marginBottom: 15}}>
