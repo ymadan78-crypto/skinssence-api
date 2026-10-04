@@ -35,3 +35,7 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Backups & Scratch
+backend/backups/
+scratch/
+

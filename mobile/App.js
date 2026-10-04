@@ -31,9 +31,29 @@ import LeadFollowupsScreen from './screens/LeadFollowupsScreen';
 import axios from 'axios';
 
 
-// Bypass Localtunnel Warning Page for mobile requests
+// Network & Resilience Configuration
+axios.defaults.timeout = 15000; // 15-second explicit timeout for all mobile API calls
 axios.defaults.headers.common['Bypass-Tunnel-Reminder'] = 'true';
 axios.defaults.headers.common['ngrok-skip-browser-warning'] = 'true';
+
+// Safe GET retry interceptor (retries idempotent GET requests once on network hiccup)
+axios.interceptors.response.use(undefined, async (err) => {
+  const config = err?.config;
+  if (!config) return Promise.reject(err);
+
+  const isGet = (config.method || 'get').toLowerCase() === 'get';
+  const isNetworkOrTimeout = !err.response || err.code === 'ECONNABORTED' || err.message?.includes('Network Error');
+
+  if (isGet && isNetworkOrTimeout && (!config.__retryCount || config.__retryCount < 2)) {
+    config.__retryCount = (config.__retryCount || 0) + 1;
+    const delay = config.__retryCount * 700;
+    console.warn(`[Axios Network Retry] Retrying GET ${config.url} (attempt ${config.__retryCount}) in ${delay}ms...`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    return axios(config);
+  }
+
+  return Promise.reject(err);
+});
 
 const Stack = createNativeStackNavigator();
 

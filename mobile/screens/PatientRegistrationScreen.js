@@ -56,7 +56,13 @@ export default function PatientRegistrationScreen({ navigation }) {
         consultation_fee: chargeConsultation ? 400 : 0,
         consultation_payment_mode: chargeConsultation ? consultationPaymentMode : null
       };
-      const response = await axios.post(API_URL, payload, { headers: { Authorization: `Bearer ${token}` } });
+      const idempotencyKey = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const response = await axios.post(API_URL, payload, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-idempotency-key': idempotencyKey
+        }
+      });
       const feeInfo = chargeConsultation
         ? `\nConsultation Fee: ₹400 (${consultationPaymentMode}) recorded.`
         : '\nConsultation Fee: Waived (₹0).';

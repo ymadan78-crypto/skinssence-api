@@ -280,8 +280,12 @@ export default function PharmacyBillingScreen({ navigation, route }) {
       const token = await AsyncStorage.getItem('userToken');
 
       // STAGE 1: SAVE TRANSACTION TO DATABASE FIRST
+      const idempotencyKey = `pharm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const res = await axios.post(`https://skinssence-api.onrender.com/api/pharmacy/sell`, payload, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-idempotency-key': idempotencyKey
+        }
       });
 
       const visitId = res.data.visit_id;

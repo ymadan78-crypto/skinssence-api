@@ -340,7 +340,13 @@ export default function VisitEntryScreen({ route, navigation }) {
         payload.package_sold = { name: formData.new_package_name, total_sessions: parseInt(formData.new_package_sessions), amount: parseFloat(formData.new_package_amount) };
       }
 
-      await axios.post(`${API_URL}/visits`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      const idempotencyKey = `visit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      await axios.post(`${API_URL}/visits`, payload, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-idempotency-key': idempotencyKey
+        }
+      });
 
       // Auto-book next appointment if selected
       if (nextFollowupDate) {

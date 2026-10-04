@@ -1,9 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 export default function DoctorDashboard({ navigation }) {
@@ -19,6 +21,7 @@ export default function DoctorDashboard({ navigation }) {
   const [pendingFollowupPatients, setPendingFollowupPatients] = useState([]);
   const [followupModalVisible, setFollowupModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
 
   const checkHourlyReminder = async (count) => {
     try {
@@ -87,12 +90,48 @@ export default function DoctorDashboard({ navigation }) {
   };
 
   const handleBackup = async () => {
+    if (backupLoading) return;
     try {
+      setBackupLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      const url = `https://skinssence-api.onrender.com/api/admin/backup?token=${token}`;
-      Linking.openURL(url);
+      if (!token) {
+        Alert.alert('Authentication Required', 'Please log in again to download backup.');
+        return;
+      }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      const filename = `Skinssence_Backup_${todayStr}.xlsx`;
+      const fileUri = `${FileSystem.documentDirectory}${filename}`;
+      const downloadUrl = 'https://skinssence-api.onrender.com/api/admin/backup';
+
+      const downloadResult = await FileSystem.downloadAsync(downloadUrl, fileUri, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (downloadResult.status !== 200) {
+        throw new Error(`Server returned HTTP status ${downloadResult.status}`);
+      }
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(downloadResult.uri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          dialogTitle: 'Save Skinssence Backup',
+          UTI: 'com.microsoft.excel.xlsx'
+        });
+      } else {
+        Alert.alert('Backup Ready', `Backup downloaded successfully:\n${filename}`);
+      }
     } catch (e) {
-      console.log('Error opening backup URL');
+      console.log('Error downloading backup:', e);
+      Alert.alert(
+        'Backup Download Notice',
+        'Could not complete backup download. If the cloud service is waking up, please retry in 30 seconds.'
+      );
+    } finally {
+      setBackupLoading(false);
     }
   };
 
@@ -222,8 +261,19 @@ export default function DoctorDashboard({ navigation }) {
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('DoctorReports')}>
             <Text style={styles.listText}>Reports & Collections</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.listItem, {backgroundColor: '#dcfce7'}]} onPress={handleBackup}>
-            <Text style={[styles.listText, {color: '#166534', fontWeight: 'bold'}]}>Download Cloud Backup (.xlsx)</Text>
+          <TouchableOpacity 
+            style={[styles.listItem, {backgroundColor: '#dcfce7'}, backupLoading && {opacity: 0.7}]} 
+            onPress={handleBackup}
+            disabled={backupLoading}
+          >
+            {backupLoading ? (
+              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                <ActivityIndicator size="small" color="#166534" style={{marginRight: 8}} />
+                <Text style={[styles.listText, {color: '#166534', fontWeight: 'bold'}]}>Generating & Downloading Backup...</Text>
+              </View>
+            ) : (
+              <Text style={[styles.listText, {color: '#166534', fontWeight: 'bold'}]}>Export Clinic Data (.xlsx)</Text>
+            )}
           </TouchableOpacity>
         </View>
 
