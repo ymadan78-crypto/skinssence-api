@@ -54,6 +54,11 @@ export default function VisitEntryScreen({ route, navigation }) {
     planned_procedures: ''
   });
 
+  // Dual UPI & Split Payment State
+  const [upiAccount, setUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
+  const [splitCashAmount, setSplitCashAmount] = useState('');
+  const [splitUpiAmount, setSplitUpiAmount] = useState('');
+
   // Next Follow-Up / Appointment Scheduler
   const [nextFollowupDays, setNextFollowupDays] = useState(null);
   const [nextFollowupDate, setNextFollowupDate] = useState('');
@@ -317,13 +322,28 @@ export default function VisitEntryScreen({ route, navigation }) {
         consultation_fee: (entryMode === 'REDEEM_PACKAGE' || entryMode === 'SELL_PACKAGE') ? 0 : cFeeNum,
         medicine_details: '', // Kept separate under the Pharmacy Bill to prevent duplicate items
         medicine_amount: 0,
-        payment_mode: formData.payment_mode,
+        payment_mode: (() => {
+          const upiModeName = upiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)';
+          if (formData.payment_mode === 'CASH + UPI') {
+            const cashAmt = parseFloat(splitCashAmount) || 0;
+            const upiAmt = parseFloat(splitUpiAmount) || 0;
+            return `Cash: ₹${cashAmt} + ${upiModeName}: ₹${upiAmt}`;
+          }
+          if (formData.payment_mode === 'UPI') return upiModeName;
+          return formData.payment_mode;
+        })(),
+        split_payments: formData.payment_mode === 'CASH + UPI' ? [
+          { mode: 'CASH', amount: parseFloat(splitCashAmount) || 0 },
+          { mode: upiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)', amount: parseFloat(splitUpiAmount) || 0 }
+        ] : null,
         subtotal: subtotal,
         discount_type: discount.type,
         discount_value: discount.value,
         discount_amount: discount.amount,
         net_payable: netPayable,
-        amount_received: parseFloat(formData.amount_received) || 0,
+        amount_received: formData.payment_mode === 'CASH + UPI' 
+          ? ((parseFloat(splitCashAmount) || 0) + (parseFloat(splitUpiAmount) || 0))
+          : (parseFloat(formData.amount_received) || 0),
         planned_procedures: formData.planned_procedures
       };
 
@@ -736,41 +756,136 @@ export default function VisitEntryScreen({ route, navigation }) {
 
           <Text style={[styles.label, {marginTop: 15}]}>Payment Method</Text>
           <View style={styles.paymentRow}>
-            {['CASH', 'UPI', 'CARD', 'NETBANKING', 'PREPAID_WALLET'].map(mode => (
-              <TouchableOpacity key={mode} style={[styles.modeSelect, formData.payment_mode === mode && styles.modeSelected]} onPress={() => handleInputChange('payment_mode', mode)}>
+            {['CASH', 'UPI', 'CASH + UPI', 'CARD', 'NETBANKING', 'PREPAID_WALLET'].map(mode => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.modeSelect, formData.payment_mode === mode && styles.modeSelected]}
+                onPress={() => {
+                  handleInputChange('payment_mode', mode);
+                  if (mode === 'CASH + UPI' && !splitCashAmount && !splitUpiAmount && collectNow > 0) {
+                    const half = Math.round(collectNow / 2);
+                    setSplitCashAmount(half.toString());
+                    setSplitUpiAmount((collectNow - half).toString());
+                  }
+                }}
+              >
                 <Text style={[styles.modeSelectText, formData.payment_mode === mode && styles.modeSelectedText]}>{mode}</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            <Text style={[styles.label, { marginTop: 0 }]}>Amount Received for Visit (Rs.)</Text>
-            <Text style={{ fontSize: 11, color: '#6b7280' }}>Actual cash/UPI collected</Text>
-          </View>
-          <TextInput
-            style={[styles.input, { borderColor: '#10b981', borderWidth: 2, fontSize: 18, fontWeight: 'bold' }]}
-            keyboardType="numeric"
-            value={formData.amount_received}
-            onChangeText={(v) => handleInputChange('amount_received', v)}
-            placeholder="0"
-          />
+          {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
+          {(formData.payment_mode === 'UPI' || formData.payment_mode === 'CASH + UPI') && (
+            <View style={styles.upiAccountBox}>
+              <Text style={styles.upiAccountLabel}>Receiving UPI Account:</Text>
+              <View style={styles.upiAccountRow}>
+                <TouchableOpacity
+                  style={[styles.upiAccountBtn, upiAccount === 'STORE' && styles.upiAccountBtnActive]}
+                  onPress={() => setUpiAccount('STORE')}
+                >
+                  <Text style={[styles.upiAccountBtnText, upiAccount === 'STORE' && styles.upiAccountBtnTextActive]}>
+                    🛒 Skincare Store (Default)
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.upiAccountBtn, upiAccount === 'CLINIC' && styles.upiAccountBtnActive]}
+                  onPress={() => setUpiAccount('CLINIC')}
+                >
+                  <Text style={[styles.upiAccountBtnText, upiAccount === 'CLINIC' && styles.upiAccountBtnTextActive]}>
+                    🏥 Laser & Clinic
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
-          {/* Quick-fill 1-tap buttons */}
-          <View style={styles.quickFillRow}>
-            <TouchableOpacity
-              style={styles.quickFillBtn}
-              onPress={() => handleInputChange('amount_received', collectNow.toFixed(0))}
-            >
-              <Text style={styles.quickFillText}>Rs. {collectNow.toFixed(0)} (Full Visit)</Text>
-            </TouchableOpacity>
+          {/* Payment Amount Input: Split Cash+UPI or Single Mode */}
+          {formData.payment_mode === 'CASH + UPI' ? (
+            <View style={styles.splitBox}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={styles.splitBoxTitle}>Split Payment (Cash + UPI)</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    const half = Math.round(collectNow / 2);
+                    setSplitCashAmount(half.toString());
+                    setSplitUpiAmount((collectNow - half).toString());
+                  }}
+                  style={styles.splitHalfBtn}
+                >
+                  <Text style={styles.splitHalfBtnText}>⚡ 50/50 Split</Text>
+                </TouchableOpacity>
+              </View>
 
-            <TouchableOpacity
-              style={[styles.quickFillBtn, { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}
-              onPress={() => handleInputChange('amount_received', '0')}
-            >
-              <Text style={[styles.quickFillText, { color: '#b91c1c' }]}>Rs. 0 (Unpaid)</Text>
-            </TouchableOpacity>
-          </View>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.splitInputLabel}>Cash Amount (₹)</Text>
+                  <TextInput
+                    style={[styles.input, styles.splitInput]}
+                    keyboardType="numeric"
+                    value={splitCashAmount}
+                    onChangeText={(val) => {
+                      setSplitCashAmount(val);
+                      const c = parseFloat(val) || 0;
+                      if (collectNow >= c) {
+                        setSplitUpiAmount((collectNow - c).toFixed(0));
+                      }
+                    }}
+                    placeholder="0"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.splitInputLabel}>UPI Amount (₹)</Text>
+                  <TextInput
+                    style={[styles.input, styles.splitInput]}
+                    keyboardType="numeric"
+                    value={splitUpiAmount}
+                    onChangeText={(val) => setSplitUpiAmount(val)}
+                    placeholder="0"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.splitSummaryRow}>
+                <Text style={styles.splitSummaryText}>
+                  Total: <Text style={{ fontWeight: 'bold', color: '#166534' }}>₹{((parseFloat(splitCashAmount) || 0) + (parseFloat(splitUpiAmount) || 0)).toFixed(0)}</Text>
+                </Text>
+                <Text style={[styles.splitSummaryText, { color: '#64748b' }]}>
+                  Target to Collect: ₹{collectNow.toFixed(0)}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                <Text style={[styles.label, { marginTop: 0 }]}>Amount Received for Visit (Rs.)</Text>
+                <Text style={{ fontSize: 11, color: '#6b7280' }}>Actual cash/UPI collected</Text>
+              </View>
+              <TextInput
+                style={[styles.input, { borderColor: '#10b981', borderWidth: 2, fontSize: 18, fontWeight: 'bold' }]}
+                keyboardType="numeric"
+                value={formData.amount_received}
+                onChangeText={(v) => handleInputChange('amount_received', v)}
+                placeholder="0"
+              />
+
+              {/* Quick-fill 1-tap buttons */}
+              <View style={styles.quickFillRow}>
+                <TouchableOpacity
+                  style={styles.quickFillBtn}
+                  onPress={() => handleInputChange('amount_received', collectNow.toFixed(0))}
+                >
+                  <Text style={styles.quickFillText}>Rs. {collectNow.toFixed(0)} (Full Visit)</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickFillBtn, { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}
+                  onPress={() => handleInputChange('amount_received', '0')}
+                >
+                  <Text style={[styles.quickFillText, { color: '#b91c1c' }]}>Rs. 0 (Unpaid)</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
 
         <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={loading}>
@@ -914,5 +1029,20 @@ const styles = StyleSheet.create({
   followupChipText: { fontSize: 12, fontWeight: '600', color: '#475569' },
   followupChipTextActive: { color: '#fff', fontWeight: 'bold' },
   followupBanner: { marginTop: 8, padding: 10, backgroundColor: '#ecfdf5', borderRadius: 6, borderWidth: 1, borderColor: '#a7f3d0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  followupBannerText: { fontSize: 12, color: '#065f46', fontWeight: 'bold' }
+  followupBannerText: { fontSize: 12, color: '#065f46', fontWeight: 'bold' },
+  upiAccountBox: { backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 12 },
+  upiAccountLabel: { fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 6 },
+  upiAccountRow: { flexDirection: 'row', gap: 8 },
+  upiAccountBtn: { flex: 1, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 6, borderWidth: 1.5, borderColor: '#cbd5e1', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  upiAccountBtnActive: { backgroundColor: '#15803d', borderColor: '#15803d' },
+  upiAccountBtnText: { fontSize: 11, fontWeight: 'bold', color: '#334155', textAlign: 'center' },
+  upiAccountBtnTextActive: { color: '#fff' },
+  splitBox: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', marginTop: 8 },
+  splitBoxTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
+  splitHalfBtn: { paddingVertical: 4, paddingHorizontal: 8, backgroundColor: '#e0e7ff', borderRadius: 4 },
+  splitHalfBtnText: { fontSize: 11, fontWeight: 'bold', color: '#3730a3' },
+  splitInputLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 },
+  splitInput: { borderWidth: 1.5, borderColor: '#10b981', fontSize: 16, fontWeight: 'bold', padding: 8, backgroundColor: '#fff' },
+  splitSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  splitSummaryText: { fontSize: 12, color: '#334155' }
 });

@@ -18,6 +18,7 @@ export default function PatientRegistrationScreen({ navigation }) {
   });
   const [chargeConsultation, setChargeConsultation] = useState(true);
   const [consultationPaymentMode, setConsultationPaymentMode] = useState('CASH');
+  const [regUpiAccount, setRegUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
 
   const API_URL = 'https://skinssence-api.onrender.com/api/patients';
 
@@ -49,12 +50,15 @@ export default function PatientRegistrationScreen({ navigation }) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
+      const effectiveMode = consultationPaymentMode === 'UPI' 
+        ? (regUpiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)')
+        : consultationPaymentMode;
       const payload = {
         ...formData,
         force_duplicate,
         charge_consultation: chargeConsultation,
         consultation_fee: chargeConsultation ? 400 : 0,
-        consultation_payment_mode: chargeConsultation ? consultationPaymentMode : null
+        consultation_payment_mode: chargeConsultation ? effectiveMode : null
       };
       const idempotencyKey = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const response = await axios.post(API_URL, payload, {
@@ -64,7 +68,7 @@ export default function PatientRegistrationScreen({ navigation }) {
         }
       });
       const feeInfo = chargeConsultation
-        ? `\nConsultation Fee: ₹400 (${consultationPaymentMode}) recorded.`
+        ? `\nConsultation Fee: ₹400 (${effectiveMode}) recorded.`
         : '\nConsultation Fee: Waived (₹0).';
       Alert.alert('Success', `Patient registered successfully with number: ${response.data.skinssence_id}.${feeInfo}`);
       navigation.goBack();
@@ -240,6 +244,48 @@ export default function PatientRegistrationScreen({ navigation }) {
                   ]}>📱 UPI / QR</Text>
                 </TouchableOpacity>
               </View>
+
+              {consultationPaymentMode === 'UPI' && (
+                <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#bbf7d0' }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>Receiving UPI Account:</Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 7,
+                        paddingHorizontal: 4,
+                        borderRadius: 6,
+                        borderWidth: 1.5,
+                        borderColor: regUpiAccount === 'STORE' ? '#15803d' : '#cbd5e1',
+                        backgroundColor: regUpiAccount === 'STORE' ? '#15803d' : '#fff',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => setRegUpiAccount('STORE')}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: regUpiAccount === 'STORE' ? '#fff' : '#334155' }}>
+                        🛒 Store (Default)
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 7,
+                        paddingHorizontal: 4,
+                        borderRadius: 6,
+                        borderWidth: 1.5,
+                        borderColor: regUpiAccount === 'CLINIC' ? '#15803d' : '#cbd5e1',
+                        backgroundColor: regUpiAccount === 'CLINIC' ? '#15803d' : '#fff',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => setRegUpiAccount('CLINIC')}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: regUpiAccount === 'CLINIC' ? '#fff' : '#334155' }}>
+                        🏥 Laser & Clinic
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 

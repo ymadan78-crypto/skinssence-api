@@ -77,6 +77,9 @@ function PatientProfileScreenContent({ route, navigation }) {
   const [pkgDiscountVal, setPkgDiscountVal] = useState('0');
   const [pkgPrice, setPkgPrice] = useState('');
   const [pkgMode, setPkgMode] = useState('CASH');
+  const [pkgUpiAccount, setPkgUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
+  const [pkgSplitCash, setPkgSplitCash] = useState('');
+  const [pkgSplitUpi, setPkgSplitUpi] = useState('');
   const [pkgDate, setPkgDate] = useState(new Date().toISOString().split('T')[0]);
   const [pkgUsedSessions, setPkgUsedSessions] = useState('0');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -225,6 +228,33 @@ function PatientProfileScreenContent({ route, navigation }) {
       const discAmt = Math.max(0, origP - netP);
       const discPct = origP > 0 ? ((discAmt / origP) * 100) : 0;
 
+      const upiModeName = pkgUpiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)';
+      let effectiveMode = pkgMode;
+      let splitPaymentsPayload = null;
+
+      if (pkgMode === 'CASH + UPI') {
+        const cashAmt = parseFloat(pkgSplitCash) || 0;
+        const upiAmt = parseFloat(pkgSplitUpi) || 0;
+        const totalSplit = cashAmt + upiAmt;
+        if (Math.round(totalSplit) !== Math.round(netP)) {
+          setIsSubmitting(false);
+          return Alert.alert(
+            'Split Total Mismatch',
+            `Cash (₹${cashAmt}) + UPI (₹${upiAmt}) = ₹${totalSplit}, but Net Price Paid is ₹${netP}. Please adjust to match.`
+          );
+        }
+        effectiveMode = `Cash: ₹${cashAmt} + ${upiModeName}: ₹${upiAmt}`;
+        splitPaymentsPayload = [
+          { mode: 'CASH', amount: cashAmt },
+          { mode: upiModeName, amount: upiAmt }
+        ];
+      } else if (pkgMode === 'UPI') {
+        effectiveMode = upiModeName;
+        splitPaymentsPayload = [
+          { mode: upiModeName, amount: netP }
+        ];
+      }
+
       const token = await AsyncStorage.getItem('userToken');
       await axios.post(`https://skinssence-api.onrender.com/api/patients/${patient.id}/packages`, {
         package_name: pkgName,
@@ -233,7 +263,8 @@ function PatientProfileScreenContent({ route, navigation }) {
         discount_percent: Math.round(discPct * 10) / 10,
         discount_amount: discAmt,
         price_paid: netP,
-        mode: pkgMode,
+        mode: effectiveMode,
+        split_payments: splitPaymentsPayload,
         booking_date: pkgDate || new Date().toISOString().split('T')[0],
         sessions_used: parseInt(pkgUsedSessions, 10) || 0
       }, { headers: { Authorization: `Bearer ${token}` } });
@@ -245,6 +276,9 @@ function PatientProfileScreenContent({ route, navigation }) {
       setPkgOriginalPrice('');
       setPkgDiscountVal('0');
       setPkgPrice('');
+      setPkgSplitCash('');
+      setPkgSplitUpi('');
+      setPkgUpiAccount('STORE');
       setPkgUsedSessions('0');
       setPkgDate(new Date().toISOString().split('T')[0]);
       setPkgModalVisible(false);
@@ -255,7 +289,7 @@ function PatientProfileScreenContent({ route, navigation }) {
 
       Alert.alert(
         'Package Sold!',
-        `Rs. ${netP.toLocaleString('en-IN')} received for ${pkgName} via ${pkgMode}.${discAmt > 0 ? ` (Includes ${Math.round(discPct)}% discount)` : ''}\n\nSend WhatsApp Confirmation?`,
+        `Rs. ${netP.toLocaleString('en-IN')} received for ${pkgName} via ${effectiveMode}.${discAmt > 0 ? ` (Includes ${Math.round(discPct)}% discount)` : ''}\n\nSend WhatsApp Confirmation?`,
         [
           { text: 'Done', style: 'cancel' },
           {
@@ -264,7 +298,7 @@ function PatientProfileScreenContent({ route, navigation }) {
               const msg = `Dear ${patient.first_name},
 
 Thank you for your payment of Rs. ${netP.toLocaleString('en-IN')} for the *${pkgName}* package (${pkgSessions} Sessions).${discBreakdown}
-• *Payment Mode:* ${pkgMode}${parseInt(pkgUsedSessions, 10) > 0 ? `\n• *Session Taken Today:* 1 of ${pkgSessions}` : ''}
+• *Payment Mode:* ${effectiveMode}${parseInt(pkgUsedSessions, 10) > 0 ? `\n• *Session Taken Today:* 1 of ${pkgSessions}` : ''}
 
 *Terms & Conditions:*
 • Packages are non-transferable and non-refundable.
@@ -1468,10 +1502,128 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
             )}
 
             <Text style={{marginTop: 5, marginBottom: 5, fontWeight: 'bold', color: '#555'}}>Payment Mode:</Text>
-            <View style={{flexDirection: 'row', justifyContent: 'space-around', marginBottom: 15}}>
-              <TouchableOpacity onPress={() => setPkgMode('CASH')} style={{padding: 10, backgroundColor: pkgMode==='CASH' ? '#10b981' : '#eee', borderRadius: 5, flex: 1, marginRight: 5, alignItems: 'center'}}><Text style={{color: pkgMode==='CASH' ? '#fff' : '#000', fontWeight: 'bold'}}>CASH</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setPkgMode('UPI')} style={{padding: 10, backgroundColor: pkgMode==='UPI' ? '#3b82f6' : '#eee', borderRadius: 5, flex: 1, marginLeft: 5, alignItems: 'center'}}><Text style={{color: pkgMode==='UPI' ? '#fff' : '#000', fontWeight: 'bold'}}>UPI</Text></TouchableOpacity>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
+              {['CASH', 'UPI', 'CASH + UPI'].map(mode => (
+                <TouchableOpacity
+                  key={mode}
+                  onPress={() => {
+                    setPkgMode(mode);
+                    const net = parseFloat(pkgPrice) || 0;
+                    if (mode === 'CASH + UPI' && !pkgSplitCash && !pkgSplitUpi && net > 0) {
+                      const half = Math.round(net / 2);
+                      setPkgSplitCash(half.toString());
+                      setPkgSplitUpi((net - half).toString());
+                    }
+                  }}
+                  style={{
+                    paddingVertical: 9,
+                    paddingHorizontal: 4,
+                    backgroundColor: pkgMode === mode ? '#10b981' : '#eee',
+                    borderRadius: 6,
+                    flex: 1,
+                    marginHorizontal: 3,
+                    alignItems: 'center'
+                  }}
+                >
+                  <Text style={{color: pkgMode === mode ? '#fff' : '#000', fontWeight: 'bold', fontSize: 12}}>{mode}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
+
+            {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
+            {(pkgMode === 'UPI' || pkgMode === 'CASH + UPI') && (
+              <View style={{ backgroundColor: '#f0fdf4', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>Receiving UPI Account:</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: 8,
+                      paddingHorizontal: 4,
+                      borderRadius: 6,
+                      borderWidth: 1.5,
+                      borderColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#cbd5e1',
+                      backgroundColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#fff',
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setPkgUpiAccount('STORE')}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'STORE' ? '#fff' : '#334155' }}>
+                      🛒 Skincare Store (Default)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: 8,
+                      paddingHorizontal: 4,
+                      borderRadius: 6,
+                      borderWidth: 1.5,
+                      borderColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#cbd5e1',
+                      backgroundColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#fff',
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setPkgUpiAccount('CLINIC')}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'CLINIC' ? '#fff' : '#334155' }}>
+                      🏥 Laser & Clinic
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Split Cash + UPI Inputs */}
+            {pkgMode === 'CASH + UPI' && (
+              <View style={{ backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#1e293b' }}>Split Payment</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const net = parseFloat(pkgPrice) || 0;
+                      const half = Math.round(net / 2);
+                      setPkgSplitCash(half.toString());
+                      setPkgSplitUpi((net - half).toString());
+                    }}
+                    style={{ paddingVertical: 3, paddingHorizontal: 6, backgroundColor: '#e0e7ff', borderRadius: 4 }}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#3730a3' }}>⚡ 50/50 Split</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>Cash (₹)</Text>
+                    <TextInput
+                      style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
+                      keyboardType="numeric"
+                      value={pkgSplitCash}
+                      onChangeText={(val) => {
+                        setPkgSplitCash(val);
+                        const net = parseFloat(pkgPrice) || 0;
+                        const c = parseFloat(val) || 0;
+                        if (net >= c) {
+                          setPkgSplitUpi((net - c).toFixed(0));
+                        }
+                      }}
+                      placeholder="0"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>UPI (₹)</Text>
+                    <TextInput
+                      style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
+                      keyboardType="numeric"
+                      value={pkgSplitUpi}
+                      onChangeText={(val) => setPkgSplitUpi(val)}
+                      placeholder="0"
+                    />
+                  </View>
+                </View>
+                <Text style={{ fontSize: 11, color: '#64748b', marginTop: 4, textAlign: 'right' }}>
+                  Total: ₹{((parseFloat(pkgSplitCash) || 0) + (parseFloat(pkgSplitUpi) || 0)).toFixed(0)} / Target: ₹{pkgPrice || '0'}
+                </Text>
+              </View>
+            )}
             <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10}}>
               <TouchableOpacity onPress={() => setPkgModalVisible(false)} style={{marginRight: 20, padding: 10}} disabled={isSubmitting}><Text style={{color: '#ef4444', fontWeight: 'bold', fontSize: 16}}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity onPress={handlePackageSale} disabled={isSubmitting} style={{backgroundColor: isSubmitting ? '#9ca3af' : '#10b981', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 6}}>

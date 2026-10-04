@@ -21,6 +21,9 @@ export default function PharmacyBillingScreen({ navigation, route }) {
   const [medSearchQ, setMedSearchQ] = useState('');
   const [selectedPatient, setSelectedPatient] = useState(route?.params?.patient || null);
   const [paymentMode, setPaymentMode] = useState('CASH');
+  const [upiAccount, setUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
+  const [splitCashAmount, setSplitCashAmount] = useState('');
+  const [splitUpiAmount, setSplitUpiAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [completedSale, setCompletedSale] = useState(null);
   const [billModalVisible, setBillModalVisible] = useState(false);
@@ -250,16 +253,46 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     const dateSnapshot = saleDate;
     const visitDateStr = (dateSnapshot || new Date()).toISOString();
 
+    const upiModeName = upiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)';
+    let effectiveMode = modeSnapshot;
+    let splitPaymentsPayload = null;
+    let effectiveAmountReceived = netPayableSnapshot;
+
+    if (modeSnapshot === 'CASH + UPI') {
+      const cashAmt = parseFloat(splitCashAmount) || 0;
+      const upiAmt = parseFloat(splitUpiAmount) || 0;
+      const totalSplit = cashAmt + upiAmt;
+      if (Math.round(totalSplit) !== Math.round(netPayableSnapshot)) {
+        setLoading(false);
+        return Alert.alert(
+          'Split Total Mismatch',
+          `Cash (₹${cashAmt}) + UPI (₹${upiAmt}) = ₹${totalSplit}, but Net Payable is ₹${netPayableSnapshot}. Please adjust to match.`
+        );
+      }
+      effectiveMode = `Cash: ₹${cashAmt} + ${upiModeName}: ₹${upiAmt}`;
+      splitPaymentsPayload = [
+        { mode: 'CASH', amount: cashAmt },
+        { mode: upiModeName, amount: upiAmt }
+      ];
+      effectiveAmountReceived = totalSplit;
+    } else if (modeSnapshot === 'UPI') {
+      effectiveMode = upiModeName;
+      splitPaymentsPayload = [
+        { mode: upiModeName, amount: netPayableSnapshot }
+      ];
+    }
+
     const payload = {
       patient_id: patientSnapshot.id,
-      payment_mode: modeSnapshot,
+      payment_mode: effectiveMode,
+      split_payments: splitPaymentsPayload,
       visit_date: visitDateStr,
       subtotal: subtotalSnapshot,
       discount_type: discountSnapshot.type,
       discount_value: discountSnapshot.value,
       discount_amount: discountSnapshot.amount,
       net_payable: netPayableSnapshot,
-      amount_received: netPayableSnapshot,
+      amount_received: effectiveAmountReceived,
       medicines_sold: cartSnapshot.map(c => {
         let nameWithComp = c.medicine_name;
         if (c.is_complimentary && !nameWithComp.toLowerCase().includes('complimentary')) {
@@ -295,6 +328,9 @@ export default function PharmacyBillingScreen({ navigation, route }) {
       setDiscount({ type: 'NONE', value: 0, amount: 0 });
       setSelectedPatient(null);
       setSearchQ('');
+      setSplitCashAmount('');
+      setSplitUpiAmount('');
+      setUpiAccount('STORE');
       fetchInventory(); // refresh inventory stock in background
 
       const saleRecord = {
@@ -929,13 +965,107 @@ export default function PharmacyBillingScreen({ navigation, route }) {
         {cart.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>4. Payment & Checkout</Text>
-            <View style={{flexDirection: 'row', justifyContent:'space-around', marginBottom: 20}}>
-              {['CASH', 'UPI', 'CARD'].map(mode => (
-                <TouchableOpacity key={mode} style={[styles.payBtn, paymentMode === mode && styles.payBtnActive]} onPress={() => setPaymentMode(mode)}>
-                  <Text style={paymentMode === mode ? {color:'#fff'} : {color:'#000'}}>{mode}</Text>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12}}>
+              {['CASH', 'UPI', 'CASH + UPI', 'CARD'].map(mode => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.payBtn, paymentMode === mode && styles.payBtnActive]}
+                  onPress={() => {
+                    setPaymentMode(mode);
+                    if (mode === 'CASH + UPI' && !splitCashAmount && !splitUpiAmount && netPayable > 0) {
+                      const half = Math.round(netPayable / 2);
+                      setSplitCashAmount(half.toString());
+                      setSplitUpiAmount((netPayable - half).toString());
+                    }
+                  }}
+                >
+                  <Text style={paymentMode === mode ? {color:'#fff', fontWeight: 'bold'} : {color:'#000', fontWeight: '500'}}>{mode}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
+            {(paymentMode === 'UPI' || paymentMode === 'CASH + UPI') && (
+              <View style={styles.upiAccountBox}>
+                <Text style={styles.upiAccountLabel}>Receiving UPI Account:</Text>
+                <View style={styles.upiAccountRow}>
+                  <TouchableOpacity
+                    style={[styles.upiAccountBtn, upiAccount === 'STORE' && styles.upiAccountBtnActive]}
+                    onPress={() => setUpiAccount('STORE')}
+                  >
+                    <Text style={[styles.upiAccountBtnText, upiAccount === 'STORE' && styles.upiAccountBtnTextActive]}>
+                      🛒 Skincare Store (Default)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.upiAccountBtn, upiAccount === 'CLINIC' && styles.upiAccountBtnActive]}
+                    onPress={() => setUpiAccount('CLINIC')}
+                  >
+                    <Text style={[styles.upiAccountBtnText, upiAccount === 'CLINIC' && styles.upiAccountBtnTextActive]}>
+                      🏥 Laser & Clinic
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Split Cash + UPI Breakdown */}
+            {paymentMode === 'CASH + UPI' && (
+              <View style={styles.splitBox}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={styles.splitBoxTitle}>Split Payment (Cash + UPI)</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      const half = Math.round(netPayable / 2);
+                      setSplitCashAmount(half.toString());
+                      setSplitUpiAmount((netPayable - half).toString());
+                    }}
+                    style={styles.splitHalfBtn}
+                  >
+                    <Text style={styles.splitHalfBtnText}>⚡ 50/50 Split</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.splitInputLabel}>Cash Amount (₹)</Text>
+                    <TextInput
+                      style={styles.splitInput}
+                      keyboardType="numeric"
+                      value={splitCashAmount}
+                      onChangeText={(val) => {
+                        setSplitCashAmount(val);
+                        const c = parseFloat(val) || 0;
+                        if (netPayable >= c) {
+                          setSplitUpiAmount((netPayable - c).toFixed(0));
+                        }
+                      }}
+                      placeholder="0"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.splitInputLabel}>UPI Amount (₹)</Text>
+                    <TextInput
+                      style={styles.splitInput}
+                      keyboardType="numeric"
+                      value={splitUpiAmount}
+                      onChangeText={(val) => setSplitUpiAmount(val)}
+                      placeholder="0"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.splitSummaryRow}>
+                  <Text style={styles.splitSummaryText}>
+                    Total: <Text style={{ fontWeight: 'bold', color: '#166534' }}>₹{((parseFloat(splitCashAmount) || 0) + (parseFloat(splitUpiAmount) || 0)).toFixed(0)}</Text>
+                  </Text>
+                  <Text style={[styles.splitSummaryText, { color: '#64748b' }]}>
+                    Net Payable: ₹{netPayable.toFixed(0)}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             <TouchableOpacity style={[styles.checkoutBtn, loading && {opacity: 0.7}]} onPress={handleCheckout} disabled={loading}>
               <Text style={styles.checkoutText}>
                 {loading ? 'Saving Sale to Database...' : `Complete Sale & Collect Rs. ${netPayable}`}
@@ -1271,7 +1401,7 @@ const styles = StyleSheet.create({
   presetScroll: { flexDirection: 'row', marginTop: 8 },
   presetChip: { backgroundColor: '#e3f2fd', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15, marginRight: 8, borderWidth: 1, borderColor: '#bbdefb' },
   presetText: { color: '#0d47a1', fontSize: 12, fontWeight: '500' },
-  payBtn: { padding: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, width: '30%', alignItems: 'center' },
+  payBtn: { paddingVertical: 10, paddingHorizontal: 4, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, flex: 1, marginHorizontal: 3, alignItems: 'center' },
   payBtnActive: { backgroundColor: '#007bff', borderColor: '#007bff' },
   checkoutBtn: { backgroundColor: '#28a745', padding: 15, borderRadius: 8, alignItems: 'center' },
   checkoutText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
@@ -1304,5 +1434,20 @@ const styles = StyleSheet.create({
   piranidToggleBtnActiveFree: { backgroundColor: '#15803d', borderColor: '#15803d' },
   piranidToggleBtnActivePaid: { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' },
   piranidToggleText: { fontSize: 12, fontWeight: 'bold', color: '#475569', textAlign: 'center' },
-  piranidToggleTextActive: { color: '#fff' }
+  piranidToggleTextActive: { color: '#fff' },
+  upiAccountBox: { backgroundColor: '#f0fdf4', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 12 },
+  upiAccountLabel: { fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 6 },
+  upiAccountRow: { flexDirection: 'row', gap: 8 },
+  upiAccountBtn: { flex: 1, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 6, borderWidth: 1.5, borderColor: '#cbd5e1', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  upiAccountBtnActive: { backgroundColor: '#15803d', borderColor: '#15803d' },
+  upiAccountBtnText: { fontSize: 11, fontWeight: 'bold', color: '#334155', textAlign: 'center' },
+  upiAccountBtnTextActive: { color: '#fff' },
+  splitBox: { backgroundColor: '#f8fafc', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', marginBottom: 12 },
+  splitBoxTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
+  splitHalfBtn: { paddingVertical: 4, paddingHorizontal: 8, backgroundColor: '#e0e7ff', borderRadius: 4 },
+  splitHalfBtnText: { fontSize: 11, fontWeight: 'bold', color: '#3730a3' },
+  splitInputLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 },
+  splitInput: { borderWidth: 1.5, borderColor: '#10b981', fontSize: 16, fontWeight: 'bold', padding: 8, backgroundColor: '#fff', borderRadius: 6 },
+  splitSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  splitSummaryText: { fontSize: 12, color: '#334155' }
 });
