@@ -1109,7 +1109,8 @@ app.post('/api/patients', authenticateToken, idempotencyMiddleware, async (req, 
 
     const chargeConsultation = req.body.charge_consultation !== false && req.body.charge_consultation !== 'false';
     const cFee = chargeConsultation ? (parseFloat(req.body.consultation_fee) !== undefined && !isNaN(parseFloat(req.body.consultation_fee)) ? parseFloat(req.body.consultation_fee) : 400) : 0;
-    const payMode = (req.body.consultation_payment_mode || 'CASH').toUpperCase();
+    const rawPayMode = req.body.consultation_payment_mode || 'CASH';
+    const payMode = rawPayMode.includes('(') ? rawPayMode : rawPayMode.toUpperCase();
     const nowIso = new Date().toISOString();
     const staffId = req.user?.id || 1;
 
@@ -1618,7 +1619,7 @@ app.post('/api/procedures/master/merge', authenticateToken, (req, res) => {
 // --- VISIT ENTRY ROUTES ---
 
 app.post('/api/visits', authenticateToken, idempotencyMiddleware, async (req, res) => {
-  const { patient_id, procedure_name, notes, procedure_amount, medicine_details, medicine_amount, payment_mode, amount_received, planned_procedures, package_sold, package_redeemed_id, existing_visit_id } = req.body;
+  const { patient_id, procedure_name, notes, procedure_amount, medicine_details, medicine_amount, payment_mode, amount_received, planned_procedures, package_sold, package_redeemed_id, existing_visit_id, split_payments } = req.body;
   const staff_id = req.user.id;
   const { 
     subtotal: rawSubtotal, 
@@ -1829,10 +1830,22 @@ app.post('/api/visits', authenticateToken, idempotencyMiddleware, async (req, re
           );
         }
 
-        await tx.run(
-          'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
-          [visit_id, patient_id, payment_mode, netToRecord, finalVisitDate, 'VISIT']
-        );
+        if (Array.isArray(split_payments) && split_payments.length > 0) {
+          for (const sp of split_payments) {
+            const spAmt = parseFloat(sp.amount) || 0;
+            if (spAmt > 0) {
+              await tx.run(
+                'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+                [visit_id, patient_id, sp.mode || 'CASH', spAmt, finalVisitDate, 'VISIT']
+              );
+            }
+          }
+        } else {
+          await tx.run(
+            'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+            [visit_id, patient_id, payment_mode || 'CASH', netToRecord, finalVisitDate, 'VISIT']
+          );
+        }
       }
 
       return {
@@ -1904,7 +1917,8 @@ app.post('/api/pharmacy/sell', authenticateToken, idempotencyMiddleware, (req, r
     discount_type,
     discount_value,
     discount_amount,
-    net_payable: rawNetPayable
+    net_payable: rawNetPayable,
+    split_payments
   } = req.body;
   const staff_id = req.user.id;
   const finalVisitDate = visit_date || new Date().toISOString();
@@ -2091,10 +2105,22 @@ app.post('/api/pharmacy/sell', authenticateToken, idempotencyMiddleware, (req, r
           : finalNetPayable;
 
         if (payAmount > 0) {
-          await tx.run(
-            'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
-            [visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY']
-          );
+          if (Array.isArray(split_payments) && split_payments.length > 0) {
+            for (const sp of split_payments) {
+              const spAmt = parseFloat(sp.amount) || 0;
+              if (spAmt > 0) {
+                await tx.run(
+                  'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+                  [visit_id, patient_id, sp.mode || 'CASH', spAmt, finalVisitDate, 'PHARMACY']
+                );
+              }
+            }
+          } else {
+            await tx.run(
+              'INSERT INTO payments (visit_id, patient_id, mode, amount_received, payment_date, purpose) VALUES (?, ?, ?, ?, ?, ?)',
+              [visit_id, patient_id, payment_mode || 'CASH', payAmount, finalVisitDate, 'PHARMACY']
+            );
+          }
         }
 
         return {
@@ -3669,6 +3695,15 @@ const getISTDate = () => {
   return new Date(now.getTime() + istOffset).toISOString().split('T')[0];
 };
 
+// Helper to normalize payment modes for reporting
+function normalizePaymentMode(rawMode) {
+  if (!rawMode) return 'CASH';
+  const upper = rawMode.toUpperCase();
+  if (upper.includes('STORE')) return 'UPI (Store)';
+  if (upper.includes('CLINIC')) return 'UPI (Clinic)';
+  return upper;
+}
+
 // Helper to compute daily collection breakdown (Procedure Collection vs Medicine/Pharmacy Collection vs Total Collection)
 function getDailyCollectionBreakdown(targetDate, callback) {
   const sqlPayments = `
@@ -3713,7 +3748,7 @@ function getDailyCollectionBreakdown(targetDate, callback) {
 
         (payRows || []).forEach(p => {
           const amt = parseFloat(p.amount_received) || 0;
-          const mode = (p.mode || 'CASH').toUpperCase();
+          const mode = normalizePaymentMode(p.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
 
           const isPharm = (p.purpose === 'PHARMACY') || (p.planned_procedures === 'PHARMACY SALE');
@@ -3733,14 +3768,14 @@ function getDailyCollectionBreakdown(targetDate, callback) {
 
         (pkgRows || []).forEach(pkg => {
           const amt = parseFloat(pkg.price_paid) || 0;
-          const mode = (pkg.mode || 'CASH').toUpperCase();
+          const mode = normalizePaymentMode(pkg.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
           procedure_collection += amt;
         });
 
         (walRows || []).forEach(w => {
           const amt = parseFloat(w.amount) || 0;
-          const mode = (w.mode || 'CASH').toUpperCase();
+          const mode = normalizePaymentMode(w.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
           procedure_collection += amt;
         });
@@ -5482,6 +5517,7 @@ app.get('/api/admin/backup', async (req, res) => {
       await safeQuery('Inventory', 'SELECT * FROM inventory ORDER BY medicine_name ASC');
       await safeQuery('Expenses', 'SELECT * FROM expenses ORDER BY id DESC');
       await safeQuery('Invoices', 'SELECT * FROM invoices ORDER BY id DESC');
+      await safeQuery('Payments', 'SELECT * FROM payments ORDER BY id DESC');
       await safeQuery('Packages', 'SELECT * FROM patient_packages ORDER BY id DESC');
       await safeQuery('Appointments', 'SELECT * FROM appointments ORDER BY id DESC');
 
@@ -5686,7 +5722,8 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
     discount_amount, 
     mode, 
     booking_date, 
-    sessions_used 
+    sessions_used,
+    split_payments
   } = req.body;
   
   if (!package_name || typeof package_name !== 'string' || !package_name.trim()) {
@@ -5773,15 +5810,40 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
               const finishVisit = () => {
                 // If payment was made, record payment entry
                 if (price > 0) {
-                  db.run(
-                    `INSERT INTO payments (visit_id, patient_id, amount_received, mode, purpose, payment_date)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [visitId, patient_id, price, mode || 'CASH', 'PROCEDURE', visitIso],
-                    (errPay) => {
-                      if (errPay) console.error('Error inserting package payment:', errPay.message);
-                      res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
-                    }
-                  );
+                  if (Array.isArray(split_payments) && split_payments.length > 0) {
+                    let pendingPay = split_payments.length;
+                    split_payments.forEach(sp => {
+                      const spAmt = parseFloat(sp.amount) || 0;
+                      if (spAmt > 0) {
+                        db.run(
+                          `INSERT INTO payments (visit_id, patient_id, amount_received, mode, purpose, payment_date)
+                           VALUES (?, ?, ?, ?, ?, ?)`,
+                          [visitId, patient_id, spAmt, sp.mode || 'CASH', 'PROCEDURE', visitIso],
+                          () => {
+                            pendingPay--;
+                            if (pendingPay <= 0) {
+                              res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
+                            }
+                          }
+                        );
+                      } else {
+                        pendingPay--;
+                        if (pendingPay <= 0) {
+                          res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
+                        }
+                      }
+                    });
+                  } else {
+                    db.run(
+                      `INSERT INTO payments (visit_id, patient_id, amount_received, mode, purpose, payment_date)
+                       VALUES (?, ?, ?, ?, ?, ?)`,
+                      [visitId, patient_id, price, mode || 'CASH', 'PROCEDURE', visitIso],
+                      (errPay) => {
+                        if (errPay) console.error('Error inserting package payment:', errPay.message);
+                        res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
+                      }
+                    );
+                  }
                 } else {
                   res.json({ message: 'Package added successfully', id: pkgId, visit_id: visitId });
                 }
