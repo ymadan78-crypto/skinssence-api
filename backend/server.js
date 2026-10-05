@@ -22,10 +22,31 @@ try {
   db.run('ALTER TABLE patient_packages ADD COLUMN original_price REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE patient_packages ADD COLUMN discount_percent REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE patient_packages ADD COLUMN discount_amount REAL DEFAULT 0', () => {});
+
+  // Secondary Performance & Relational Integrity Indexes (Non-destructive)
+  db.run('CREATE INDEX IF NOT EXISTS idx_visits_patient_id ON visits(patient_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_visits_visit_date ON visits(visit_date)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_procedures_visit_id ON procedures(visit_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_medicines_visit_id ON medicines(visit_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_payments_visit_id ON payments(visit_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_payments_patient_id ON payments(patient_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_payments_payment_date ON payments(payment_date)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_invoices_visit_id ON invoices(visit_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_patient_packages_patient_id ON patient_packages(patient_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments(patient_id)', () => {});
+  db.run('CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date)', () => {});
 } catch (eMigration) {}
 
+// Process-level crash prevention handlers to prevent unexpected Node process terminations
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught Process Exception:', err);
+});
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet());
 
 // Phase 2C: Conservative CORS Configuration
@@ -51,6 +72,15 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Rate limiter for heavy Excel/database exports to prevent memory exhaustion
+const backupExportLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 10, // max 10 export/backup requests per 5 minutes per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many backup or export requests. Please wait 5 minutes before trying again.' }
+});
 
 // Phase 3A: Response Error Sanitizer Middleware
 // Intercepts error responses (status >= 500) to ensure raw database details, SQL statements,
@@ -5255,13 +5285,20 @@ app.put('/api/users/:id/permissions', authenticateToken, (req, res) => {
   });
 });
 
-app.delete('/api/users/:id', authenticateToken, (req, res) => {
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
   if (req.params.id == 1) return res.status(400).json({ error: 'Cannot delete the master admin account' });
-  db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const existingUser = await db.getAsync('SELECT id, username, role, name, mobile FROM users WHERE id = ?', [req.params.id]);
+    if (!existingUser) return res.status(404).json({ error: 'User not found' });
+
+    await db.runAsync('DELETE FROM users WHERE id = ?', [req.params.id]);
+    writeAudit(req.user, 'DELETE_USER', 'USERS', req.params.id, existingUser, null, req.body?.reason || 'User deleted by doctor');
     res.json({ message: 'User deleted' });
-  });
+  } catch (err) {
+    console.error('Delete user error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/attendance', authenticateToken, (req, res) => {
@@ -5459,7 +5496,7 @@ app.post('/api/staff/attendance/geotag', authenticateToken, (req, res) => {
 });
 
 // 5. Excel Backup Download
-app.get('/api/admin/backup', async (req, res) => {
+app.get('/api/admin/backup', backupExportLimiter, async (req, res) => {
   // Support either query param ?token=... or standard Authorization Bearer header
   let token = req.query.token;
   if (!token && req.headers.authorization) {
@@ -5866,17 +5903,29 @@ app.post('/api/patients/:id/packages', authenticateToken, (req, res) => {
   );
 });
 
-app.delete('/api/patients/:patient_id/packages/:package_id', authenticateToken, (req, res) => {
+app.delete('/api/patients/:patient_id/packages/:package_id', authenticateToken, async (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Admins or Doctors can delete packages.' });
+  }
   const { patient_id, package_id } = req.params;
-  db.run(
-    `DELETE FROM patient_packages WHERE id = ? AND patient_id = ?`,
-    [package_id, patient_id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: 'Package not found' });
-      res.json({ message: 'Package deleted successfully' });
-    }
-  );
+  try {
+    const existingPkg = await db.getAsync(
+      'SELECT * FROM patient_packages WHERE id = ? AND patient_id = ?',
+      [package_id, patient_id]
+    );
+    if (!existingPkg) return res.status(404).json({ error: 'Package not found' });
+
+    const result = await db.runAsync(
+      'DELETE FROM patient_packages WHERE id = ? AND patient_id = ?',
+      [package_id, patient_id]
+    );
+    writeAudit(req.user, 'DELETE_PACKAGE', 'PATIENT_PACKAGES', package_id, existingPkg, null, req.body?.reason || 'Package deleted by admin');
+    res.json({ message: 'Package deleted successfully', changes: result.changes });
+  } catch (err) {
+    console.error('Delete package error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
@@ -6169,12 +6218,26 @@ app.get('/api/audit-log', authenticateToken, (req, res) => {
 });
 
 // Helper: Write audit entry (called internally from routes)
-const writeAudit = (user, action, entity, entityId, oldVal, newVal, reason) => {
+function writeAudit(user, action, entity, entityId, oldVal, newVal, reason) {
+  const userId = user?.id || null;
+  const username = user?.username || (typeof user === 'string' ? user : (user?.name || 'SYSTEM'));
   db.run(
     'INSERT INTO audit_log (user_id, username, action, entity, entity_id, old_value, new_value, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [user.id, user.username, action, entity, String(entityId), oldVal ? JSON.stringify(oldVal) : null, newVal ? JSON.stringify(newVal) : null, reason || null]
+    [
+      userId,
+      username,
+      action,
+      entity,
+      entityId ? String(entityId) : null,
+      oldVal ? (typeof oldVal === 'object' ? JSON.stringify(oldVal) : String(oldVal)) : null,
+      newVal ? (typeof newVal === 'object' ? JSON.stringify(newVal) : String(newVal)) : null,
+      reason || null
+    ],
+    (err) => {
+      if (err) console.error('[AUDIT WRITE ERROR]', err.message);
+    }
   );
-};
+}
 
 // Expose writeAudit for use in routes (attach to app)
 app.locals.writeAudit = writeAudit;
@@ -6580,7 +6643,7 @@ app.get('/api/admin/reconciliation/status', authenticateToken, (req, res) => {
 // --- AUTOMATED DATABASE BACKUP SYSTEM & RECOVERY API ---
 const { performBackup, BACKUP_DIR } = require('./scripts/backup');
 
-app.post('/api/admin/system/backup', authenticateToken, async (req, res) => {
+app.post('/api/admin/system/backup', backupExportLimiter, authenticateToken, async (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Access denied: Only Admins can trigger database backups.' });
   }
@@ -6595,7 +6658,7 @@ app.post('/api/admin/system/backup', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/admin/system/backups', authenticateToken, (req, res) => {
+app.get('/api/admin/system/backups', backupExportLimiter, authenticateToken, (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Access denied: Only Admins can list database backups.' });
   }

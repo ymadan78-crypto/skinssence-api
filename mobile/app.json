@@ -34,7 +34,8 @@
     },
     "runtimeVersion": "1.52.0",
     "updates": {
-      "url": "https://u.expo.dev/46652322-d121-4423-bc91-53931c0f0ef1"
+      "url": "https://u.expo.dev/46652322-d121-4423-bc91-53931c0f0ef1",
+      "fallbackToCacheTimeout": 0
     },
     "plugins": [
       "expo-updates",
