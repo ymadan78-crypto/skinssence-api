@@ -1579,19 +1579,25 @@ app.put('/api/procedures/master/:id', authenticateToken, (req, res) => {
 });
 
 // 4. DELETE / Inactivate Master Procedure (Soft toggle to preserve history)
-app.delete('/api/procedures/master/:id', authenticateToken, (req, res) => {
+app.delete('/api/procedures/master/:id', authenticateToken, async (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Unauthorized' });
   }
-  const nowStr = new Date().toISOString();
-  db.run('UPDATE master_procedures SET active = 0, updated_at = ? WHERE id = ?', [nowStr, req.params.id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+  const id = req.params.id;
+  try {
+    const existing = await db.getAsync('SELECT * FROM master_procedures WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Master procedure not found' });
+    const nowStr = new Date().toISOString();
+    await db.runAsync('UPDATE master_procedures SET active = 0, updated_at = ? WHERE id = ?', [nowStr, id]);
+    writeAudit(req.user, 'PROCEDURE_MASTER_DEACTIVATE', 'master_procedures', id, existing, { active: 0 }, 'Deactivated master procedure');
     res.json({ message: 'Procedure deactivated successfully. Historical records preserved.' });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 5. POST Merge Procedures (Admin feature to merge variations into one master procedure)
-app.post('/api/procedures/master/merge', authenticateToken, (req, res) => {
+app.post('/api/procedures/master/merge', authenticateToken, async (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Only Admins can merge master procedures.' });
   }
@@ -1601,49 +1607,53 @@ app.post('/api/procedures/master/merge', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Valid and distinct source and target procedure IDs are required.' });
   }
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
+  try {
+    const targetProc = await db.getAsync('SELECT * FROM master_procedures WHERE id = ?', [target_id]);
+    if (!targetProc) {
+      return res.status(404).json({ error: 'Target procedure not found' });
+    }
 
-    db.get('SELECT * FROM master_procedures WHERE id = ?', [target_id], (errT, targetProc) => {
-      if (errT || !targetProc) {
-        return db.run('ROLLBACK', () => res.status(404).json({ error: 'Target procedure not found' }));
-      }
+    const sourceProc = await db.getAsync('SELECT * FROM master_procedures WHERE id = ?', [source_id]);
+    if (!sourceProc) {
+      return res.status(404).json({ error: 'Source procedure not found' });
+    }
 
-      db.get('SELECT * FROM master_procedures WHERE id = ?', [source_id], (errS, sourceProc) => {
-        if (errS || !sourceProc) {
-          return db.run('ROLLBACK', () => res.status(404).json({ error: 'Source procedure not found' }));
-        }
+    const nowStr = new Date().toISOString();
+    const retiredDesc = `${sourceProc.description || ''} [Merged into ${targetProc.code || 'P' + targetProc.id} - ${targetProc.name}]`.trim();
 
-        // Reassign all procedures transactions from source to target
-        db.run(
-          'UPDATE procedures SET procedure_id = ?, name = ? WHERE procedure_id = ? OR UPPER(TRIM(name)) = UPPER(TRIM(?))',
-          [target_id, targetProc.name, source_id, sourceProc.name],
-          function (errP) {
-            if (errP) return db.run('ROLLBACK', () => res.status(500).json({ error: errP.message }));
-            const reallocated = this.changes;
+    let reallocated = 0;
+    await db.withTransaction(async (tx) => {
+      // Reassign all procedures transactions from source to target
+      const updateRes = await tx.run(
+        'UPDATE procedures SET procedure_id = ?, name = ? WHERE procedure_id = ? OR UPPER(TRIM(name)) = UPPER(TRIM(?))',
+        [target_id, targetProc.name, source_id, sourceProc.name]
+      );
+      reallocated = updateRes.changes || 0;
 
-            // Soft-retire the source procedure with an audit note
-            const nowStr = new Date().toISOString();
-            const retiredDesc = `${sourceProc.description || ''} [Merged into ${targetProc.code || 'P' + targetProc.id} - ${targetProc.name}]`.trim();
-            db.run(
-              'UPDATE master_procedures SET active = 0, description = ?, updated_at = ? WHERE id = ?',
-              [retiredDesc, nowStr, source_id],
-              (errRetire) => {
-                if (errRetire) return db.run('ROLLBACK', () => res.status(500).json({ error: errRetire.message }));
-
-                db.run('COMMIT', () => {
-                  res.json({
-                    message: `Successfully merged "${sourceProc.name}" into [${targetProc.code}] "${targetProc.name}". ${reallocated} historical records updated.`,
-                    reallocated_count: reallocated
-                  });
-                });
-              }
-            );
-          }
-        );
-      });
+      // Soft-retire the source procedure with an audit note
+      await tx.run(
+        'UPDATE master_procedures SET active = 0, description = ?, updated_at = ? WHERE id = ?',
+        [retiredDesc, nowStr, source_id]
+      );
     });
-  });
+
+    writeAudit(
+      req.user,
+      'PROCEDURE_MASTER_MERGE',
+      'master_procedures',
+      source_id,
+      { source_id, source_name: sourceProc.name },
+      { target_id, target_name: targetProc.name, reallocated_count: reallocated },
+      `Merged procedure "${sourceProc.name}" into "${targetProc.name}"`
+    );
+
+    res.json({
+      message: `Successfully merged "${sourceProc.name}" into [${targetProc.code}] "${targetProc.name}". ${reallocated} historical records updated.`,
+      reallocated_count: reallocated
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- VISIT ENTRY ROUTES ---
@@ -2593,7 +2603,12 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
 });
 
 // Dedicated stock addition endpoint
-app.post('/api/inventory/:id/add-stock', authenticateToken, (req, res) => {
+app.post('/api/inventory/:id/add-stock', authenticateToken, async (req, res) => {
+  const role = req.user?.role ? req.user.role.toUpperCase() : '';
+  if (role !== 'ADMIN' && role !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied: Only Admins or Doctors can add stock to inventory.' });
+  }
+
   const id = req.params.id;
   const { quantity, batch_number, expiry_date, reason = '', notes = '' } = req.body;
   const addQty = parseFloat(quantity);
@@ -2606,64 +2621,59 @@ app.post('/api/inventory/:id/add-stock', authenticateToken, (req, res) => {
   const userId = req.user?.id || null;
   const fullReason = [reason || 'Stock added', notes].filter(Boolean).join(' - ');
 
-  db.serialize(() => {
-    db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
-      if (errBegin) return res.status(500).json({ error: errBegin.message });
+  try {
+    const item = await db.getAsync('SELECT * FROM inventory WHERE id = ?', [id]);
+    if (!item) {
+      return res.status(404).json({ error: 'Inventory item not found.' });
+    }
 
-      db.get('SELECT * FROM inventory WHERE id = ?', [id], (errGet, item) => {
-        if (errGet || !item) {
-          return db.run('ROLLBACK', () => res.status(404).json({ error: 'Inventory item not found.' }));
-        }
+    const prevQty = parseFloat(item.quantity) || 0;
+    const newQty = prevQty + addQty;
+    const finalBatch = (batch_number && batch_number.trim()) ? batch_number.trim() : (item.batch_number || '');
+    const finalExp = (expiry_date && expiry_date.trim()) ? expiry_date.trim() : (item.expiry_date || '');
 
-        const prevQty = parseFloat(item.quantity) || 0;
-        const newQty = prevQty + addQty;
-        const finalBatch = (batch_number && batch_number.trim()) ? batch_number.trim() : (item.batch_number || '');
-        const finalExp = (expiry_date && expiry_date.trim()) ? expiry_date.trim() : (item.expiry_date || '');
+    let movementId = null;
+    await db.withTransaction(async (tx) => {
+      await tx.run(
+        'UPDATE inventory SET quantity = ?, batch_number = ?, expiry_date = ? WHERE id = ?',
+        [newQty, finalBatch, finalExp, id]
+      );
 
-        db.run(
-          'UPDATE inventory SET quantity = ?, batch_number = ?, expiry_date = ? WHERE id = ?',
-          [newQty, finalBatch, finalExp, id],
-          function(errUpd) {
-            if (errUpd) {
-              return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
-            }
-
-            db.run(
-              `INSERT INTO inventory_stock_movements (
-                item_id, medicine_name, batch_number, movement_type, quantity,
-                previous_quantity, new_quantity, reason, reference_type, reference_id,
-                user_id, user_name, created_at
-              ) VALUES (?, ?, ?, 'ADDED', ?, ?, ?, ?, 'STOCK_ADDITION', ?, ?, ?, CURRENT_TIMESTAMP)`,
-              [id, item.medicine_name, finalBatch, addQty, prevQty, newQty, fullReason, String(id), userId, userName],
-              function(errIns) {
-                if (errIns) {
-                  return db.run('ROLLBACK', () => res.status(500).json({ error: errIns.message }));
-                }
-
-                const movementId = this.lastID;
-                db.run('COMMIT', (errCommit) => {
-                  if (errCommit) {
-                    return db.run('ROLLBACK', () => res.status(500).json({ error: errCommit.message }));
-                  }
-                  res.json({
-                    message: `Successfully added ${addQty} ${item.unit || 'units'} to ${item.medicine_name}.`,
-                    movementId,
-                    previousQuantity: prevQty,
-                    newQuantity: newQty,
-                    item: { ...item, quantity: newQty, batch_number: finalBatch, expiry_date: finalExp }
-                  });
-                });
-              }
-            );
-          }
-        );
-      });
+      const insRes = await tx.run(
+        `INSERT INTO inventory_stock_movements (
+          item_id, medicine_name, batch_number, movement_type, quantity,
+          previous_quantity, new_quantity, reason, reference_type, reference_id,
+          user_id, user_name, created_at
+        ) VALUES (?, ?, ?, 'ADDED', ?, ?, ?, ?, 'STOCK_ADDITION', ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [id, item.medicine_name, finalBatch, addQty, prevQty, newQty, fullReason, String(id), userId, userName]
+      );
+      movementId = insRes.lastID || insRes.lastInsertRowid;
     });
-  });
+
+    writeAudit(
+      req.user,
+      'INVENTORY_ADD_STOCK',
+      'inventory',
+      id,
+      { quantity: prevQty },
+      { quantity: newQty, added: addQty, batch_number: finalBatch, expiry_date: finalExp },
+      fullReason
+    );
+
+    res.json({
+      message: `Successfully added ${addQty} ${item.unit || 'units'} to ${item.medicine_name}.`,
+      movementId,
+      previousQuantity: prevQty,
+      newQuantity: newQty,
+      item: { ...item, quantity: newQty, batch_number: finalBatch, expiry_date: finalExp }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Dedicated stock adjustment endpoint
-app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
+app.post('/api/inventory/:id/adjust', authenticateToken, async (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
   const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
   const id = req.params.id;
@@ -2694,70 +2704,75 @@ app.post('/api/inventory/:id/adjust', authenticateToken, (req, res) => {
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
 
-  db.serialize(() => {
-    db.run('BEGIN IMMEDIATE TRANSACTION', (errBegin) => {
-      if (errBegin) return res.status(500).json({ error: errBegin.message });
+  try {
+    const item = await db.getAsync('SELECT * FROM inventory WHERE id = ?', [id]);
+    if (!item) {
+      return res.status(404).json({ error: 'Inventory item not found.' });
+    }
 
-      db.get('SELECT * FROM inventory WHERE id = ?', [id], (errGet, item) => {
-        if (errGet || !item) {
-          return db.run('ROLLBACK', () => res.status(404).json({ error: 'Inventory item not found.' }));
-        }
+    const prevQty = parseFloat(item.quantity) || 0;
+    const newQty = prevQty + delta;
 
-        const prevQty = parseFloat(item.quantity) || 0;
-        const newQty = prevQty + delta;
-
-        // Prevent negative stock
-        if (newQty < 0) {
-          return db.run('ROLLBACK', () => {
-            res.status(400).json({
-              error: `Adjustment rejected: Resulting stock cannot be negative. Current stock is ${prevQty} ${item.unit || 'units'}, reduction is ${Math.abs(delta)}.`
-            });
-          });
-        }
-
-        db.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newQty, id], function(errUpd) {
-          if (errUpd) {
-            return db.run('ROLLBACK', () => res.status(500).json({ error: errUpd.message }));
-          }
-
-          const reqVal = reqUnitPrice !== undefined && reqUnitPrice !== null ? parseFloat(reqUnitPrice) : null;
-          const unitVal = (reqVal !== null && Number.isFinite(reqVal) && reqVal >= 0) ? reqVal : (parseFloat(item.mrp) || 0);
-          const totalVal = Math.abs(delta) * unitVal;
-          const movementType = isClinicUse ? 'CLINIC_USE' : (delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT'));
-          const valueText = totalVal > 0 ? `Value: ₹${Math.round(totalVal)} (@₹${unitVal}/unit)` : '';
-          const fullReason = [reason_type, notes, valueText].filter(Boolean).join(' • ');
-
-          db.run(
-            `INSERT INTO inventory_stock_movements (
-              item_id, medicine_name, batch_number, movement_type, quantity,
-              previous_quantity, new_quantity, reason, reference_type, reference_id,
-              user_id, user_name, unit_price, total_amount, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'STOCK_ADJUSTMENT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [id, item.medicine_name, item.batch_number || '', movementType, delta, prevQty, newQty, fullReason, String(id), userId, userName, unitVal, totalVal],
-            function(errIns) {
-              if (errIns) {
-                return db.run('ROLLBACK', () => res.status(500).json({ error: errIns.message }));
-              }
-
-              const movementId = this.lastID;
-              db.run('COMMIT', (errCommit) => {
-                if (errCommit) {
-                  return db.run('ROLLBACK', () => res.status(500).json({ error: errCommit.message }));
-                }
-                res.json({
-                  message: `Stock adjusted by ${delta > 0 ? '+' + delta : delta} ${item.unit || 'units'} (${fullReason}).`,
-                  movementId,
-                  previousQuantity: prevQty,
-                  newQuantity: newQty,
-                  item: { ...item, quantity: newQty }
-                });
-              });
-            }
-          );
-        });
+    // Prevent negative stock
+    if (newQty < 0) {
+      return res.status(400).json({
+        error: `Adjustment rejected: Resulting stock cannot be negative. Current stock is ${prevQty} ${item.unit || 'units'}, reduction is ${Math.abs(delta)}.`
       });
+    }
+
+    const reqVal = reqUnitPrice !== undefined && reqUnitPrice !== null ? parseFloat(reqUnitPrice) : null;
+    const unitVal = (reqVal !== null && Number.isFinite(reqVal) && reqVal >= 0) ? reqVal : (parseFloat(item.mrp) || 0);
+    const totalVal = Math.abs(delta) * unitVal;
+    const movementType = isClinicUse ? 'CLINIC_USE' : (delta > 0 ? 'ADJUSTMENT' : (['Damaged', 'Expired', 'Wastage'].includes(reason_type) ? 'REDUCED' : 'ADJUSTMENT'));
+    const valueText = totalVal > 0 ? `Value: ₹${Math.round(totalVal)} (@₹${unitVal}/unit)` : '';
+    const fullReason = [reason_type, notes, valueText].filter(Boolean).join(' • ');
+
+    let movementId = null;
+    await db.withTransaction(async (tx) => {
+      // Conditional update for safety if reducing
+      if (delta < 0) {
+        const updRes = await tx.run(
+          'UPDATE inventory SET quantity = ? WHERE id = ? AND quantity >= ?',
+          [newQty, id, Math.abs(delta)]
+        );
+        if (updRes.changes === 0) {
+          throw new Error('Insufficient stock for adjustment');
+        }
+      } else {
+        await tx.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newQty, id]);
+      }
+
+      const insRes = await tx.run(
+        `INSERT INTO inventory_stock_movements (
+          item_id, medicine_name, batch_number, movement_type, quantity,
+          previous_quantity, new_quantity, reason, reference_type, reference_id,
+          user_id, user_name, unit_price, total_amount, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'STOCK_ADJUSTMENT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [id, item.medicine_name, item.batch_number || '', movementType, delta, prevQty, newQty, fullReason, String(id), userId, userName, unitVal, totalVal]
+      );
+      movementId = insRes.lastID || insRes.lastInsertRowid;
     });
-  });
+
+    writeAudit(
+      req.user,
+      'INVENTORY_ADJUST_STOCK',
+      'inventory',
+      id,
+      { quantity: prevQty },
+      { quantity: newQty, delta, movementType, reason: fullReason },
+      fullReason
+    );
+
+    res.json({
+      message: `Stock adjusted by ${delta > 0 ? '+' + delta : delta} ${item.unit || 'units'} (${fullReason}).`,
+      movementId,
+      previousQuantity: prevQty,
+      newQuantity: newQty,
+      item: { ...item, quantity: newQty }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Full Item Details & Stock Movement History
@@ -3429,9 +3444,9 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
 });
 
 // --- EXPENSE ROUTES ---
-app.post('/api/expenses', authenticateToken, (req, res) => {
+app.post('/api/expenses', authenticateToken, async (req, res) => {
   const { category, vendor, amount, expense_date, notes, raw_ocr_text, inventory_items, update_inventory } = req.body;
-  const staff_id = req.user.id;
+  const staff_id = req.user?.id;
 
   if (!category || !category.trim()) {
     return res.status(400).json({ error: 'Category is required' });
@@ -3457,45 +3472,43 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
     }
   }
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
+  try {
+    let expense_id = null;
+    await db.withTransaction(async (tx) => {
+      const expRes = await tx.run(
+        `INSERT INTO expenses (category, vendor, amount, expense_date, notes, raw_ocr_text, staff_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [category.trim(), vendor, parsedAmount, expense_date, notes, raw_ocr_text, staff_id]
+      );
+      expense_id = expRes.lastID || expRes.lastInsertRowid;
 
-    db.run(
-      `INSERT INTO expenses (category, vendor, amount, expense_date, notes, raw_ocr_text, staff_id) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [category.trim(), vendor, parsedAmount, expense_date, notes, raw_ocr_text, staff_id],
-      function(err) {
-        if (err) return db.run('ROLLBACK', () => res.status(500).json({ error: err.message }));
-        
-        const expense_id = this.lastID;
-
-        if (category === 'Pharmacy' && inventory_items && inventory_items.length > 0 && update_inventory) {
-          let pending = inventory_items.length;
-          let hasError = false;
-
-          inventory_items.forEach(item => {
-            db.run(
-              `INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date) VALUES (?, ?, ?, ?, ?)`,
-              [item.medicine_name, item.batch_number, item.mrp, item.quantity, item.expiry_date],
-              (err2) => {
-                if (err2) hasError = true;
-                pending--;
-                if (pending === 0) {
-                  if (hasError) {
-                    db.run('ROLLBACK', () => res.status(500).json({ error: 'Error adding inventory items' }));
-                  } else {
-                    db.run('COMMIT', () => res.json({ message: 'Expense & Inventory recorded successfully!', expense_id }));
-                  }
-                }
-              }
-            );
-          });
-        } else {
-          db.run('COMMIT', () => res.json({ message: 'Expense recorded successfully!', expense_id }));
+      if (category === 'Pharmacy' && inventory_items && inventory_items.length > 0 && update_inventory) {
+        for (const item of inventory_items) {
+          await tx.run(
+            `INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date) VALUES (?, ?, ?, ?, ?)`,
+            [item.medicine_name, item.batch_number, item.mrp, item.quantity, item.expiry_date]
+          );
         }
       }
+    });
+
+    writeAudit(
+      req.user,
+      'EXPENSE_CREATE',
+      'expenses',
+      expense_id,
+      null,
+      { category: category.trim(), vendor, amount: parsedAmount, expense_date },
+      'Recorded clinic expense'
     );
-  });
+
+    const message = (category === 'Pharmacy' && inventory_items && inventory_items.length > 0 && update_inventory)
+      ? 'Expense & Inventory recorded successfully!'
+      : 'Expense recorded successfully!';
+    res.json({ message, expense_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 3. Patient Visit History
@@ -5301,39 +5314,29 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/attendance', authenticateToken, (req, res) => {
+app.post('/api/attendance', authenticateToken, async (req, res) => {
   if (req.user.role !== 'DOCTOR') return res.status(403).json({ error: 'Access denied' });
   const { date, attendanceData } = req.body; 
   // attendanceData = [{ user_id: 2, status: 'PRESENT' }, ...]
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-    let hasError = false;
-    let pending = attendanceData.length;
+  if (!attendanceData || !Array.isArray(attendanceData) || attendanceData.length === 0) {
+    return res.json({ message: 'No data to save' });
+  }
 
-    if (pending === 0) {
-      return db.run('COMMIT', () => res.json({ message: 'No data to save' }));
-    }
-
-    attendanceData.forEach(record => {
-      db.run(
-        `INSERT INTO attendance (user_id, date, status) VALUES (?, ?, ?)
-         ON CONFLICT(user_id, date) DO UPDATE SET status = excluded.status`,
-        [record.user_id, date, record.status],
-        (err) => {
-          if (err) hasError = true;
-          pending--;
-          if (pending === 0) {
-            if (hasError) {
-              db.run('ROLLBACK', () => res.status(500).json({ error: 'Failed to mark attendance' }));
-            } else {
-              db.run('COMMIT', () => res.json({ message: 'Attendance saved' }));
-            }
-          }
-        }
-      );
+  try {
+    await db.withTransaction(async (tx) => {
+      for (const record of attendanceData) {
+        await tx.run(
+          `INSERT INTO attendance (user_id, date, status) VALUES (?, ?, ?)
+           ON CONFLICT(user_id, date) DO UPDATE SET status = excluded.status`,
+          [record.user_id, date, record.status]
+        );
+      }
     });
-  });
+    res.json({ message: 'Attendance saved' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to mark attendance: ' + err.message });
+  }
 });
 
 app.get('/api/attendance/summary', authenticateToken, (req, res) => {
@@ -5613,10 +5616,10 @@ app.get('/api/reports/procedures', authenticateToken, authorizeRole('DOCTOR'), (
   });
 
 // --- WALLET BALANCE ENDPOINTS ---
-app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
+app.post('/api/patients/:id/wallet', authenticateToken, async (req, res) => {
   const patientId = req.params.id;
   const { amount, type, description, mode } = req.body; 
-  const staffId = req.user.id;
+  const staffId = req.user?.id;
 
   const parsedAmount = parseFloat(amount);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -5628,8 +5631,8 @@ app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Transaction type must be CREDIT or DEBIT' });
   }
 
-  db.get('SELECT wallet_balance FROM patients WHERE id = ?', [patientId], (errPat, pat) => {
-    if (errPat) return res.status(500).json({ error: errPat.message });
+  try {
+    const pat = await db.getAsync('SELECT wallet_balance FROM patients WHERE id = ?', [patientId]);
     if (!pat) return res.status(404).json({ error: 'Patient not found' });
 
     const curBal = parseFloat(pat.wallet_balance) || 0;
@@ -5640,21 +5643,44 @@ app.post('/api/patients/:id/wallet', authenticateToken, (req, res) => {
     }
 
     const balanceChange = txType === 'CREDIT' ? parsedAmount : -parsedAmount;
-    db.serialize(() => {
-      db.run(
+    const newBal = curBal + balanceChange;
+
+    await db.withTransaction(async (tx) => {
+      await tx.run(
         `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id) VALUES (?, ?, ?, ?, ?, ?)`,
-        [patientId, parsedAmount, txType, description || '', mode || 'CASH', staffId],
-        function(err) {
-          if (err) return res.status(500).json({ error: err.message });
-          
-          db.run(`UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`, [balanceChange, patientId], function(err2) {
-            if (err2) return res.status(500).json({ error: err2.message });
-            res.json({ message: 'Wallet updated successfully', balance: curBal + balanceChange });
-          });
-        }
+        [patientId, parsedAmount, txType, description || '', mode || 'CASH', staffId]
       );
+
+      if (txType === 'DEBIT') {
+        const updRes = await tx.run(
+          `UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ? AND COALESCE(wallet_balance, 0) >= ?`,
+          [balanceChange, patientId, parsedAmount]
+        );
+        if (updRes.changes === 0) {
+          throw new Error('Insufficient wallet balance to complete transaction');
+        }
+      } else {
+        await tx.run(
+          `UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`,
+          [balanceChange, patientId]
+        );
+      }
     });
-  });
+
+    writeAudit(
+      req.user,
+      'WALLET_TRANSACTION',
+      'patients',
+      patientId,
+      { wallet_balance: curBal },
+      { wallet_balance: newBal, amount: parsedAmount, type: txType, mode: mode || 'CASH' },
+      description || `Wallet ${txType.toLowerCase()}`
+    );
+
+    res.json({ message: 'Wallet updated successfully', balance: newBal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
@@ -6018,7 +6044,7 @@ app.post('/api/invoices', authenticateToken, idempotencyMiddleware, async (req, 
 });
 
 // Admin / Doctor: Edit / Adjust discount on an existing visit/bill
-app.put('/api/visits/:id/discount', authenticateToken, (req, res) => {
+app.put('/api/visits/:id/discount', authenticateToken, async (req, res) => {
   const role = req.user?.role ? req.user.role.toUpperCase() : '';
   if (role !== 'ADMIN' && role !== 'DOCTOR') {
     return res.status(403).json({ error: 'Access denied: Only Doctor or Admin can edit discounts.' });
@@ -6028,89 +6054,75 @@ app.put('/api/visits/:id/discount', authenticateToken, (req, res) => {
   const { discount_type, discount_value, discount_amount, reason } = req.body;
   if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
 
-  db.get('SELECT * FROM visits WHERE id = ?', [visitId], (errV, visit) => {
-    if (errV) return res.status(500).json({ error: errV.message });
+  try {
+    const visit = await db.getAsync('SELECT * FROM visits WHERE id = ?', [visitId]);
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
 
-    db.all('SELECT amount FROM procedures WHERE visit_id = ?', [visitId], (errP, procs) => {
-      if (errP) return res.status(500).json({ error: errP.message });
-      db.all('SELECT amount FROM medicines WHERE visit_id = ?', [visitId], (errM, meds) => {
-        if (errM) return res.status(500).json({ error: errM.message });
+    const procs = await db.allAsync('SELECT amount FROM procedures WHERE visit_id = ?', [visitId]);
+    const meds = await db.allAsync('SELECT amount FROM medicines WHERE visit_id = ?', [visitId]);
 
-        const procTotal = (procs || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
-        const medTotal = (meds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
-        const cFee = parseFloat(visit.consultation_fee) || 0;
-        const subtotal = (visit.subtotal && parseFloat(visit.subtotal) > 0) ? parseFloat(visit.subtotal) : (procTotal + medTotal + cFee);
+    const procTotal = (procs || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const medTotal = (meds || []).reduce((s, m) => s + (parseFloat(m.amount) || 0), 0);
+    const cFee = parseFloat(visit.consultation_fee) || 0;
+    const subtotal = (visit.subtotal && parseFloat(visit.subtotal) > 0) ? parseFloat(visit.subtotal) : (procTotal + medTotal + cFee);
 
-        const dType = (discount_type || 'NONE').toUpperCase();
-        const dVal = parseFloat(discount_value) || 0;
-        let dAmt = 0;
-        if (dType === 'PERCENTAGE') {
-          dAmt = Math.round((subtotal * Math.min(100, Math.max(0, dVal))) / 100);
-        } else if (dType === 'FIXED') {
-          dAmt = Math.min(subtotal, Math.max(0, parseFloat(discount_amount !== undefined ? discount_amount : dVal) || 0));
-        }
+    const dType = (discount_type || 'NONE').toUpperCase();
+    const dVal = parseFloat(discount_value) || 0;
+    let dAmt = 0;
+    if (dType === 'PERCENTAGE') {
+      dAmt = Math.round((subtotal * Math.min(100, Math.max(0, dVal))) / 100);
+    } else if (dType === 'FIXED') {
+      dAmt = Math.min(subtotal, Math.max(0, parseFloat(discount_amount !== undefined ? discount_amount : dVal) || 0));
+    }
 
-        const netPayable = Math.max(0, subtotal - dAmt);
+    const netPayable = Math.max(0, subtotal - dAmt);
 
-        db.serialize(() => {
-          db.run('BEGIN TRANSACTION');
+    await db.withTransaction(async (tx) => {
+      // Update visits table
+      await tx.run(
+        `UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?`,
+        [subtotal, dType, dVal, dAmt, netPayable, visitId]
+      );
 
-          // Update visits table
-          db.run(
-            `UPDATE visits SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?, net_payable = ? WHERE id = ?`,
-            [subtotal, dType, dVal, dAmt, netPayable, visitId],
-            (errUpV) => {
-              if (errUpV) return db.run('ROLLBACK', () => res.status(500).json({ error: errUpV.message }));
+      // Update invoice if exists
+      await tx.run(
+        `UPDATE invoices SET subtotal = ?, discount = ?, discount_type = ?, discount_value = ?, discount_amount = ?, grand_total = ?, net_payable = ?, amount_paid = ? WHERE visit_id = ?`,
+        [subtotal, dAmt, dType, dVal, dAmt, netPayable, netPayable, netPayable, visitId]
+      );
 
-              // Update invoice if exists
-              db.run(
-                `UPDATE invoices SET subtotal = ?, discount = ?, discount_type = ?, discount_value = ?, discount_amount = ?, grand_total = ?, net_payable = ?, amount_paid = ? WHERE visit_id = ?`,
-                [subtotal, dAmt, dType, dVal, dAmt, netPayable, netPayable, netPayable, visitId],
-                () => {}
-              );
-
-              // Update existing payment amount without creating any duplicate records
-              db.run(
-                `UPDATE payments SET amount_received = ? WHERE visit_id = ?`,
-                [netPayable, visitId],
-                (errPay) => {
-                  if (errPay) return db.run('ROLLBACK', () => res.status(500).json({ error: errPay.message }));
-
-                  // Audit log
-                  const oldData = {
-                    discount_type: visit.discount_type,
-                    discount_value: visit.discount_value,
-                    discount_amount: visit.discount_amount,
-                    net_payable: visit.net_payable
-                  };
-                  const newData = {
-                    discount_type: dType,
-                    discount_value: dVal,
-                    discount_amount: dAmt,
-                    net_payable: netPayable
-                  };
-                  writeAudit(req.user, 'EDIT_DISCOUNT', 'VISIT', visitId, oldData, newData, reason || 'Discount modification');
-
-                  db.run('COMMIT', (errC) => {
-                    if (errC) return res.status(500).json({ error: 'Commit failed' });
-                    res.json({
-                      message: 'Discount updated successfully',
-                      subtotal,
-                      discount_type: dType,
-                      discount_value: dVal,
-                      discount_amount: dAmt,
-                      net_payable: netPayable
-                    });
-                  });
-                }
-              );
-            }
-          );
-        });
-      });
+      // Update existing payment amount without creating any duplicate records
+      await tx.run(
+        `UPDATE payments SET amount_received = ? WHERE visit_id = ?`,
+        [netPayable, visitId]
+      );
     });
-  });
+
+    // Audit log
+    const oldData = {
+      discount_type: visit.discount_type,
+      discount_value: visit.discount_value,
+      discount_amount: visit.discount_amount,
+      net_payable: visit.net_payable
+    };
+    const newData = {
+      discount_type: dType,
+      discount_value: dVal,
+      discount_amount: dAmt,
+      net_payable: netPayable
+    };
+    writeAudit(req.user, 'EDIT_DISCOUNT', 'VISIT', visitId, oldData, newData, reason || 'Discount modification');
+
+    res.json({
+      message: 'Discount updated successfully',
+      subtotal,
+      discount_type: dType,
+      discount_value: dVal,
+      discount_amount: dAmt,
+      net_payable: netPayable
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/invoices/patient/:patient_id', authenticateToken, (req, res) => {
@@ -6194,14 +6206,20 @@ app.put('/api/consultation-fee-rules/:id', authenticateToken, (req, res) => {
   );
 });
 
-app.delete('/api/consultation-fee-rules/:id', authenticateToken, (req, res) => {
+app.delete('/api/consultation-fee-rules/:id', authenticateToken, async (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
     return res.status(403).json({ error: 'Admin only' });
   }
-  db.run('UPDATE consultation_fee_rules SET active = 0 WHERE id = ?', [req.params.id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+  const id = req.params.id;
+  try {
+    const existing = await db.getAsync('SELECT * FROM consultation_fee_rules WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Rule not found' });
+    await db.runAsync('UPDATE consultation_fee_rules SET active = 0 WHERE id = ?', [id]);
+    writeAudit(req.user, 'CONSULTATION_RULE_DEACTIVATE', 'consultation_fee_rules', id, existing, { active: 0 }, 'Deactivated consultation fee rule');
     res.json({ message: 'Deactivated' });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================
@@ -6594,10 +6612,6 @@ app.delete('/api/admin/pharmacy/sales/:visit_id/items/:medicine_id', authenticat
 
 // Duplicate master procedure routes consolidated above
 
-app.listen(PORT, () => {
-  console.log(`Skinssence API running on http://localhost:${PORT}`);
-});
-
 // --- GENERALIZED LEGACY RECONCILIATION ENDPOINTS ---
 app.get('/api/admin/reconciliation/status', authenticateToken, (req, res) => {
   if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
@@ -6702,5 +6716,9 @@ app.use((err, req, res, next) => {
     return next(err);
   }
   res.status(err.status || 500).json({ error: 'Internal server error' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Skinssence API running on http://localhost:${PORT}`);
 });
 
