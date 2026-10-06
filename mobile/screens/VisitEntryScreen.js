@@ -4,6 +4,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DiscountControl from '../components/DiscountControl';
+import { getDailyClinicQrStatus, promptDailyClinicQrRequired } from '../utils/clinicQrHelper';
 
 export default function VisitEntryScreen({ route, navigation }) {
   const { patient, isPastVisit } = route.params;
@@ -58,6 +59,7 @@ export default function VisitEntryScreen({ route, navigation }) {
   const [upiAccount, setUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
   const [splitCashAmount, setSplitCashAmount] = useState('');
   const [splitUpiAmount, setSplitUpiAmount] = useState('');
+  const [clinicQrCompleted, setClinicQrCompleted] = useState(false);
 
   // Next Follow-Up / Appointment Scheduler
   const [nextFollowupDays, setNextFollowupDays] = useState(null);
@@ -93,6 +95,9 @@ export default function VisitEntryScreen({ route, navigation }) {
     if (!isPastVisit) {
       fetchLastVisit();
     }
+    getDailyClinicQrStatus().then(st => {
+      setClinicQrCompleted(st.clinic_qr_completed);
+    });
   }, []);
 
   // Fetch pharmacy bill whenever visit date changes
@@ -299,7 +304,7 @@ export default function VisitEntryScreen({ route, navigation }) {
     setProcedures(newProcs);
   };
 
-  const handleSubmit = async () => {
+  const executeSubmit = async (effectiveUpiAccount = upiAccount) => {
     const validProcs = procedures.filter(p => p.name && p.name.trim() !== '');
     const hasConsultation = cFeeNum > 0;
     const hasProcedures = validProcs.length > 0;
@@ -314,7 +319,8 @@ export default function VisitEntryScreen({ route, navigation }) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      
+      const upiModeName = effectiveUpiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)';
+
       const payload = {
         patient_id: patient.id,
         existing_visit_id: existingVisitId || null,
@@ -323,7 +329,6 @@ export default function VisitEntryScreen({ route, navigation }) {
         medicine_details: '', // Kept separate under the Pharmacy Bill to prevent duplicate items
         medicine_amount: 0,
         payment_mode: (() => {
-          const upiModeName = upiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)';
           if (formData.payment_mode === 'CASH + UPI') {
             const cashAmt = parseFloat(splitCashAmount) || 0;
             const upiAmt = parseFloat(splitUpiAmount) || 0;
@@ -334,7 +339,7 @@ export default function VisitEntryScreen({ route, navigation }) {
         })(),
         split_payments: formData.payment_mode === 'CASH + UPI' ? [
           { mode: 'CASH', amount: parseFloat(splitCashAmount) || 0 },
-          { mode: upiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)', amount: parseFloat(splitUpiAmount) || 0 }
+          { mode: upiModeName, amount: parseFloat(splitUpiAmount) || 0 }
         ] : null,
         subtotal: subtotal,
         discount_type: discount.type,
@@ -368,6 +373,10 @@ export default function VisitEntryScreen({ route, navigation }) {
         }
       });
 
+      if (effectiveUpiAccount === 'CLINIC') {
+        setClinicQrCompleted(true);
+      }
+
       // Auto-book next appointment if selected
       if (nextFollowupDate) {
         try {
@@ -391,6 +400,38 @@ export default function VisitEntryScreen({ route, navigation }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async () => {
+    const isUpi = (formData.payment_mode === 'UPI' || formData.payment_mode === 'CASH + UPI');
+    if (isUpi && upiAccount !== 'CLINIC' && !clinicQrCompleted) {
+      Alert.alert(
+        '🏥 Daily Clinic QR Payment Required',
+        'A single payment on Clinic QR code ("Skinssence Laser & Skincare Clinic") is required each day.\n\nStaff has not taken any Clinic QR transaction yet today.\n\nDo you want to switch this payment to Clinic QR?',
+        [
+          {
+            text: 'Switch to Clinic QR & Save',
+            onPress: () => {
+              setUpiAccount('CLINIC');
+              executeSubmit('CLINIC');
+            }
+          },
+          {
+            text: 'Continue with Store QR',
+            onPress: () => {
+              executeSubmit('STORE');
+            }
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          }
+        ]
+      );
+      return;
+    }
+
+    executeSubmit(upiAccount);
   };
 
   return (
@@ -767,6 +808,9 @@ export default function VisitEntryScreen({ route, navigation }) {
                     setSplitCashAmount(half.toString());
                     setSplitUpiAmount((collectNow - half).toString());
                   }
+                  if ((mode === 'UPI' || mode === 'CASH + UPI') && !clinicQrCompleted && upiAccount !== 'CLINIC') {
+                    promptDailyClinicQrRequired(() => setUpiAccount('CLINIC'));
+                  }
                 }}
               >
                 <Text style={[styles.modeSelectText, formData.payment_mode === mode && styles.modeSelectedText]}>{mode}</Text>
@@ -777,7 +821,28 @@ export default function VisitEntryScreen({ route, navigation }) {
           {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
           {(formData.payment_mode === 'UPI' || formData.payment_mode === 'CASH + UPI') && (
             <View style={styles.upiAccountBox}>
-              <Text style={styles.upiAccountLabel}>Receiving UPI Account:</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={styles.upiAccountLabel}>Receiving UPI Account:</Text>
+                {clinicQrCompleted ? (
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#15803d' }}>✅ Clinic QR Done Today</Text>
+                ) : (
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#b45309' }}>⚠️ Clinic QR Pending</Text>
+                )}
+              </View>
+
+              {!clinicQrCompleted && (
+                <TouchableOpacity
+                  style={styles.clinicQrNoticeCardPending}
+                  onPress={() => setUpiAccount('CLINIC')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.clinicQrNoticeTitlePending}>⚠️ 1 Daily Clinic QR Payment Required</Text>
+                  <Text style={styles.clinicQrNoticeDescPending}>
+                    Staff has not taken any Clinic QR payment today. Tap here to use Clinic QR for this bill.
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               <View style={styles.upiAccountRow}>
                 <TouchableOpacity
                   style={[styles.upiAccountBtn, upiAccount === 'STORE' && styles.upiAccountBtnActive]}
@@ -792,7 +857,7 @@ export default function VisitEntryScreen({ route, navigation }) {
                   onPress={() => setUpiAccount('CLINIC')}
                 >
                   <Text style={[styles.upiAccountBtnText, upiAccount === 'CLINIC' && styles.upiAccountBtnTextActive]}>
-                    🏥 Laser & Clinic
+                    🏥 Laser & Clinic {!clinicQrCompleted ? '⭐' : ''}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1044,5 +1109,24 @@ const styles = StyleSheet.create({
   splitInputLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 },
   splitInput: { borderWidth: 1.5, borderColor: '#10b981', fontSize: 16, fontWeight: 'bold', padding: 8, backgroundColor: '#fff' },
   splitSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
-  splitSummaryText: { fontSize: 12, color: '#334155' }
+  splitSummaryText: { fontSize: 12, color: '#334155' },
+  clinicQrNoticeCardPending: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#f59e0b',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  clinicQrNoticeTitlePending: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#b45309',
+    marginBottom: 2,
+  },
+  clinicQrNoticeDescPending: {
+    fontSize: 11,
+    color: '#92400e',
+    fontWeight: '500',
+  }
 });

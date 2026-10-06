@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Switch, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getDailyClinicQrStatus, promptDailyClinicQrRequired } from '../utils/clinicQrHelper';
 
 export default function PatientRegistrationScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
@@ -19,6 +20,14 @@ export default function PatientRegistrationScreen({ navigation }) {
   const [chargeConsultation, setChargeConsultation] = useState(true);
   const [consultationPaymentMode, setConsultationPaymentMode] = useState('CASH');
   const [regUpiAccount, setRegUpiAccount] = useState('STORE'); // 'STORE' | 'CLINIC'
+  const [clinicQrCompleted, setClinicQrCompleted] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const status = await getDailyClinicQrStatus();
+      setClinicQrCompleted(status.completed);
+    })();
+  }, []);
 
   const API_URL = 'https://skinssence-api.onrender.com/api/patients';
 
@@ -46,12 +55,47 @@ export default function PatientRegistrationScreen({ navigation }) {
     });
   };
 
-  const submitRegistration = async (force_duplicate = false) => {
+  const handlePaymentModeSelect = (mode) => {
+    setConsultationPaymentMode(mode);
+    if (mode === 'UPI' && !clinicQrCompleted) {
+      promptDailyClinicQrRequired(
+        () => setRegUpiAccount('CLINIC'),
+        () => setRegUpiAccount('STORE')
+      );
+    }
+  };
+
+  const submitRegistration = async (force_duplicate = false, chosenUpiAccount = null) => {
+    const activeUpiAccount = chosenUpiAccount || regUpiAccount;
+
+    // Check if daily Clinic QR transaction is still pending
+    if (
+      chargeConsultation &&
+      consultationPaymentMode === 'UPI' &&
+      activeUpiAccount !== 'CLINIC' &&
+      !clinicQrCompleted
+    ) {
+      promptDailyClinicQrRequired(
+        () => {
+          setRegUpiAccount('CLINIC');
+          executeSubmit(force_duplicate, 'CLINIC');
+        },
+        () => {
+          executeSubmit(force_duplicate, 'STORE');
+        }
+      );
+      return;
+    }
+
+    await executeSubmit(force_duplicate, activeUpiAccount);
+  };
+
+  const executeSubmit = async (force_duplicate = false, activeUpiAccount = regUpiAccount) => {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
       const effectiveMode = consultationPaymentMode === 'UPI' 
-        ? (regUpiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)')
+        ? (activeUpiAccount === 'CLINIC' ? 'UPI (Clinic)' : 'UPI (Store)')
         : consultationPaymentMode;
       const payload = {
         ...formData,
@@ -67,6 +111,9 @@ export default function PatientRegistrationScreen({ navigation }) {
           'x-idempotency-key': idempotencyKey
         }
       });
+      if (activeUpiAccount === 'CLINIC') {
+        setClinicQrCompleted(true);
+      }
       const feeInfo = chargeConsultation
         ? `\nConsultation Fee: ₹400 (${effectiveMode}) recorded.`
         : '\nConsultation Fee: Waived (₹0).';
@@ -223,7 +270,7 @@ export default function PatientRegistrationScreen({ navigation }) {
                     styles.paymentModeBtn,
                     consultationPaymentMode === 'CASH' && styles.paymentModeBtnActive
                   ]}
-                  onPress={() => setConsultationPaymentMode('CASH')}
+                  onPress={() => handlePaymentModeSelect('CASH')}
                 >
                   <Text style={[
                     styles.paymentModeText,
@@ -236,7 +283,7 @@ export default function PatientRegistrationScreen({ navigation }) {
                     styles.paymentModeBtn,
                     consultationPaymentMode === 'UPI' && styles.paymentModeBtnActive
                   ]}
-                  onPress={() => setConsultationPaymentMode('UPI')}
+                  onPress={() => handlePaymentModeSelect('UPI')}
                 >
                   <Text style={[
                     styles.paymentModeText,
@@ -247,6 +294,19 @@ export default function PatientRegistrationScreen({ navigation }) {
 
               {consultationPaymentMode === 'UPI' && (
                 <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#bbf7d0' }}>
+                  {!clinicQrCompleted ? (
+                    <View style={{ backgroundColor: '#fef3c7', padding: 8, borderRadius: 6, marginBottom: 8, borderWidth: 1, borderColor: '#f59e0b' }}>
+                      <Text style={{ fontSize: 11, color: '#92400e', fontWeight: 'bold' }}>
+                        ⚠️ Daily Mandate: 1 Clinic QR payment required today (0 done so far).
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ backgroundColor: '#ecfdf5', padding: 6, borderRadius: 6, marginBottom: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#065f46', fontWeight: '600' }}>
+                        ✅ Daily Clinic QR completed for today.
+                      </Text>
+                    </View>
+                  )}
                   <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>Receiving UPI Account:</Text>
                   <View style={{ flexDirection: 'row', gap: 6 }}>
                     <TouchableOpacity

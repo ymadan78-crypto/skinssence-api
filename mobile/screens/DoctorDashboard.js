@@ -22,6 +22,7 @@ export default function DoctorDashboard({ navigation }) {
   const [followupModalVisible, setFollowupModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
+  const [clinicQrStatus, setClinicQrStatus] = useState({ completed: true, count: 0 });
 
   const checkHourlyReminder = async (count) => {
     try {
@@ -57,6 +58,10 @@ export default function DoctorDashboard({ navigation }) {
           collection: todayRes.data.collection || todayRes.data.total_collection || 0,
           procedure_collection: todayRes.data.procedure_collection || 0,
           medicine_collection: todayRes.data.medicine_collection || 0
+        });
+        setClinicQrStatus({
+          completed: todayRes.data.clinic_qr_completed !== undefined ? !!todayRes.data.clinic_qr_completed : true,
+          count: todayRes.data.clinic_qr_count || 0
         });
         const pCount = todayRes.data.pending_followups_count || 0;
         const pList = todayRes.data.pending_followup_patients || [];
@@ -211,6 +216,48 @@ export default function DoctorDashboard({ navigation }) {
             <Text style={styles.cardText}>Search Patient</Text>
           </TouchableOpacity>
         </View>
+
+        {/* DAILY CLINIC QR STATUS BANNER */}
+        {!clinicQrStatus.completed ? (
+          <View style={{
+            backgroundColor: '#fffbeb',
+            borderWidth: 1.5,
+            borderColor: '#f59e0b',
+            borderRadius: 10,
+            padding: 12,
+            marginHorizontal: 15,
+            marginBottom: 15,
+            flexDirection: 'row',
+            alignItems: 'center'
+          }}>
+            <Ionicons name="alert-circle" size={24} color="#d97706" style={{ marginRight: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#92400e' }}>
+                Daily Mandate: 1 Clinic QR payment needed
+              </Text>
+              <Text style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+                0 payments on Clinic QR today. Ensure at least one UPI payment is received on Clinic QR.
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={{
+            backgroundColor: '#f0fdf4',
+            borderWidth: 1,
+            borderColor: '#86efac',
+            borderRadius: 10,
+            padding: 10,
+            marginHorizontal: 15,
+            marginBottom: 15,
+            flexDirection: 'row',
+            alignItems: 'center'
+          }}>
+            <Ionicons name="checkmark-circle" size={20} color="#16a34a" style={{ marginRight: 8 }} />
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#166534' }}>
+              Daily Clinic QR mandate completed ({clinicQrStatus.count} transaction{clinicQrStatus.count === 1 ? '' : 's'} today)
+            </Text>
+          </View>
+        )}
         
         {/* MANAGEMENT SECTION */}
         <View style={styles.section}>
