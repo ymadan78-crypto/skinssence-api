@@ -3787,12 +3787,19 @@ function getDailyCollectionBreakdown(targetDate, callback) {
 
         let procedure_collection = 0;
         let medicine_collection = 0;
+        let clinic_qr_count = 0;
+        let clinic_qr_amount = 0;
         const modesMap = {};
 
         (payRows || []).forEach(p => {
           const amt = parseFloat(p.amount_received) || 0;
           const mode = normalizePaymentMode(p.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
+
+          if (mode === 'UPI (Clinic)') {
+            clinic_qr_count++;
+            clinic_qr_amount += amt;
+          }
 
           const isPharm = (p.purpose === 'PHARMACY') || (p.planned_procedures === 'PHARMACY SALE');
           if (isPharm) {
@@ -3813,6 +3820,10 @@ function getDailyCollectionBreakdown(targetDate, callback) {
           const amt = parseFloat(pkg.price_paid) || 0;
           const mode = normalizePaymentMode(pkg.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
+          if (mode === 'UPI (Clinic)') {
+            clinic_qr_count++;
+            clinic_qr_amount += amt;
+          }
           procedure_collection += amt;
         });
 
@@ -3820,6 +3831,10 @@ function getDailyCollectionBreakdown(targetDate, callback) {
           const amt = parseFloat(w.amount) || 0;
           const mode = normalizePaymentMode(w.mode);
           modesMap[mode] = (modesMap[mode] || 0) + amt;
+          if (mode === 'UPI (Clinic)') {
+            clinic_qr_count++;
+            clinic_qr_amount += amt;
+          }
           procedure_collection += amt;
         });
 
@@ -3830,7 +3845,10 @@ function getDailyCollectionBreakdown(targetDate, callback) {
           procedure_collection,
           medicine_collection,
           total_collection,
-          modes
+          modes,
+          clinic_qr_count,
+          clinic_qr_amount,
+          clinic_qr_completed: clinic_qr_count >= 1
         });
       });
     });
@@ -3899,6 +3917,26 @@ app.get('/api/staff/collection/today', authenticateToken, (req, res) => {
       // Return modes array for backward compatibility with older client builds
       res.json(data.modes || []);
     }
+  });
+});
+
+// Daily Clinic QR Code Status Check (1 transaction required per day)
+app.get('/api/payments/daily-clinic-qr-status', authenticateToken, (req, res) => {
+  const today = req.query.date || getISTDate();
+  getDailyCollectionBreakdown(today, (err, data) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const count = data.clinic_qr_count || 0;
+    const completed = count >= 1;
+    res.json({
+      date: today,
+      clinic_qr_count: count,
+      clinic_qr_amount: data.clinic_qr_amount || 0,
+      clinic_qr_completed: completed,
+      required_per_day: 1,
+      message: completed
+        ? 'Daily Clinic QR payment requirement satisfied.'
+        : 'At least 1 transaction on Clinic QR code (Skinssence Laser & Skincare Clinic) is required today.'
+    });
   });
 });
 
@@ -4796,6 +4834,9 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
                 procedure_collection: colData?.procedure_collection || 0,
                 medicine_collection: colData?.medicine_collection || 0,
                 modes: colData?.modes || [],
+                clinic_qr_count: colData?.clinic_qr_count || 0,
+                clinic_qr_amount: colData?.clinic_qr_amount || 0,
+                clinic_qr_completed: !!colData?.clinic_qr_completed,
                 pending_followups_count: 0,
                 pending_followup_patients: []
               });
@@ -4849,6 +4890,9 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
                       procedure_collection: colData?.procedure_collection || 0,
                       medicine_collection: colData?.medicine_collection || 0,
                       modes: colData?.modes || [],
+                      clinic_qr_count: colData?.clinic_qr_count || 0,
+                      clinic_qr_amount: colData?.clinic_qr_amount || 0,
+                      clinic_qr_completed: !!colData?.clinic_qr_completed,
                       pending_followups_count: fData ? fData.pendingCount : 0,
                       pending_followup_patients: fData ? fData.pendingPatients : []
                     });
