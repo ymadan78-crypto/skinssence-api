@@ -3767,9 +3767,15 @@ function getDailyCollectionBreakdown(targetDate, callback) {
   `;
 
   const sqlPackages = `
-    SELECT id, price_paid, mode, created_at 
-    FROM patient_packages 
-    WHERE (date(created_at) = ? OR created_at LIKE ?) AND price_paid > 0
+    SELECT pp.id, pp.price_paid, pp.mode, pp.created_at 
+    FROM patient_packages pp
+    WHERE (date(pp.created_at) = ? OR pp.created_at LIKE ?) 
+      AND pp.price_paid > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM payments p 
+        WHERE p.patient_id = pp.patient_id 
+          AND (date(p.payment_date) = date(pp.created_at) OR p.payment_date LIKE substr(pp.created_at, 1, 10) || '%')
+      )
   `;
 
   const sqlWallet = `
