@@ -28,6 +28,7 @@ import LeadsScreen from './screens/LeadsScreen';
 import AddLeadScreen from './screens/AddLeadScreen';
 import LeadDetailScreen from './screens/LeadDetailScreen';
 import LeadFollowupsScreen from './screens/LeadFollowupsScreen';
+import TreatmentPlannerScreen from './screens/TreatmentPlannerScreen';
 import axios from 'axios';
 
 
@@ -132,6 +133,7 @@ export default function App() {
         <Stack.Screen name="AddLead" component={AddLeadScreen} />
         <Stack.Screen name="LeadDetail" component={LeadDetailScreen} />
         <Stack.Screen name="LeadFollowups" component={LeadFollowupsScreen} />
+        <Stack.Screen name="TreatmentPlanner" component={TreatmentPlannerScreen} />
       </Stack.Navigator>
 
       </NavigationContainer>

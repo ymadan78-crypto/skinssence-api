@@ -842,6 +842,45 @@ db.run(`CREATE TABLE IF NOT EXISTS idempotency_keys (
 db.run(`CREATE INDEX IF NOT EXISTS idx_idempotency_created_at ON idempotency_keys(created_at)`, () => {});
 db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_skinssence_id ON patients(skinssence_id)`, () => {});
 
+// --- TREATMENT PLANS & PRE-BRIDAL PROTOCOLS ---
+db.run(`CREATE TABLE IF NOT EXISTS treatment_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    plan_type TEXT DEFAULT 'PRE_BRIDAL',
+    plan_title TEXT NOT NULL,
+    event_name TEXT DEFAULT 'Wedding',
+    target_event_date TEXT,
+    start_date TEXT,
+    status TEXT DEFAULT 'ACTIVE',
+    total_estimated_value REAL DEFAULT 0,
+    agreed_package_price REAL DEFAULT 0,
+    advance_amount REAL DEFAULT 0,
+    payment_terms TEXT,
+    doctor_notes TEXT,
+    homecare_instructions TEXT,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+
+db.run(`CREATE TABLE IF NOT EXISTS treatment_plan_milestones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    sequence_order INTEGER NOT NULL,
+    milestone_title TEXT,
+    target_date TEXT,
+    days_before_event INTEGER,
+    procedures_json TEXT,
+    status TEXT DEFAULT 'PLANNED',
+    completed_visit_id INTEGER,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_treatment_plans_patient ON treatment_plans(patient_id)`, () => {});
+db.run(`CREATE INDEX IF NOT EXISTS idx_treatment_plan_milestones_plan ON treatment_plan_milestones(plan_id)`, () => {});
+
+
 // Seed patient_s_number sequence from max existing patient ID if not yet seeded
 db.get(`
   SELECT MAX(num) as max_num FROM (
@@ -6758,6 +6797,288 @@ setInterval(() => {
     .then(res => console.log('[SCHEDULED BACKUP SUCCESS]', res.filename))
     .catch(err => console.error('[SCHEDULED BACKUP FAILED]', err.message));
 }, TWENTY_FOUR_HOURS_MS);
+
+// ==========================================
+// TREATMENT PLANS & PRE-BRIDAL PROTOCOLS API
+// ==========================================
+
+// 1. Get all treatment plans for a patient
+app.get('/api/treatment-plans/patient/:patient_id', authenticateToken, (req, res) => {
+  const patientId = req.params.patient_id;
+  const sqlPlans = `
+    SELECT tp.*, u.name as created_by_name
+    FROM treatment_plans tp
+    LEFT JOIN users u ON tp.created_by = u.id
+    WHERE tp.patient_id = ?
+    ORDER BY tp.created_at DESC
+  `;
+  db.all(sqlPlans, [patientId], (err, plans) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!plans || plans.length === 0) return res.json([]);
+
+    const planIds = plans.map(p => p.id);
+    const placeholders = planIds.map(() => '?').join(',');
+    const sqlMilestones = `
+      SELECT * FROM treatment_plan_milestones
+      WHERE plan_id IN (${placeholders})
+      ORDER BY sequence_order ASC, target_date ASC, id ASC
+    `;
+    db.all(sqlMilestones, planIds, (errM, milestones) => {
+      if (errM) return res.status(500).json({ error: errM.message });
+      const msMap = {};
+      (milestones || []).forEach(m => {
+        try {
+          m.procedures = JSON.parse(m.procedures_json || '[]');
+        } catch (e) {
+          m.procedures = [];
+        }
+        if (!msMap[m.plan_id]) msMap[m.plan_id] = [];
+        msMap[m.plan_id].push(m);
+      });
+
+      const result = plans.map(p => ({
+        ...p,
+        milestones: msMap[p.id] || []
+      }));
+      res.json(result);
+    });
+  });
+});
+
+// 2. Get single treatment plan by ID
+app.get('/api/treatment-plans/:id', authenticateToken, (req, res) => {
+  const planId = req.params.id;
+  const sqlPlan = `
+    SELECT tp.*, p.first_name, p.last_name, p.skinssence_id, p.mobile, p.gender, p.dob, u.name as created_by_name
+    FROM treatment_plans tp
+    JOIN patients p ON tp.patient_id = p.id
+    LEFT JOIN users u ON tp.created_by = u.id
+    WHERE tp.id = ?
+  `;
+  db.get(sqlPlan, [planId], (err, plan) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!plan) return res.status(404).json({ error: 'Treatment plan not found' });
+
+    db.all(`SELECT * FROM treatment_plan_milestones WHERE plan_id = ? ORDER BY sequence_order ASC, target_date ASC, id ASC`, [planId], (errM, milestones) => {
+      if (errM) return res.status(500).json({ error: errM.message });
+      const parsedMilestones = (milestones || []).map(m => {
+        try {
+          m.procedures = JSON.parse(m.procedures_json || '[]');
+        } catch (e) {
+          m.procedures = [];
+        }
+        return m;
+      });
+      res.json({ ...plan, milestones: parsedMilestones });
+    });
+  });
+});
+
+// 3. Create a new treatment plan with sequenced milestones
+app.post('/api/treatment-plans', authenticateToken, async (req, res) => {
+  const {
+    patient_id,
+    plan_type = 'PRE_BRIDAL',
+    plan_title,
+    event_name = 'Wedding',
+    target_event_date,
+    start_date,
+    total_estimated_value = 0,
+    agreed_package_price = 0,
+    advance_amount = 0,
+    payment_terms = '',
+    doctor_notes = '',
+    homecare_instructions = '',
+    milestones = []
+  } = req.body;
+
+  if (!patient_id || !plan_title) {
+    return res.status(400).json({ error: 'Patient ID and Plan Title are required.' });
+  }
+
+  const staffId = req.user ? req.user.id : null;
+  const startVal = start_date || new Date().toISOString().split('T')[0];
+
+  try {
+    let createdPlanId = null;
+    await db.withTransaction(async (tx) => {
+      const planRes = await tx.run(
+        `INSERT INTO treatment_plans (
+          patient_id, plan_type, plan_title, event_name, target_event_date, start_date,
+          status, total_estimated_value, agreed_package_price, advance_amount,
+          payment_terms, doctor_notes, homecare_instructions, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          patient_id,
+          plan_type,
+          plan_title.trim(),
+          event_name,
+          target_event_date || null,
+          startVal,
+          parseFloat(total_estimated_value) || 0,
+          parseFloat(agreed_package_price) || 0,
+          parseFloat(advance_amount) || 0,
+          payment_terms,
+          doctor_notes,
+          homecare_instructions,
+          staffId
+        ]
+      );
+      createdPlanId = planRes.lastID;
+
+      if (Array.isArray(milestones) && milestones.length > 0) {
+        for (let i = 0; i < milestones.length; i++) {
+          const m = milestones[i];
+          const seq = m.sequence_order !== undefined ? m.sequence_order : (i + 1);
+          const procsJson = JSON.stringify(m.procedures || []);
+          await tx.run(
+            `INSERT INTO treatment_plan_milestones (
+              plan_id, sequence_order, milestone_title, target_date,
+              days_before_event, procedures_json, status, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              createdPlanId,
+              seq,
+              m.milestone_title || `Milestone ${seq}`,
+              m.target_date || null,
+              m.days_before_event !== undefined ? m.days_before_event : null,
+              procsJson,
+              m.status || 'PLANNED',
+              m.notes || ''
+            ]
+          );
+        }
+      }
+    });
+
+    writeAudit(req.user, 'CREATE_TREATMENT_PLAN', 'treatment_plans', createdPlanId, null, {
+      plan_title,
+      patient_id,
+      milestones_count: milestones.length
+    });
+
+    res.json({ message: 'Treatment plan created successfully', plan_id: createdPlanId });
+  } catch (err) {
+    console.error('Error creating treatment plan:', err);
+    res.status(500).json({ error: err.message || 'Failed to create treatment plan.' });
+  }
+});
+
+// 4. Update an existing treatment plan and milestones
+app.put('/api/treatment-plans/:id', authenticateToken, async (req, res) => {
+  const planId = req.params.id;
+  const {
+    plan_title,
+    event_name,
+    target_event_date,
+    start_date,
+    status,
+    total_estimated_value,
+    agreed_package_price,
+    advance_amount,
+    payment_terms,
+    doctor_notes,
+    homecare_instructions,
+    milestones
+  } = req.body;
+
+  try {
+    await db.withTransaction(async (tx) => {
+      await tx.run(
+        `UPDATE treatment_plans SET
+          plan_title = COALESCE(?, plan_title),
+          event_name = COALESCE(?, event_name),
+          target_event_date = COALESCE(?, target_event_date),
+          start_date = COALESCE(?, start_date),
+          status = COALESCE(?, status),
+          total_estimated_value = COALESCE(?, total_estimated_value),
+          agreed_package_price = COALESCE(?, agreed_package_price),
+          advance_amount = COALESCE(?, advance_amount),
+          payment_terms = COALESCE(?, payment_terms),
+          doctor_notes = COALESCE(?, doctor_notes),
+          homecare_instructions = COALESCE(?, homecare_instructions),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+        [
+          plan_title,
+          event_name,
+          target_event_date,
+          start_date,
+          status,
+          total_estimated_value !== undefined ? parseFloat(total_estimated_value) : null,
+          agreed_package_price !== undefined ? parseFloat(agreed_package_price) : null,
+          advance_amount !== undefined ? parseFloat(advance_amount) : null,
+          payment_terms,
+          doctor_notes,
+          homecare_instructions,
+          planId
+        ]
+      );
+
+      // If milestones provided, refresh them
+      if (Array.isArray(milestones)) {
+        await tx.run('DELETE FROM treatment_plan_milestones WHERE plan_id = ?', [planId]);
+        for (let i = 0; i < milestones.length; i++) {
+          const m = milestones[i];
+          const seq = m.sequence_order !== undefined ? m.sequence_order : (i + 1);
+          const procsJson = JSON.stringify(m.procedures || []);
+          await tx.run(
+            `INSERT INTO treatment_plan_milestones (
+              plan_id, sequence_order, milestone_title, target_date,
+              days_before_event, procedures_json, status, completed_visit_id, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              planId,
+              seq,
+              m.milestone_title || `Milestone ${seq}`,
+              m.target_date || null,
+              m.days_before_event !== undefined ? m.days_before_event : null,
+              procsJson,
+              m.status || 'PLANNED',
+              m.completed_visit_id || null,
+              m.notes || ''
+            ]
+          );
+        }
+      }
+    });
+
+    res.json({ message: 'Treatment plan updated successfully' });
+  } catch (err) {
+    console.error('Error updating treatment plan:', err);
+    res.status(500).json({ error: err.message || 'Failed to update treatment plan.' });
+  }
+});
+
+// 5. Update milestone status
+app.put('/api/treatment-plans/milestones/:id/status', authenticateToken, (req, res) => {
+  const milestoneId = req.params.id;
+  const { status, completed_visit_id } = req.body;
+  if (!status) return res.status(400).json({ error: 'Status is required' });
+
+  db.run(
+    'UPDATE treatment_plan_milestones SET status = ?, completed_visit_id = COALESCE(?, completed_visit_id) WHERE id = ?',
+    [status, completed_visit_id || null, milestoneId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'Milestone status updated successfully' });
+    }
+  );
+});
+
+// 6. Delete treatment plan
+app.delete('/api/treatment-plans/:id', authenticateToken, async (req, res) => {
+  const planId = req.params.id;
+  try {
+    await db.withTransaction(async (tx) => {
+      await tx.run('DELETE FROM treatment_plan_milestones WHERE plan_id = ?', [planId]);
+      await tx.run('DELETE FROM treatment_plans WHERE id = ?', [planId]);
+    });
+    res.json({ message: 'Treatment plan deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Phase 3A: Centralized Express Error Handler (catches unhandled exceptions and next(err))
 app.use((err, req, res, next) => {

@@ -21,6 +21,7 @@ function PatientProfileScreenContent({ route, navigation }) {
   const [loadingPatient, setLoadingPatient] = useState(!initialPatient && !!initialPatientId);
   const [history, setHistory] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [treatmentPlans, setTreatmentPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState(initialPatient ? { ...initialPatient } : {});
@@ -160,12 +161,27 @@ function PatientProfileScreenContent({ route, navigation }) {
     }
   };
 
+  const fetchTreatmentPlans = async (overrideId) => {
+    const id = overrideId || patient?.id || patientId;
+    if (!id) return;
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.get(`https://skinssence-api.onrender.com/api/treatment-plans/patient/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTreatmentPlans(res.data || []);
+    } catch (error) {
+      console.log('Failed to fetch treatment plans:', error?.message);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       const currentId = patient?.id || patientId;
       if (currentId) {
         fetchHistory(currentId);
         fetchPackages(currentId);
+        fetchTreatmentPlans(currentId);
       }
       AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
     }, [patient?.id, patientId])
@@ -173,7 +189,7 @@ function PatientProfileScreenContent({ route, navigation }) {
 
   const onRefresh = () => {
     setRefreshing(true);
-    Promise.all([fetchHistory(), fetchPackages()]).finally(() => setRefreshing(false));
+    Promise.all([fetchHistory(), fetchPackages(), fetchTreatmentPlans()]).finally(() => setRefreshing(false));
   };
 
   const handleUpdateProfile = async () => {
@@ -1103,8 +1119,71 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                   <Text style={[styles.actionBtnText, {fontSize: 14}]}>🎁 Sell Package</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* ACTION BUTTONS ROW 3: Pre-Bridal Treatment Planner */}
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 10}}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, {flex: 1, backgroundColor: '#831843', marginTop: 0}]}
+                  onPress={() => {
+                    navigation.navigate('TreatmentPlanner', { patient, existingPlan: treatmentPlans[0] || null });
+                  }}
+                >
+                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>👰 ✨ Pre-Bridal / Treatment Plan</Text>
+                </TouchableOpacity>
+              </View>
             </>
           )}
+
+          {/* PRE-BRIDAL / CUSTOMISED TREATMENT PLANS DISPLAY */}
+          <View style={[styles.walletBanner, {backgroundColor: '#fdf2f8', borderColor: '#f472b6', marginTop: 15, flexDirection: 'column', alignItems: 'stretch'}]}>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6}}>
+              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                <Text style={[styles.walletTitle, {color: '#831843'}]}>👰 PRE-BRIDAL & TREATMENT PLANS</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.walletBtn, {backgroundColor: '#831843', paddingVertical: 4, paddingHorizontal: 10}]}
+                onPress={() => navigation.navigate('TreatmentPlanner', { patient })}
+              >
+                <Text style={styles.walletBtnText}>+ New Plan</Text>
+              </TouchableOpacity>
+            </View>
+
+            {treatmentPlans.length === 0 ? (
+              <TouchableOpacity
+                style={{paddingVertical: 6}}
+                onPress={() => navigation.navigate('TreatmentPlanner', { patient })}
+              >
+                <Text style={{color: '#9d174d', fontStyle: 'italic', fontSize: 13}}>
+                  No active pre-bridal protocol. Tap here to create a sequenced treatment plan.
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              treatmentPlans.map(tp => {
+                const targetDateFormatted = tp.target_event_date ? new Date(tp.target_event_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Custom';
+                return (
+                  <View key={tp.id} style={{borderTopWidth: 1, borderTopColor: '#fbcfe8', paddingTop: 8, marginTop: 4}}>
+                    <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                      <View style={{flex: 1, marginRight: 8}}>
+                        <Text style={{fontWeight: 'bold', color: '#831843', fontSize: 14}}>{tp.plan_title}</Text>
+                        <Text style={{color: '#701a75', fontSize: 12, marginTop: 2}}>
+                          🎯 {tp.event_name || 'Event'}: {targetDateFormatted} • {tp.milestones?.length || 0} Milestones
+                        </Text>
+                        <Text style={{color: '#475569', fontSize: 11, marginTop: 1}}>
+                          Agreed Price: ₹{(tp.agreed_package_price || 0).toLocaleString('en-IN')} • Advance: ₹{(tp.advance_amount || 0).toLocaleString('en-IN')}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={{backgroundColor: '#831843', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6}}
+                        onPress={() => navigation.navigate('TreatmentPlanner', { patient, existingPlan: tp })}
+                      >
+                        <Text style={{color: '#fff', fontSize: 12, fontWeight: 'bold'}}>Manage / PDF ›</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
           
           {/* ACTIVE PACKAGES DISPLAY */}
           <View style={[styles.walletBanner, {backgroundColor: '#e0e7ff', borderColor: '#4f46e5', marginTop: 15, flexDirection: 'column', alignItems: 'stretch'}]}>
