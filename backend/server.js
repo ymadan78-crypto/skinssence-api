@@ -12,6 +12,7 @@ try {
   console.warn('[Skinssence Server] Optional dependency "xlsx" not found. Excel download routes will return JSON notice.');
 }
 const db = require('./db');
+const googleContactsService = require('./services/googleContactsService');
 
 // Ensure unit_price and total_amount exist on inventory_stock_movements for Clinic Use tracking
 try {
@@ -1239,6 +1240,18 @@ app.post('/api/patients', authenticateToken, idempotencyMiddleware, async (req, 
     });
 
     res.json(result);
+
+    // Asynchronous Google Contacts Sync (non-blocking)
+    googleContactsService.syncPatientContact({
+      first_name,
+      last_name,
+      skinssence_id: result.skinssence_id,
+      mobile,
+      dob,
+      gender,
+      email,
+      city
+    }).catch(err => console.error('[GoogleSync Background Error]', err));
   } catch (err) {
     console.error('Patient registration failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -1254,6 +1267,22 @@ app.put('/api/patients/:id', authenticateToken, (req, res) => {
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: 'Patient updated successfully' });
+
+      // Asynchronously update Google Contacts (non-blocking)
+      db.get('SELECT skinssence_id FROM patients WHERE id = ?', [id], (e, row) => {
+        if (!e && row) {
+          googleContactsService.syncPatientContact({
+            first_name,
+            last_name,
+            skinssence_id: row.skinssence_id,
+            mobile,
+            dob,
+            gender,
+            email,
+            city
+          }).catch(err => console.error('[GoogleSync Background Error]', err));
+        }
+      });
     }
   );
 });
@@ -6758,6 +6787,25 @@ app.post('/api/admin/system/backup', backupExportLimiter, authenticateToken, asy
   } catch (err) {
     console.error('Backup trigger failed:', err);
     res.status(500).json({ error: 'Database backup failed: ' + err.message });
+  }
+});
+
+app.post('/api/admin/google-sync-test', authenticateToken, async (req, res) => {
+  if (req.user.role.toUpperCase() !== 'ADMIN' && req.user.role.toUpperCase() !== 'DOCTOR') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  try {
+    const testPatient = req.body.patient || {
+      first_name: 'Test',
+      last_name: 'Patient',
+      skinssence_id: 'S000',
+      mobile: '9876543210',
+      city: 'Kota'
+    };
+    const result = await googleContactsService.syncPatientContact(testPatient);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

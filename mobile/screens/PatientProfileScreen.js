@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Linking, Modal, RefreshControl, KeyboardAvoidingView, Platform } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Print from 'expo-print';
@@ -1420,7 +1420,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       </ScrollView>
 
       {/* RECHARGE WALLET MODAL */}
-      <Modal visible={rechargeModalVisible} transparent={true} animationType="slide">
+      <Modal visible={rechargeModalVisible} transparent={true} animationType="slide" onRequestClose={() => setRechargeModalVisible(false)}>
         <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center'}}>
           <View style={{backgroundColor: '#fff', padding: 20, borderRadius: 10, width: '85%'}}>
             <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#5C0B0B'}}>Recharge Prepaid Package</Text>
@@ -1441,276 +1441,298 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       </Modal>
 
       {/* SELL PACKAGE MODAL */}
-      <Modal visible={pkgModalVisible} transparent={true} animationType="slide">
-        <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center'}}>
-          <View style={{backgroundColor: '#fff', padding: 20, borderRadius: 10, width: '90%'}}>
-            <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#5C0B0B'}}>Sell New Package</Text>
+      <Modal visible={pkgModalVisible} transparent={true} animationType="slide" onRequestClose={() => setPkgModalVisible(false)}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+          style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 12}}
+        >
+          <View style={{backgroundColor: '#fff', borderRadius: 12, width: '95%', maxWidth: 440, maxHeight: '88%', display: 'flex', overflow: 'hidden'}}>
             
-            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Booking Date (YYYY-MM-DD):</Text>
-            <TextInput 
-              style={styles.modalInput} 
-              placeholder="YYYY-MM-DD (e.g. 2026-08-01)" 
-              value={pkgDate} 
-              onChangeText={setPkgDate} 
-            />
-
-            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Package Name:</Text>
-            <TextInput 
-              style={styles.modalInput} 
-              placeholder="e.g. LHR FULL BODY" 
-              value={pkgName} 
-              onChangeText={setPkgName} 
-            />
-
-            <View style={{flexDirection: 'row', gap: 10}}>
-              <View style={{flex: 1}}>
-                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Total Sessions:</Text>
-                <TextInput 
-                  style={styles.modalInput} 
-                  keyboardType="numeric" 
-                  placeholder="e.g. 3" 
-                  value={pkgSessions} 
-                  onChangeText={setPkgSessions} 
-                />
-              </View>
-              <View style={{flex: 1}}>
-                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Already Taken:</Text>
-                <TextInput 
-                  style={styles.modalInput} 
-                  keyboardType="numeric" 
-                  placeholder="0" 
-                  value={pkgUsedSessions} 
-                  onChangeText={setPkgUsedSessions} 
-                />
-              </View>
+            {/* Header */}
+            <View style={{paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+              <Text style={{fontSize: 18, fontWeight: 'bold', color: '#5C0B0B'}}>Sell New Package</Text>
+              <TouchableOpacity onPress={() => setPkgModalVisible(false)} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
+                <Text style={{fontSize: 20, color: '#94a3b8', fontWeight: 'bold'}}>✕</Text>
+              </TouchableOpacity>
             </View>
 
-            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Package Total MRP / Original Price (Rs):</Text>
-            <TextInput 
-              style={styles.modalInput} 
-              keyboardType="numeric" 
-              placeholder="e.g. 15000" 
-              value={pkgOriginalPrice} 
-              onChangeText={(val) => {
-                setPkgOriginalPrice(val);
-                const orig = parseFloat(val) || 0;
-                const pct = parseFloat(pkgDiscountVal) || 0;
-                if (orig > 0 && pct > 0) {
-                  const disc = (orig * pct) / 100;
-                  setPkgPrice(String(Math.round(orig - disc)));
-                } else {
-                  setPkgPrice(val);
-                }
-              }} 
-            />
+            {/* Scrollable Form Body */}
+            <ScrollView 
+              style={{flexShrink: 1}}
+              contentContainerStyle={{padding: 16, paddingBottom: 16}}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Booking Date (YYYY-MM-DD):</Text>
+              <TextInput 
+                style={styles.modalInput} 
+                placeholder="YYYY-MM-DD (e.g. 2026-08-01)" 
+                value={pkgDate} 
+                onChangeText={setPkgDate} 
+              />
 
-            <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount % Preset:</Text>
-            <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10}}>
-              {[0, 5, 10, 15, 20].map((d) => (
-                <TouchableOpacity
-                  key={d}
-                  onPress={() => {
-                    setPkgDiscountVal(String(d));
-                    const orig = parseFloat(pkgOriginalPrice) || 0;
-                    if (orig > 0) {
-                      const disc = (orig * d) / 100;
-                      setPkgPrice(String(Math.round(orig - disc)));
-                    }
-                  }}
-                  style={{
-                    paddingVertical: 5,
-                    paddingHorizontal: 10,
-                    borderRadius: 6,
-                    backgroundColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#f3f4f6',
-                    borderWidth: 1,
-                    borderColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#d1d5db'
-                  }}
-                >
-                  <Text style={{fontSize: 12, fontWeight: 'bold', color: pkgDiscountVal === String(d) ? '#fff' : '#374151'}}>
-                    {d === 0 ? 'No Disc' : `${d}%`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+              <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Package Name:</Text>
+              <TextInput 
+                style={styles.modalInput} 
+                placeholder="e.g. LHR FULL BODY" 
+                value={pkgName} 
+                onChangeText={setPkgName} 
+              />
 
-            <View style={{flexDirection: 'row', gap: 10}}>
-              <View style={{flex: 1}}>
-                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount %:</Text>
-                <TextInput 
-                  style={styles.modalInput} 
-                  keyboardType="numeric" 
-                  placeholder="0" 
-                  value={pkgDiscountVal} 
-                  onChangeText={(val) => {
-                    setPkgDiscountVal(val);
-                    const orig = parseFloat(pkgOriginalPrice) || 0;
-                    const pct = parseFloat(val) || 0;
-                    if (orig > 0 && pct >= 0 && pct <= 100) {
-                      const disc = (orig * pct) / 100;
-                      setPkgPrice(String(Math.round(orig - disc)));
-                    }
-                  }} 
-                />
+              <View style={{flexDirection: 'row', gap: 10}}>
+                <View style={{flex: 1}}>
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Total Sessions:</Text>
+                  <TextInput 
+                    style={styles.modalInput} 
+                    keyboardType="numeric" 
+                    placeholder="e.g. 3" 
+                    value={pkgSessions} 
+                    onChangeText={setPkgSessions} 
+                  />
+                </View>
+                <View style={{flex: 1}}>
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Already Taken:</Text>
+                  <TextInput 
+                    style={styles.modalInput} 
+                    keyboardType="numeric" 
+                    placeholder="0" 
+                    value={pkgUsedSessions} 
+                    onChangeText={setPkgUsedSessions} 
+                  />
+                </View>
               </View>
-              <View style={{flex: 1}}>
-                <Text style={{fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 4}}>Net Price Paid (Rs):</Text>
-                <TextInput 
-                  style={[styles.modalInput, {borderColor: '#10b981', borderWidth: 1.5, fontWeight: 'bold'}]} 
-                  keyboardType="numeric" 
-                  placeholder="e.g. 13500" 
-                  value={pkgPrice} 
-                  onChangeText={(val) => {
+
+              <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Package Total MRP / Original Price (Rs):</Text>
+              <TextInput 
+                style={styles.modalInput} 
+                keyboardType="numeric" 
+                placeholder="e.g. 15000" 
+                value={pkgOriginalPrice} 
+                onChangeText={(val) => {
+                  setPkgOriginalPrice(val);
+                  const orig = parseFloat(val) || 0;
+                  const pct = parseFloat(pkgDiscountVal) || 0;
+                  if (orig > 0 && pct > 0) {
+                    const disc = (orig * pct) / 100;
+                    setPkgPrice(String(Math.round(orig - disc)));
+                  } else {
                     setPkgPrice(val);
-                    const orig = parseFloat(pkgOriginalPrice) || 0;
-                    const net = parseFloat(val) || 0;
-                    if (orig > 0 && net <= orig) {
-                      const pct = Math.round(((orig - net) / orig) * 100);
-                      setPkgDiscountVal(String(pct));
-                    }
-                  }} 
-                />
-              </View>
-            </View>
+                  }
+                }} 
+              />
 
-            {parseFloat(pkgOriginalPrice) > 0 && parseFloat(pkgPrice) > 0 && parseFloat(pkgOriginalPrice) > parseFloat(pkgPrice) && (
-              <View style={{backgroundColor: '#f5f3ff', padding: 8, borderRadius: 6, marginBottom: 10, borderWidth: 1, borderColor: '#ddd6fe'}}>
-                <Text style={{fontSize: 12, color: '#6d28d9', fontWeight: 'bold'}}>
-                  🏷️ MRP: ₹{parseFloat(pkgOriginalPrice).toLocaleString('en-IN')}  •  Discount: {pkgDiscountVal}% (-₹{(parseFloat(pkgOriginalPrice) - parseFloat(pkgPrice)).toLocaleString('en-IN')})  •  Net: ₹{parseFloat(pkgPrice).toLocaleString('en-IN')}
-                </Text>
-              </View>
-            )}
-
-            <Text style={{marginTop: 5, marginBottom: 5, fontWeight: 'bold', color: '#555'}}>Payment Mode:</Text>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
-              {['CASH', 'UPI', 'CASH + UPI'].map(mode => (
-                <TouchableOpacity
-                  key={mode}
-                  onPress={() => {
-                    setPkgMode(mode);
-                    const net = parseFloat(pkgPrice) || 0;
-                    if (mode === 'CASH + UPI' && !pkgSplitCash && !pkgSplitUpi && net > 0) {
-                      const half = Math.round(net / 2);
-                      setPkgSplitCash(half.toString());
-                      setPkgSplitUpi((net - half).toString());
-                    }
-                  }}
-                  style={{
-                    paddingVertical: 9,
-                    paddingHorizontal: 4,
-                    backgroundColor: pkgMode === mode ? '#10b981' : '#eee',
-                    borderRadius: 6,
-                    flex: 1,
-                    marginHorizontal: 3,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{color: pkgMode === mode ? '#fff' : '#000', fontWeight: 'bold', fontSize: 12}}>{mode}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
-            {(pkgMode === 'UPI' || pkgMode === 'CASH + UPI') && (
-              <View style={{ backgroundColor: '#f0fdf4', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 10 }}>
-                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>Receiving UPI Account:</Text>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
+              <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount % Preset:</Text>
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10}}>
+                {[0, 5, 10, 15, 20].map((d) => (
                   <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      paddingVertical: 8,
-                      paddingHorizontal: 4,
-                      borderRadius: 6,
-                      borderWidth: 1.5,
-                      borderColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#cbd5e1',
-                      backgroundColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#fff',
-                      alignItems: 'center'
-                    }}
-                    onPress={() => setPkgUpiAccount('STORE')}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'STORE' ? '#fff' : '#334155' }}>
-                      🛒 Skincare Store (Default)
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{
-                      flex: 1,
-                      paddingVertical: 8,
-                      paddingHorizontal: 4,
-                      borderRadius: 6,
-                      borderWidth: 1.5,
-                      borderColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#cbd5e1',
-                      backgroundColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#fff',
-                      alignItems: 'center'
-                    }}
-                    onPress={() => setPkgUpiAccount('CLINIC')}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'CLINIC' ? '#fff' : '#334155' }}>
-                      🏥 Laser & Clinic
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* Split Cash + UPI Inputs */}
-            {pkgMode === 'CASH + UPI' && (
-              <View style={{ backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#1e293b' }}>Split Payment</Text>
-                  <TouchableOpacity
+                    key={d}
                     onPress={() => {
-                      const net = parseFloat(pkgPrice) || 0;
-                      const half = Math.round(net / 2);
-                      setPkgSplitCash(half.toString());
-                      setPkgSplitUpi((net - half).toString());
+                      setPkgDiscountVal(String(d));
+                      const orig = parseFloat(pkgOriginalPrice) || 0;
+                      if (orig > 0) {
+                        const disc = (orig * d) / 100;
+                        setPkgPrice(String(Math.round(orig - disc)));
+                      }
                     }}
-                    style={{ paddingVertical: 3, paddingHorizontal: 6, backgroundColor: '#e0e7ff', borderRadius: 4 }}
+                    style={{
+                      paddingVertical: 5,
+                      paddingHorizontal: 10,
+                      borderRadius: 6,
+                      backgroundColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#f3f4f6',
+                      borderWidth: 1,
+                      borderColor: pkgDiscountVal === String(d) ? '#7c3aed' : '#d1d5db'
+                    }}
                   >
-                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#3730a3' }}>⚡ 50/50 Split</Text>
+                    <Text style={{fontSize: 12, fontWeight: 'bold', color: pkgDiscountVal === String(d) ? '#fff' : '#374151'}}>
+                      {d === 0 ? 'No Disc' : `${d}%`}
+                    </Text>
                   </TouchableOpacity>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>Cash (₹)</Text>
-                    <TextInput
-                      style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
-                      keyboardType="numeric"
-                      value={pkgSplitCash}
-                      onChangeText={(val) => {
-                        setPkgSplitCash(val);
-                        const net = parseFloat(pkgPrice) || 0;
-                        const c = parseFloat(val) || 0;
-                        if (net >= c) {
-                          setPkgSplitUpi((net - c).toFixed(0));
-                        }
-                      }}
-                      placeholder="0"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>UPI (₹)</Text>
-                    <TextInput
-                      style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
-                      keyboardType="numeric"
-                      value={pkgSplitUpi}
-                      onChangeText={(val) => setPkgSplitUpi(val)}
-                      placeholder="0"
-                    />
-                  </View>
-                </View>
-                <Text style={{ fontSize: 11, color: '#64748b', marginTop: 4, textAlign: 'right' }}>
-                  Total: ₹{((parseFloat(pkgSplitCash) || 0) + (parseFloat(pkgSplitUpi) || 0)).toFixed(0)} / Target: ₹{pkgPrice || '0'}
-                </Text>
+                ))}
               </View>
-            )}
-            <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10}}>
-              <TouchableOpacity onPress={() => setPkgModalVisible(false)} style={{marginRight: 20, padding: 10}} disabled={isSubmitting}><Text style={{color: '#ef4444', fontWeight: 'bold', fontSize: 16}}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity onPress={handlePackageSale} disabled={isSubmitting} style={{backgroundColor: isSubmitting ? '#9ca3af' : '#10b981', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 6}}>
-                {isSubmitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{color: '#fff', fontWeight: 'bold', fontSize: 16}}>Sell Package</Text>}
+
+              <View style={{flexDirection: 'row', gap: 10}}>
+                <View style={{flex: 1}}>
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 4}}>Discount %:</Text>
+                  <TextInput 
+                    style={styles.modalInput} 
+                    keyboardType="numeric" 
+                    placeholder="0" 
+                    value={pkgDiscountVal} 
+                    onChangeText={(val) => {
+                      setPkgDiscountVal(val);
+                      const orig = parseFloat(pkgOriginalPrice) || 0;
+                      const pct = parseFloat(val) || 0;
+                      if (orig > 0 && pct >= 0 && pct <= 100) {
+                        const disc = (orig * pct) / 100;
+                        setPkgPrice(String(Math.round(orig - disc)));
+                      }
+                    }} 
+                  />
+                </View>
+                <View style={{flex: 1}}>
+                  <Text style={{fontSize: 12, fontWeight: 'bold', color: '#166534', marginBottom: 4}}>Net Price Paid (Rs):</Text>
+                  <TextInput 
+                    style={[styles.modalInput, {borderColor: '#10b981', borderWidth: 1.5, fontWeight: 'bold'}]} 
+                    keyboardType="numeric" 
+                    placeholder="e.g. 13500" 
+                    value={pkgPrice} 
+                    onChangeText={(val) => {
+                      setPkgPrice(val);
+                      const orig = parseFloat(pkgOriginalPrice) || 0;
+                      const net = parseFloat(val) || 0;
+                      if (orig > 0 && net <= orig) {
+                        const pct = Math.round(((orig - net) / orig) * 100);
+                        setPkgDiscountVal(String(pct));
+                      }
+                    }} 
+                  />
+                </View>
+              </View>
+
+              {parseFloat(pkgOriginalPrice) > 0 && parseFloat(pkgPrice) > 0 && parseFloat(pkgOriginalPrice) > parseFloat(pkgPrice) && (
+                <View style={{backgroundColor: '#f5f3ff', padding: 8, borderRadius: 6, marginBottom: 10, borderWidth: 1, borderColor: '#ddd6fe'}}>
+                  <Text style={{fontSize: 12, color: '#6d28d9', fontWeight: 'bold'}}>
+                    🏷️ MRP: ₹{parseFloat(pkgOriginalPrice).toLocaleString('en-IN')}  •  Discount: {pkgDiscountVal}% (-₹{(parseFloat(pkgOriginalPrice) - parseFloat(pkgPrice)).toLocaleString('en-IN')})  •  Net: ₹{parseFloat(pkgPrice).toLocaleString('en-IN')}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={{marginTop: 5, marginBottom: 5, fontWeight: 'bold', color: '#555'}}>Payment Mode:</Text>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10}}>
+                {['CASH', 'UPI', 'CASH + UPI'].map(mode => (
+                  <TouchableOpacity
+                    key={mode}
+                    onPress={() => {
+                      setPkgMode(mode);
+                      const net = parseFloat(pkgPrice) || 0;
+                      if (mode === 'CASH + UPI' && !pkgSplitCash && !pkgSplitUpi && net > 0) {
+                        const half = Math.round(net / 2);
+                        setPkgSplitCash(half.toString());
+                        setPkgSplitUpi((net - half).toString());
+                      }
+                    }}
+                    style={{
+                      paddingVertical: 9,
+                      paddingHorizontal: 4,
+                      backgroundColor: pkgMode === mode ? '#10b981' : '#eee',
+                      borderRadius: 6,
+                      flex: 1,
+                      marginHorizontal: 3,
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{color: pkgMode === mode ? '#fff' : '#000', fontWeight: 'bold', fontSize: 12}}>{mode}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Dual UPI Account Selection (Store by default, Clinic on 1-tap) */}
+              {(pkgMode === 'UPI' || pkgMode === 'CASH + UPI') && (
+                <View style={{ backgroundColor: '#f0fdf4', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#86efac', marginBottom: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#166534', marginBottom: 6 }}>Receiving UPI Account:</Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        paddingHorizontal: 4,
+                        borderRadius: 6,
+                        borderWidth: 1.5,
+                        borderColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#cbd5e1',
+                        backgroundColor: pkgUpiAccount === 'STORE' ? '#15803d' : '#fff',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => setPkgUpiAccount('STORE')}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'STORE' ? '#fff' : '#334155' }}>
+                        🛒 Skincare Store (Default)
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        paddingHorizontal: 4,
+                        borderRadius: 6,
+                        borderWidth: 1.5,
+                        borderColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#cbd5e1',
+                        backgroundColor: pkgUpiAccount === 'CLINIC' ? '#15803d' : '#fff',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => setPkgUpiAccount('CLINIC')}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: pkgUpiAccount === 'CLINIC' ? '#fff' : '#334155' }}>
+                        🏥 Laser & Clinic
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Split Cash + UPI Inputs */}
+              {pkgMode === 'CASH + UPI' && (
+                <View style={{ backgroundColor: '#f8fafc', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#1e293b' }}>Split Payment</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const net = parseFloat(pkgPrice) || 0;
+                        const half = Math.round(net / 2);
+                        setPkgSplitCash(half.toString());
+                        setPkgSplitUpi((net - half).toString());
+                      }}
+                      style={{ paddingVertical: 3, paddingHorizontal: 6, backgroundColor: '#e0e7ff', borderRadius: 4 }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#3730a3' }}>⚡ 50/50 Split</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>Cash (₹)</Text>
+                      <TextInput
+                        style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
+                        keyboardType="numeric"
+                        value={pkgSplitCash}
+                        onChangeText={(val) => {
+                          setPkgSplitCash(val);
+                          const net = parseFloat(pkgPrice) || 0;
+                          const c = parseFloat(val) || 0;
+                          if (net >= c) {
+                            setPkgSplitUpi((net - c).toFixed(0));
+                          }
+                        }}
+                        placeholder="0"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569', marginBottom: 2 }}>UPI (₹)</Text>
+                      <TextInput
+                        style={{ borderWidth: 1.5, borderColor: '#10b981', fontSize: 14, fontWeight: 'bold', padding: 6, backgroundColor: '#fff', borderRadius: 6 }}
+                        keyboardType="numeric"
+                        value={pkgSplitUpi}
+                        onChangeText={(val) => setPkgSplitUpi(val)}
+                        placeholder="0"
+                      />
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 11, color: '#64748b', marginTop: 4, textAlign: 'right' }}>
+                    Total: ₹{((parseFloat(pkgSplitCash) || 0) + (parseFloat(pkgSplitUpi) || 0)).toFixed(0)} / Target: ₹{pkgPrice || '0'}
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Persistent Fixed Action Footer - Always visible above nav bar */}
+            <View style={{flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc'}}>
+              <TouchableOpacity onPress={() => setPkgModalVisible(false)} style={{marginRight: 16, paddingVertical: 8, paddingHorizontal: 12}} disabled={isSubmitting}>
+                <Text style={{color: '#ef4444', fontWeight: 'bold', fontSize: 15}}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handlePackageSale} disabled={isSubmitting} style={{backgroundColor: isSubmitting ? '#9ca3af' : '#10b981', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8}}>
+                {isSubmitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{color: '#fff', fontWeight: 'bold', fontSize: 15}}>Sell Package</Text>}
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* PHARMACY TRANSACTION CORRECTION MODAL */}
