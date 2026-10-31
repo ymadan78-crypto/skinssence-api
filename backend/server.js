@@ -2576,8 +2576,9 @@ app.post('/api/inventory', authenticateToken, (req, res) => {
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
 
-  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions, unit, reorder_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [medicine_name.trim(), batch_number, parsedMrp, initialQty, expiry_date, default_instructions, unit || 'units', finalReorder],
+  const finalCompany = (company || '').trim();
+  db.run('INSERT INTO inventory (medicine_name, batch_number, mrp, quantity, expiry_date, default_instructions, unit, reorder_level, company) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [medicine_name.trim(), batch_number, parsedMrp, initialQty, expiry_date, default_instructions, unit || 'units', finalReorder, finalCompany],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       const newItemId = this.lastID;

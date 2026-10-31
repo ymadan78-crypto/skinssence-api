@@ -9,6 +9,7 @@ function InventoryManagementScreenContent({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [inventory, setInventory] = useState([]);
   const [searchQ, setSearchQ] = useState('');
+  const [selectedBrandFilter, setSelectedBrandFilter] = useState('ALL');
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [userRole, setUserRole] = useState('');
   const [formData, setFormData] = useState({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], original_quantity: 0, is_new_batch: false, company: '' });
@@ -406,7 +407,7 @@ Do you want to proceed?`,
   };
 
   const openAddModal = () => {
-    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0 };
+    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0, company: '' };
     setFormData(initial);
     setInitialFormState(initial);
     setIsModalVisible(true);
@@ -464,7 +465,8 @@ Do you want to proceed?`,
     const initInst = Array.isArray(initialFormState.default_instructions) ? [...initialFormState.default_instructions].sort().join(',') : '';
     const instChanged = currInst !== initInst;
 
-    return nameChanged || batchChanged || mrpChanged || qtyChanged || expChanged || instChanged;
+    const compChanged = (formData.company || '').trim() !== (initialFormState.company || '').trim();
+    return nameChanged || batchChanged || mrpChanged || qtyChanged || expChanged || instChanged || compChanged;
   };
 
   const handleModalBackOrCancel = () => {
