@@ -23,6 +23,7 @@ try {
   db.run('ALTER TABLE patient_packages ADD COLUMN original_price REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE patient_packages ADD COLUMN discount_percent REAL DEFAULT 0', () => {});
   db.run('ALTER TABLE patient_packages ADD COLUMN discount_amount REAL DEFAULT 0', () => {});
+  db.run("ALTER TABLE inventory ADD COLUMN company TEXT DEFAULT ''", () => {});
 
   // Secondary Performance & Relational Integrity Indexes (Non-destructive)
   db.run('CREATE INDEX IF NOT EXISTS idx_visits_patient_id ON visits(patient_id)', () => {});
@@ -2558,7 +2559,7 @@ app.get('/api/inventory/all', authenticateToken, (req, res) => {
 });
 
 app.post('/api/inventory', authenticateToken, (req, res) => {
-  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '', unit = 'units', reorder_level = 5 } = req.body;
+  const { medicine_name, batch_number = '', mrp = 0, quantity = 0, expiry_date = '', default_instructions = '', unit = 'units', reorder_level = 5, company = '' } = req.body;
   if (!medicine_name || !medicine_name.trim()) return res.status(400).json({ error: 'Medicine name required' });
 
   const initialQty = parseFloat(quantity) || 0;
@@ -2605,7 +2606,7 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
   const userName = req.user?.name || req.user?.username || 'Staff';
   const userId = req.user?.id || null;
   const id = req.params.id;
-  const { medicine_name, batch_number = '', mrp = 0, quantity, expiry_date = '', default_instructions = '', unit, reorder_level } = req.body;
+  const { medicine_name, batch_number = '', mrp = 0, quantity, expiry_date = '', default_instructions = '', unit, reorder_level, company } = req.body;
 
   db.get('SELECT * FROM inventory WHERE id = ?', [id], (errRow, existingRow) => {
     if (errRow) return res.status(500).json({ error: errRow.message });
@@ -2639,12 +2640,13 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
     const finalMrp = parsedMrp;
     const finalExp = expiry_date !== undefined ? expiry_date : existingRow.expiry_date;
     const finalInst = default_instructions !== undefined ? default_instructions : existingRow.default_instructions;
+    const finalCompany = company !== undefined ? company.trim() : (existingRow.company || '');
 
     const delta = newQty - existingQty;
 
     db.run(
-      'UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=?, unit=?, reorder_level=? WHERE id=?',
-      [finalName, finalBatch, finalMrp, newQty, finalExp, finalInst, finalUnit, finalReorder, id],
+      'UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=?, unit=?, reorder_level=?, company=? WHERE id=?',
+      [finalName, finalBatch, finalMrp, newQty, finalExp, finalInst, finalUnit, finalReorder, finalCompany, id],
       function(errUpd) {
         if (errUpd) return res.status(500).json({ error: errUpd.message });
 
@@ -3509,6 +3511,276 @@ app.get('/api/inventory/analytics', authenticateToken, (req, res) => {
       });
     });
   });
+});
+
+
+// --- PHARMA COMPANY SALES ANALYTICS (BY MRP) ---
+app.get('/api/inventory/company-sales', authenticateToken, async (req, res) => {
+  try {
+    const targetMonth = (req.query.month || 'ALL').trim();
+    const targetCompany = (req.query.company || 'ALL').trim();
+
+    // 1. Fetch inventory items
+    const inventoryRows = await db.allAsync("SELECT id, medicine_name, company, mrp FROM inventory");
+    
+    const itemCompanyMap = {};
+    const itemMrpMap = {};
+
+    inventoryRows.forEach(item => {
+      const rawName = (item.medicine_name || '').trim();
+      let comp = (item.company || '').trim();
+      if (!comp) {
+        const prefixMatch = rawName.match(/^([A-Za-z0-9\s]+)\s*[-:]\s*(.+)$/);
+        if (prefixMatch && prefixMatch[1].length <= 25) {
+          comp = prefixMatch[1].trim();
+        } else {
+          const bracketMatch = rawName.match(/\[([A-Za-z0-9\s]+)\]/) || rawName.match(/\(([A-Za-z0-9\s]+)\)/);
+          if (bracketMatch && !bracketMatch[1].toLowerCase().includes('batch') && !bracketMatch[1].toLowerCase().includes('qty')) {
+            comp = bracketMatch[1].trim();
+          }
+        }
+      }
+      itemCompanyMap[rawName.toLowerCase()] = comp || 'Other';
+      itemMrpMap[rawName.toLowerCase()] = item.mrp;
+    });
+
+    // Special brand standardizations for Velnourish items
+    const velnourishPatterns = [
+      { pattern: /depiscreen/i, standardName: 'Depiscreen Under Eye Cream', mrp: 550 },
+      { pattern: /screenguard.*(tab|tablet)/i, standardName: 'Screenguard Tablet', mrp: 200 },
+      { pattern: /screenguard/i, standardName: 'Screenguard SPF 50', mrp: 495 },
+      { pattern: /aquaedge.*(bath|bar|soap)/i, standardName: 'Aquaedge Bathing Bar', mrp: 189 },
+      { pattern: /aquaedge/i, standardName: 'Aquaedge Cleanser', mrp: 399 },
+      { pattern: /acnepurge.*20/i, standardName: 'Acnepurge 20', mrp: 210 },
+      { pattern: /acnepurge/i, standardName: 'Acnepurge Facewash', mrp: 259 },
+      { pattern: /hebeda/i, standardName: 'Hebeda Serum', mrp: 770 },
+      { pattern: /kalsma/i, standardName: 'Kalsma-D3', mrp: 104 },
+      { pattern: /kezil/i, standardName: 'Kezil SL', mrp: 295 },
+      { pattern: /velmect|velnact/i, standardName: 'Velmect / Velnact', mrp: 127 }
+    ];
+
+    function resolveItem(detailsOrName, fallbackAmount) {
+      const raw = (detailsOrName || '').trim();
+      const lower = raw.toLowerCase();
+
+      for (const v of velnourishPatterns) {
+        if (v.pattern.test(lower)) {
+          return { name: v.standardName, company: 'Velnourish', mrp: v.mrp };
+        }
+      }
+
+      const cleanName = raw.replace(/\s*\[.*?\]/g, '').replace(/\s*\(Qty:.*?\)/gi, '').replace(/\|.*/, '').trim();
+      const cleanLower = cleanName.toLowerCase();
+      
+      let comp = itemCompanyMap[cleanLower];
+      let mrp = itemMrpMap[cleanLower];
+
+      if (!comp) {
+        for (const [k, c] of Object.entries(itemCompanyMap)) {
+          if (cleanLower.includes(k) || k.includes(cleanLower)) {
+            comp = c;
+            mrp = itemMrpMap[k];
+            break;
+          }
+        }
+      }
+
+      if (!comp) comp = 'Other';
+      if (!mrp) mrp = fallbackAmount || 0;
+
+      return { name: cleanName, company: comp, mrp: mrp };
+    }
+
+    function extractQty(str, fallbackAmt, mrp) {
+      const qm = (str || '').match(/\(Qty:\s*([0-9.]+)\)/i);
+      if (qm) return parseFloat(qm[1]) || 1;
+      if (fallbackAmt && mrp && fallbackAmt > 0) return Math.round(fallbackAmt / mrp) || 1;
+      return 1;
+    }
+
+    // 2. Fetch sales from medicines table
+    const meds = await db.allAsync(`
+      SELECT m.id, m.visit_id, m.details, m.amount, v.visit_date
+      FROM medicines m
+      JOIN visits v ON m.visit_id = v.id
+    `);
+
+    const visitSales = {};
+
+    for (const m of meds) {
+      const vId = m.visit_id;
+      if (!visitSales[vId]) visitSales[vId] = { date: m.visit_date, items: [] };
+      
+      const details = m.details || '';
+      if (details.includes('),') || details.includes(', Screenguard') || details.includes(', Aquaedge')) {
+        const parts = details.split(/,\s*(?=[A-Z0-9a-z])/);
+        for (const p of parts) {
+          const resItem = resolveItem(p, 0);
+          const qty = extractQty(p, 0, resItem.mrp);
+          visitSales[vId].items.push({ name: resItem.name, company: resItem.company, mrp: resItem.mrp, qty: qty });
+        }
+      } else {
+        const resItem = resolveItem(details, m.amount);
+        const qty = extractQty(details, m.amount, resItem.mrp);
+        visitSales[vId].items.push({ name: resItem.name, company: resItem.company, mrp: resItem.mrp, qty: qty });
+      }
+    }
+
+    // 3. Include non-overlapping invoices
+    const invs = await db.allAsync("SELECT id, visit_id, items_json, created_at FROM invoices ORDER BY id ASC");
+    const seenInvoiceVisits = new Set();
+
+    for (const inv of invs) {
+      const vId = inv.visit_id;
+      if (vId && visitSales[vId] && visitSales[vId].items.length > 0) continue;
+      if (vId && seenInvoiceVisits.has(vId)) continue;
+      if (vId) seenInvoiceVisits.add(vId);
+
+      let items = [];
+      try { items = JSON.parse(inv.items_json || '[]'); } catch (e) {}
+
+      const matchedInInv = [];
+      for (const it of items) {
+        if ((it.name || '').toLowerCase().includes('consultation')) continue;
+        const resItem = resolveItem(it.name, it.amount);
+        const qty = it.qty || extractQty(it.name, it.amount, resItem.mrp);
+        matchedInInv.push({ name: resItem.name, company: resItem.company, mrp: resItem.mrp, qty: qty });
+      }
+
+      if (matchedInInv.length > 0) {
+        const key = vId ? `v_${vId}` : `inv_${inv.id}`;
+        visitSales[key] = { date: inv.created_at, items: matchedInInv };
+      }
+    }
+
+    // 4. Aggregate by Month & Company
+    const allMonthsSet = new Set();
+    const allCompaniesSet = new Set();
+    const grouped = {};
+
+    for (const [key, vData] of Object.entries(visitSales)) {
+      if (!vData.items || vData.items.length === 0) continue;
+      let mKey = (vData.date || '').substring(0, 7);
+      if (!mKey.match(/^\d{4}-\d{2}$/)) {
+        const d = new Date(vData.date);
+        if (!isNaN(d.getTime())) mKey = d.toISOString().substring(0, 7);
+      }
+      if (!mKey) continue;
+
+      allMonthsSet.add(mKey);
+
+      if (!grouped[mKey]) grouped[mKey] = {};
+
+      for (const it of vData.items) {
+        const comp = it.company || 'Other';
+        allCompaniesSet.add(comp);
+
+        if (!grouped[mKey][comp]) {
+          grouped[mKey][comp] = {
+            company: comp,
+            totalUnits: 0,
+            totalSalesMrp: 0,
+            items: {}
+          };
+        }
+
+        if (!grouped[mKey][comp].items[it.name]) {
+          grouped[mKey][comp].items[it.name] = {
+            name: it.name,
+            mrp: it.mrp,
+            qty: 0,
+            totalAmount: 0
+          };
+        }
+
+        const itemTotal = it.qty * it.mrp;
+        grouped[mKey][comp].items[it.name].qty += it.qty;
+        grouped[mKey][comp].items[it.name].totalAmount += itemTotal;
+        grouped[mKey][comp].totalUnits += it.qty;
+        grouped[mKey][comp].totalSalesMrp += itemTotal;
+      }
+    }
+
+    const availableMonths = Array.from(allMonthsSet).sort().reverse();
+    // Always put Velnourish first if present, then alphabetical
+    const availableCompanies = Array.from(allCompaniesSet).sort((a, b) => {
+      if (a === 'Velnourish') return -1;
+      if (b === 'Velnourish') return 1;
+      if (a === 'Other') return 1;
+      if (b === 'Other') return -1;
+      return a.localeCompare(b);
+    });
+
+    const monthsToInclude = targetMonth === 'ALL' ? availableMonths : [targetMonth];
+    const companiesToInclude = targetCompany === 'ALL' ? availableCompanies : [targetCompany];
+
+    const resultCompanies = {};
+    let overallUnits = 0;
+    let overallMrpValue = 0;
+
+    for (const m of monthsToInclude) {
+      if (!grouped[m]) continue;
+      for (const c of companiesToInclude) {
+        if (!grouped[m][c]) continue;
+        if (!resultCompanies[c]) {
+          resultCompanies[c] = {
+            company: c,
+            totalUnits: 0,
+            totalSalesMrp: 0,
+            items: {}
+          };
+        }
+        resultCompanies[c].totalUnits += grouped[m][c].totalUnits;
+        resultCompanies[c].totalSalesMrp += grouped[m][c].totalSalesMrp;
+        overallUnits += grouped[m][c].totalUnits;
+        overallMrpValue += grouped[m][c].totalSalesMrp;
+
+        for (const [iName, iObj] of Object.entries(grouped[m][c].items)) {
+          if (!resultCompanies[c].items[iName]) {
+            resultCompanies[c].items[iName] = {
+              name: iName,
+              mrp: iObj.mrp,
+              qty: 0,
+              totalAmount: 0
+            };
+          }
+          resultCompanies[c].items[iName].qty += iObj.qty;
+          resultCompanies[c].items[iName].totalAmount += iObj.totalAmount;
+        }
+      }
+    }
+
+    const formattedCompanies = Object.values(resultCompanies).map(c => ({
+      company: c.company,
+      totalUnits: c.totalUnits,
+      totalSalesMrp: Math.round(c.totalSalesMrp * 100) / 100,
+      items: Object.values(c.items)
+        .sort((a, b) => b.totalAmount - a.totalAmount)
+        .map(it => ({
+          name: it.name,
+          mrp: it.mrp,
+          qty: it.qty,
+          totalAmount: Math.round(it.totalAmount * 100) / 100
+        }))
+    })).sort((a, b) => b.totalSalesMrp - a.totalSalesMrp);
+
+    res.json({
+      selectedMonth: targetMonth,
+      selectedCompany: targetCompany,
+      availableMonths,
+      availableCompanies,
+      summary: {
+        totalUnits: overallUnits,
+        totalSalesMrp: Math.round(overallMrpValue * 100) / 100,
+        companiesCount: formattedCompanies.length
+      },
+      companies: formattedCompanies
+    });
+
+  } catch (err) {
+    console.error('[CompanySales API Error]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- EXPENSE ROUTES ---

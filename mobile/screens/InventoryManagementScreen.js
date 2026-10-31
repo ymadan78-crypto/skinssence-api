@@ -11,7 +11,7 @@ function InventoryManagementScreenContent({ navigation }) {
   const [searchQ, setSearchQ] = useState('');
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [userRole, setUserRole] = useState('');
-  const [formData, setFormData] = useState({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], original_quantity: 0, is_new_batch: false });
+  const [formData, setFormData] = useState({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], original_quantity: 0, is_new_batch: false, company: '' });
   const [initialFormState, setInitialFormState] = useState(null);
   const [isRecModalVisible, setIsRecModalVisible] = useState(false);
   const [recLoading, setRecLoading] = useState(false);
@@ -317,7 +317,8 @@ function InventoryManagementScreenContent({ navigation }) {
         mrp: parseFloat(formData.mrp) || 0,
         quantity: newQty,
         expiry_date: formData.expiry_date ? formData.expiry_date.trim() : '',
-        default_instructions: formData.default_instructions.join(', ')
+        default_instructions: formData.default_instructions.join(', '),
+        company: formData.company ? formData.company.trim() : ''
       };
 
       if (formData.id) {

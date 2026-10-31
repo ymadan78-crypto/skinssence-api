@@ -13,10 +13,35 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedDeadStock, setExpandedDeadStock] = useState(null);
 
+  // --- COMPANY / BRAND SALES STATE ---
+  const [companySalesData, setCompanySalesData] = useState(null);
+  const [companySalesLoading, setCompanySalesLoading] = useState(false);
+  const [selectedCompanyMonth, setSelectedCompanyMonth] = useState('ALL');
+  const [selectedCompanyBrand, setSelectedCompanyBrand] = useState('ALL');
+  const [companySearchQ, setCompanySearchQ] = useState('');
+
   useEffect(() => {
     fetchAnalytics();
+    fetchCompanySales('ALL', 'ALL');
     AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
   }, []);
+
+
+  const fetchCompanySales = async (m = selectedCompanyMonth, b = selectedCompanyBrand) => {
+    setCompanySalesLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.get(`https://skinssence-api.onrender.com/api/inventory/company-sales?month=${m}&company=${b}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCompanySalesData(res.data);
+    } catch (e) {
+      console.error('Error fetching company sales:', e);
+      Alert.alert('Error', 'Failed to fetch company sales statistics.');
+    } finally {
+      setCompanySalesLoading(false);
+    }
+  };
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -478,6 +503,36 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginBottom: 2,
   },
+
+  filterSection: { backgroundColor: '#fff', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: '#e5e7eb' },
+  filterSectionTitle: { fontSize: 12, fontWeight: '700', color: '#4b5563', textTransform: 'uppercase' },
+  pillBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f3f4f6', marginRight: 8, borderWidth: 1, borderColor: '#d1d5db' },
+  activePillBtn: { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' },
+  pillText: { fontSize: 13, color: '#374151', fontWeight: '600' },
+  activePillText: { fontSize: 13, color: '#fff', fontWeight: '700' },
+  searchBarContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  searchInput: { flex: 1, fontSize: 14, color: '#111827', paddingVertical: 2 },
+  companyHeroCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 14, borderWidth: 1.5, borderColor: '#5C0B0B', elevation: 2 },
+  companyHeroHeader: { marginBottom: 12 },
+  companyHeroTitle: { fontSize: 16, fontWeight: '800', color: '#5C0B0B' },
+  companyHeroSubtitle: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  companyHeroStatsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#fdf2f2', paddingVertical: 10, borderRadius: 8 },
+  companyHeroStat: { alignItems: 'center', flex: 1 },
+  companyHeroStatLabel: { fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 2 },
+  companyHeroStatValue: { fontSize: 20, fontWeight: 'bold' },
+  companySectionCard: { backgroundColor: '#fff', borderRadius: 10, marginBottom: 14, borderWidth: 1, borderColor: '#e5e7eb', overflow: 'hidden', elevation: 1 },
+  companyCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  companyCardTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  companyCardSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
+  companyCardTotalBadge: { fontSize: 9, fontWeight: '800', color: '#0f766e', backgroundColor: '#ccfbf1', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 3, marginBottom: 2 },
+  companyCardTotalAmt: { fontSize: 16, fontWeight: '800', color: '#5C0B0B' },
+  itemTable: { paddingHorizontal: 8, paddingBottom: 6 },
+  itemTableHeader: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1.5, borderBottomColor: '#e2e8f0' },
+  tableColHeader: { fontSize: 11, fontWeight: '700', color: '#64748b', textTransform: 'uppercase' },
+  itemTableRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  itemTableNameText: { fontSize: 13, fontWeight: '600', color: '#1e293b' },
+  itemTableDataText: { fontSize: 13 }
+
   adminValuationStatVal: {
     fontSize: 14,
     fontWeight: 'bold',
