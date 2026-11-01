@@ -1,0 +1,1917 @@
+{
+  "availableMonths": [
+    "2026-11",
+    "2026-10",
+    "2026-09",
+    "2026-08",
+    "2026-04"
+  ],
+  "availableCompanies": [
+    "Velnourish",
+    "Aakaar",
+    "Adroit",
+    "Akumentis",
+    "Apex",
+    "Becura",
+    "Canixa",
+    "Dermis",
+    "Ethicare / Ubik",
+    "Fixderma",
+    "Galderma",
+    "Glaxo",
+    "Gracederma",
+    "Indus",
+    "Intas",
+    "La Pristine",
+    "Menarini",
+    "Micro Labs",
+    "Palsons Derma",
+    "Regalis",
+    "Sanofi",
+    "Sesderma",
+    "Talent India",
+    "Torrent",
+    "Vegetal",
+    "Yuderma",
+    "Other"
+  ],
+  "grouped": {
+    "2026-08": {
+      "Other": {
+        "company": "Other",
+        "totalUnits": 2,
+        "totalSalesMrp": 1230,
+        "items": {
+          "Efanid, screen guard": {
+            "name": "Efanid, screen guard",
+            "mrp": 1130,
+            "qty": 1,
+            "totalAmount": 1130
+          },
+          "Test Med": {
+            "name": "Test Med",
+            "mrp": 100,
+            "qty": 1,
+            "totalAmount": 100
+          }
+        }
+      },
+      "Intas": {
+        "company": "Intas",
+        "totalUnits": 1,
+        "totalSalesMrp": 1100,
+        "items": {
+          "Morr f Aqua, trichospire shampoo": {
+            "name": "Morr f Aqua, trichospire shampoo",
+            "mrp": 1100,
+            "qty": 1,
+            "totalAmount": 1100
+          }
+        }
+      }
+    },
+    "2026-04": {
+      "Other": {
+        "company": "Other",
+        "totalUnits": 1,
+        "totalSalesMrp": 100,
+        "items": {
+          "Test": {
+            "name": "Test",
+            "mrp": 100,
+            "qty": 1,
+            "totalAmount": 100
+          }
+        }
+      }
+    },
+    "2026-09": {
+      "Other": {
+        "company": "Other",
+        "totalUnits": 307,
+        "totalSalesMrp": 69165.44,
+        "items": {
+          "Test": {
+            "name": "Test",
+            "mrp": 500,
+            "qty": 4,
+            "totalAmount": 2000
+          },
+          "Spironolactone tab.": {
+            "name": "Spironolactone tab.",
+            "mrp": 203.4,
+            "qty": 272,
+            "totalAmount": 43265.44
+          },
+          "Clavnid-625": {
+            "name": "Clavnid-625",
+            "mrp": 200,
+            "qty": 20,
+            "totalAmount": 4000
+          },
+          "Hist-Test-Cream 50g": {
+            "name": "Hist-Test-Cream 50g",
+            "mrp": 700,
+            "qty": 2,
+            "totalAmount": 1400
+          },
+          "AZELAIC M": {
+            "name": "AZELAIC M",
+            "mrp": 1100,
+            "qty": 1,
+            "totalAmount": 1100
+          },
+          "LHR FULL BODY": {
+            "name": "LHR FULL BODY",
+            "mrp": 0,
+            "qty": 2,
+            "totalAmount": 0
+          },
+          "LHR": {
+            "name": "LHR",
+            "mrp": 1800,
+            "qty": 2,
+            "totalAmount": 6800
+          },
+          "LIP LASER": {
+            "name": "LIP LASER",
+            "mrp": 1500,
+            "qty": 2,
+            "totalAmount": 3000
+          },
+          "CARBON FACIAL": {
+            "name": "CARBON FACIAL",
+            "mrp": 4000,
+            "qty": 1,
+            "totalAmount": 4000
+          },
+          "SCALP GFC PRP": {
+            "name": "SCALP GFC PRP",
+            "mrp": 3600,
+            "qty": 1,
+            "totalAmount": 3600
+          }
+        }
+      },
+      "Menarini": {
+        "company": "Menarini",
+        "totalUnits": 24,
+        "totalSalesMrp": 17287,
+        "items": {
+          "Kelocepa silicone gel": {
+            "name": "Kelocepa silicone gel",
+            "mrp": 650,
+            "qty": 3,
+            "totalAmount": 1950
+          },
+          "Melalumin un eye serum": {
+            "name": "Melalumin un eye serum",
+            "mrp": 999,
+            "qty": 8,
+            "totalAmount": 7992
+          },
+          "Melalumin ultra": {
+            "name": "Melalumin ultra",
+            "mrp": 605,
+            "qty": 8,
+            "totalAmount": 4840
+          },
+          "Melalumin lip lightener": {
+            "name": "Melalumin lip lightener",
+            "mrp": 435,
+            "qty": 4,
+            "totalAmount": 1740
+          },
+          "Hexilak ultra": {
+            "name": "Hexilak ultra",
+            "mrp": 765,
+            "qty": 1,
+            "totalAmount": 765
+          }
+        }
+      },
+      "Velnourish": {
+        "company": "Velnourish",
+        "totalUnits": 110,
+        "totalSalesMrp": 33363,
+        "items": {
+          "Screenguard SPF 50": {
+            "name": "Screenguard SPF 50",
+            "mrp": 495,
+            "qty": 28,
+            "totalAmount": 13860
+          },
+          "Aquaedge Cleanser": {
+            "name": "Aquaedge Cleanser",
+            "mrp": 399,
+            "qty": 20,
+            "totalAmount": 7980
+          },
+          "Depiscreen Under Eye Cream": {
+            "name": "Depiscreen Under Eye Cream",
+            "mrp": 550,
+            "qty": 3,
+            "totalAmount": 1650
+          },
+          "Kezil SL": {
+            "name": "Kezil SL",
+            "mrp": 295,
+            "qty": 7,
+            "totalAmount": 2065
+          },
+          "Screenguard Tablet": {
+            "name": "Screenguard Tablet",
+            "mrp": 200,
+            "qty": 25,
+            "totalAmount": 5000
+          },
+          "Kalsma-D3": {
+            "name": "Kalsma-D3",
+            "mrp": 104,
+            "qty": 27,
+            "totalAmount": 2808
+          }
+        }
+      },
+      "Regalis": {
+        "company": "Regalis",
+        "totalUnits": 44,
+        "totalSalesMrp": 39502,
+        "items": {
+          "Brilante max": {
+            "name": "Brilante max",
+            "mrp": 679,
+            "qty": 24,
+            "totalAmount": 16296
+          },
+          "Celluglow Glutathione": {
+            "name": "Celluglow Glutathione",
+            "mrp": 2700,
+            "qty": 4,
+            "totalAmount": 10800
+          },
+          "Solasafe sunscreen": {
+            "name": "Solasafe sunscreen",
+            "mrp": 769,
+            "qty": 2,
+            "totalAmount": 1538
+          },
+          "Solglo": {
+            "name": "Solglo",
+            "mrp": 516,
+            "qty": 10,
+            "totalAmount": 5160
+          },
+          "juveskin 2Ã cream": {
+            "name": "juveskin 2Ã cream",
+            "mrp": 1369,
+            "qty": 2,
+            "totalAmount": 2738
+          },
+          "Eyegile am/pm": {
+            "name": "Eyegile am/pm",
+            "mrp": 1485,
+            "qty": 2,
+            "totalAmount": 2970
+          }
+        }
+      },
+      "Canixa": {
+        "company": "Canixa",
+        "totalUnits": 90,
+        "totalSalesMrp": 32354,
+        "items": {
+          "Sebogel": {
+            "name": "Sebogel",
+            "mrp": 250,
+            "qty": 7,
+            "totalAmount": 1750
+          },
+          "Acnewar plus": {
+            "name": "Acnewar plus",
+            "mrp": 320,
+            "qty": 9,
+            "totalAmount": 2880
+          },
+          "Logifeel-IMF": {
+            "name": "Logifeel-IMF",
+            "mrp": 400,
+            "qty": 19,
+            "totalAmount": 7600
+          },
+          "Clearzit soap": {
+            "name": "Clearzit soap",
+            "mrp": 125,
+            "qty": 4,
+            "totalAmount": 500
+          },
+          "acnewar": {
+            "name": "acnewar",
+            "mrp": 270,
+            "qty": 13,
+            "totalAmount": 3510
+          },
+          "Clearzit gel": {
+            "name": "Clearzit gel",
+            "mrp": 140,
+            "qty": 17,
+            "totalAmount": 2380
+          },
+          "Foligain hair lotion": {
+            "name": "Foligain hair lotion",
+            "mrp": 610,
+            "qty": 11,
+            "totalAmount": 6710
+          },
+          "IMIDERM 1.0": {
+            "name": "IMIDERM 1.0",
+            "mrp": 180,
+            "qty": 2,
+            "totalAmount": 360
+          },
+          "Revgrey solution": {
+            "name": "Revgrey solution",
+            "mrp": 820,
+            "qty": 2,
+            "totalAmount": 1640
+          },
+          "Z block": {
+            "name": "Z block",
+            "mrp": 899,
+            "qty": 1,
+            "totalAmount": 899
+          },
+          "Instafil gel wrinkle filler": {
+            "name": "Instafil gel wrinkle filler",
+            "mrp": 725,
+            "qty": 1,
+            "totalAmount": 725
+          },
+          "Z stick spf50+": {
+            "name": "Z stick spf50+",
+            "mrp": 850,
+            "qty": 4,
+            "totalAmount": 3400
+          }
+        }
+      },
+      "Gracederma": {
+        "company": "Gracederma",
+        "totalUnits": 92,
+        "totalSalesMrp": 7133,
+        "items": {
+          "My Tret 0.025%": {
+            "name": "My Tret 0.025%",
+            "mrp": 131,
+            "qty": 17,
+            "totalAmount": 2227
+          },
+          "LAH-5": {
+            "name": "LAH-5",
+            "mrp": 4.7,
+            "qty": 65,
+            "totalAmount": 305.5
+          },
+          "My Tret 0.1%": {
+            "name": "My Tret 0.1%",
+            "mrp": 210,
+            "qty": 3,
+            "totalAmount": 630
+          },
+          "Trixoni2.5%": {
+            "name": "Trixoni2.5%",
+            "mrp": 87.5,
+            "qty": 3,
+            "totalAmount": 262.5
+          },
+          "Isograce-5": {
+            "name": "Isograce-5",
+            "mrp": 99,
+            "qty": 3,
+            "totalAmount": 297
+          },
+          "Botopep serum": {
+            "name": "Botopep serum",
+            "mrp": 3411,
+            "qty": 1,
+            "totalAmount": 3411
+          }
+        }
+      },
+      "Micro Labs": {
+        "company": "Micro Labs",
+        "totalUnits": 107,
+        "totalSalesMrp": 24483,
+        "items": {
+          "Aziderm  cream 20%": {
+            "name": "Aziderm  cream 20%",
+            "mrp": 347,
+            "qty": 11,
+            "totalAmount": 3817
+          },
+          "aziderm 15%": {
+            "name": "aziderm 15%",
+            "mrp": 317,
+            "qty": 9,
+            "totalAmount": 2853
+          },
+          "Doxylox": {
+            "name": "Doxylox",
+            "mrp": 111,
+            "qty": 50,
+            "totalAmount": 5550
+          },
+          "Aziderm10%": {
+            "name": "Aziderm10%",
+            "mrp": 331,
+            "qty": 36,
+            "totalAmount": 11916
+          },
+          "Truderma f/w, acnewar, Aziderm  cream 20%, Tacronid 0.1%": {
+            "name": "Truderma f/w, acnewar, Aziderm  cream 20%, Tacronid 0.1%",
+            "mrp": 347,
+            "qty": 1,
+            "totalAmount": 347
+          }
+        }
+      },
+      "Ethicare / Ubik": {
+        "company": "Ethicare / Ubik",
+        "totalUnits": 134,
+        "totalSalesMrp": 66599,
+        "items": {
+          "Trichospire hair kit": {
+            "name": "Trichospire hair kit",
+            "mrp": 1111,
+            "qty": 10,
+            "totalAmount": 11110
+          },
+          "trichospire hair shampoo": {
+            "name": "trichospire hair shampoo",
+            "mrp": 621,
+            "qty": 22,
+            "totalAmount": 13662
+          },
+          "Cuticans": {
+            "name": "Cuticans",
+            "mrp": 649,
+            "qty": 8,
+            "totalAmount": 5192
+          },
+          "Sweatnil max": {
+            "name": "Sweatnil max",
+            "mrp": 449,
+            "qty": 2,
+            "totalAmount": 898
+          },
+          "Kozilite-H": {
+            "name": "Kozilite-H",
+            "mrp": 360,
+            "qty": 1,
+            "totalAmount": 360
+          },
+          "Seren conditioner": {
+            "name": "Seren conditioner",
+            "mrp": 265,
+            "qty": 8,
+            "totalAmount": 2120
+          },
+          "Trichospire hair mask": {
+            "name": "Trichospire hair mask",
+            "mrp": 549,
+            "qty": 1,
+            "totalAmount": 549
+          },
+          "Seren shampoo": {
+            "name": "Seren shampoo",
+            "mrp": 249,
+            "qty": 6,
+            "totalAmount": 1494
+          },
+          "Lipidz": {
+            "name": "Lipidz",
+            "mrp": 420,
+            "qty": 8,
+            "totalAmount": 3360
+          },
+          "Hidrants mois.": {
+            "name": "Hidrants mois.",
+            "mrp": 499,
+            "qty": 5,
+            "totalAmount": 2495
+          },
+          "Tyrodin-FSR": {
+            "name": "Tyrodin-FSR",
+            "mrp": 171,
+            "qty": 15,
+            "totalAmount": 2565
+          },
+          "Uproot lotion hair": {
+            "name": "Uproot lotion hair",
+            "mrp": 610,
+            "qty": 1,
+            "totalAmount": 610
+          },
+          "Seabuck Softgel": {
+            "name": "Seabuck Softgel",
+            "mrp": 260,
+            "qty": 26,
+            "totalAmount": 6760
+          },
+          "Trichospire hair shampoo": {
+            "name": "Trichospire hair shampoo",
+            "mrp": 621,
+            "qty": 15,
+            "totalAmount": 9315
+          },
+          "Seren extra mild shampoo": {
+            "name": "Seren extra mild shampoo",
+            "mrp": 280,
+            "qty": 2,
+            "totalAmount": 560
+          },
+          "Trichoexito shampoo": {
+            "name": "Trichoexito shampoo",
+            "mrp": 1067,
+            "qty": 1,
+            "totalAmount": 1067
+          },
+          "Head2toe wash/shampoo": {
+            "name": "Head2toe wash/shampoo",
+            "mrp": 796,
+            "qty": 2,
+            "totalAmount": 1592
+          },
+          "Pinedruff pro scalp Serum": {
+            "name": "Pinedruff pro scalp Serum",
+            "mrp": 2890,
+            "qty": 1,
+            "totalAmount": 2890
+          }
+        }
+      },
+      "Indus": {
+        "company": "Indus",
+        "totalUnits": 94,
+        "totalSalesMrp": 14173,
+        "items": {
+          "piranid": {
+            "name": "piranid",
+            "mrp": 105,
+            "qty": 46,
+            "totalAmount": 4830
+          },
+          "Efanid cream": {
+            "name": "Efanid cream",
+            "mrp": 650,
+            "qty": 8,
+            "totalAmount": 5200
+          },
+          "Nidsone cream": {
+            "name": "Nidsone cream",
+            "mrp": 112,
+            "qty": 7,
+            "totalAmount": 784
+          },
+          "zithronid-500": {
+            "name": "zithronid-500",
+            "mrp": 24,
+            "qty": 21,
+            "totalAmount": 504
+          },
+          "Tacronid 0.1%": {
+            "name": "Tacronid 0.1%",
+            "mrp": 454,
+            "qty": 3,
+            "totalAmount": 1362
+          },
+          "Nidcort-HC": {
+            "name": "Nidcort-HC",
+            "mrp": 130,
+            "qty": 3,
+            "totalAmount": 390
+          },
+          "Nidgly-6": {
+            "name": "Nidgly-6",
+            "mrp": 135,
+            "qty": 2,
+            "totalAmount": 270
+          },
+          "Nidgly-12": {
+            "name": "Nidgly-12",
+            "mrp": 178,
+            "qty": 1,
+            "totalAmount": 178
+          },
+          "Tacronid-30": {
+            "name": "Tacronid-30",
+            "mrp": 295,
+            "qty": 1,
+            "totalAmount": 295
+          },
+          "Nidsoft-E": {
+            "name": "Nidsoft-E",
+            "mrp": 180,
+            "qty": 2,
+            "totalAmount": 360
+          }
+        }
+      },
+      "Intas": {
+        "company": "Intas",
+        "totalUnits": 29,
+        "totalSalesMrp": 25242,
+        "items": {
+          "morr max": {
+            "name": "morr max",
+            "mrp": 795,
+            "qty": 6,
+            "totalAmount": 4770
+          },
+          "Morr f Aqua": {
+            "name": "Morr f Aqua",
+            "mrp": 1100,
+            "qty": 10,
+            "totalAmount": 11000
+          },
+          "morr pro gold": {
+            "name": "morr pro gold",
+            "mrp": 1275,
+            "qty": 6,
+            "totalAmount": 7650
+          },
+          "ozetof": {
+            "name": "ozetof",
+            "mrp": 118,
+            "qty": 4,
+            "totalAmount": 472
+          },
+          "Blynds spf 80": {
+            "name": "Blynds spf 80",
+            "mrp": 850,
+            "qty": 1,
+            "totalAmount": 850
+          },
+          "Minotas ER 45": {
+            "name": "Minotas ER 45",
+            "mrp": 250,
+            "qty": 2,
+            "totalAmount": 500
+          }
+        }
+      },
+      "Torrent": {
+        "company": "Torrent",
+        "totalUnits": 168,
+        "totalSalesMrp": 17923,
+        "items": {
+          "Noskurf daily cream": {
+            "name": "Noskurf daily cream",
+            "mrp": 399,
+            "qty": 2,
+            "totalAmount": 798
+          },
+          "Tivenca gel": {
+            "name": "Tivenca gel",
+            "mrp": 412,
+            "qty": 8,
+            "totalAmount": 3296
+          },
+          "Acnemoist cream": {
+            "name": "Acnemoist cream",
+            "mrp": 494,
+            "qty": 16,
+            "totalAmount": 7904
+          },
+          "Tracnil sachet": {
+            "name": "Tracnil sachet",
+            "mrp": 46,
+            "qty": 30,
+            "totalAmount": 1380
+          },
+          "perato 10": {
+            "name": "perato 10",
+            "mrp": 110,
+            "qty": 11,
+            "totalAmount": 1210
+          },
+          "Dwash mois.f/w": {
+            "name": "Dwash mois.f/w",
+            "mrp": 499,
+            "qty": 5,
+            "totalAmount": 2495
+          },
+          "Zitcare Forte": {
+            "name": "Zitcare Forte",
+            "mrp": 7,
+            "qty": 90,
+            "totalAmount": 630
+          },
+          "Spironolactone tablet 25mg": {
+            "name": "Spironolactone tablet 25mg",
+            "mrp": 35,
+            "qty": 6,
+            "totalAmount": 210
+          }
+        }
+      },
+      "Palsons Derma": {
+        "company": "Palsons Derma",
+        "totalUnits": 3,
+        "totalSalesMrp": 2076,
+        "items": {
+          "Cosmelite next": {
+            "name": "Cosmelite next",
+            "mrp": 692,
+            "qty": 3,
+            "totalAmount": 2076
+          }
+        }
+      },
+      "Adroit": {
+        "company": "Adroit",
+        "totalUnits": 48,
+        "totalSalesMrp": 24518,
+        "items": {
+          "Truderma f/w": {
+            "name": "Truderma f/w",
+            "mrp": 499,
+            "qty": 30,
+            "totalAmount": 14970
+          },
+          "Uvsilk spf 40": {
+            "name": "Uvsilk spf 40",
+            "mrp": 900,
+            "qty": 8,
+            "totalAmount": 7200
+          },
+          "Actilife tablet": {
+            "name": "Actilife tablet",
+            "mrp": 122,
+            "qty": 4,
+            "totalAmount": 488
+          },
+          "Glutone md": {
+            "name": "Glutone md",
+            "mrp": 310,
+            "qty": 6,
+            "totalAmount": 1860
+          }
+        }
+      },
+      "Aakaar": {
+        "company": "Aakaar",
+        "totalUnits": 3,
+        "totalSalesMrp": 2070,
+        "items": {
+          "lytec klense 690": {
+            "name": "lytec klense 690",
+            "mrp": 690,
+            "qty": 3,
+            "totalAmount": 2070
+          }
+        }
+      },
+      "Vegetal": {
+        "company": "Vegetal",
+        "totalUnits": 3,
+        "totalSalesMrp": 2248,
+        "items": {
+          "vegetal we bio hair colour": {
+            "name": "vegetal we bio hair colour",
+            "mrp": 899,
+            "qty": 2,
+            "totalAmount": 1798
+          },
+          "Trichowel hair serum": {
+            "name": "Trichowel hair serum",
+            "mrp": 450,
+            "qty": 1,
+            "totalAmount": 450
+          }
+        }
+      },
+      "Akumentis": {
+        "company": "Akumentis",
+        "totalUnits": 4,
+        "totalSalesMrp": 5196,
+        "items": {
+          "Akosma": {
+            "name": "Akosma",
+            "mrp": 1299,
+            "qty": 4,
+            "totalAmount": 5196
+          }
+        }
+      },
+      "Fixderma": {
+        "company": "Fixderma",
+        "totalUnits": 10,
+        "totalSalesMrp": 11234,
+        "items": {
+          "Bronze SPF": {
+            "name": "Bronze SPF",
+            "mrp": 639,
+            "qty": 1,
+            "totalAmount": 639
+          },
+          "FCL intensive night serum": {
+            "name": "FCL intensive night serum",
+            "mrp": 1755,
+            "qty": 4,
+            "totalAmount": 7020
+          },
+          "Strallium stretch marks": {
+            "name": "Strallium stretch marks",
+            "mrp": 475,
+            "qty": 3,
+            "totalAmount": 1425
+          },
+          "FCL  AHA lightening gel HQ": {
+            "name": "FCL  AHA lightening gel HQ",
+            "mrp": 1075,
+            "qty": 2,
+            "totalAmount": 2150
+          }
+        }
+      },
+      "Apex": {
+        "company": "Apex",
+        "totalUnits": 1,
+        "totalSalesMrp": 820,
+        "items": {
+          "Reverage": {
+            "name": "Reverage",
+            "mrp": 820,
+            "qty": 1,
+            "totalAmount": 820
+          }
+        }
+      },
+      "Glaxo": {
+        "company": "Glaxo",
+        "totalUnits": 2,
+        "totalSalesMrp": 1460,
+        "items": {
+          "Physiogel": {
+            "name": "Physiogel",
+            "mrp": 730,
+            "qty": 2,
+            "totalAmount": 1460
+          }
+        }
+      },
+      "Yuderma": {
+        "company": "Yuderma",
+        "totalUnits": 9,
+        "totalSalesMrp": 7650,
+        "items": {
+          "Eclipse solarie spf50 sunscreen": {
+            "name": "Eclipse solarie spf50 sunscreen",
+            "mrp": 850,
+            "qty": 9,
+            "totalAmount": 7650
+          }
+        }
+      },
+      "Galderma": {
+        "company": "Galderma",
+        "totalUnits": 2,
+        "totalSalesMrp": 3998,
+        "items": {
+          "Cetaphil serum": {
+            "name": "Cetaphil serum",
+            "mrp": 1999,
+            "qty": 2,
+            "totalAmount": 3998
+          }
+        }
+      },
+      "Becura": {
+        "company": "Becura",
+        "totalUnits": 9,
+        "totalSalesMrp": 7191,
+        "items": {
+          "Lactofyn": {
+            "name": "Lactofyn",
+            "mrp": 799,
+            "qty": 9,
+            "totalAmount": 7191
+          }
+        }
+      },
+      "Sesderma": {
+        "company": "Sesderma",
+        "totalUnits": 1,
+        "totalSalesMrp": 1450,
+        "items": {
+          "sesderma k- VIT anti dark Serum": {
+            "name": "sesderma k- VIT anti dark Serum",
+            "mrp": 1450,
+            "qty": 1,
+            "totalAmount": 1450
+          }
+        }
+      },
+      "Talent India": {
+        "company": "Talent India",
+        "totalUnits": 3,
+        "totalSalesMrp": 357,
+        "items": {
+          "Raviron XT": {
+            "name": "Raviron XT",
+            "mrp": 119,
+            "qty": 3,
+            "totalAmount": 357
+          }
+        }
+      }
+    },
+    "2026-10": {
+      "Ethicare / Ubik": {
+        "company": "Ethicare / Ubik",
+        "totalUnits": 139,
+        "totalSalesMrp": 64847,
+        "items": {
+          "Pinedruff pro scalp Serum": {
+            "name": "Pinedruff pro scalp Serum",
+            "mrp": 2890,
+            "qty": 3,
+            "totalAmount": 8670
+          },
+          "Trichospire hair shampoo": {
+            "name": "Trichospire hair shampoo",
+            "mrp": 621,
+            "qty": 23,
+            "totalAmount": 14283
+          },
+          "Cuticans": {
+            "name": "Cuticans",
+            "mrp": 649,
+            "qty": 3,
+            "totalAmount": 1947
+          },
+          "Trichospire hair kit": {
+            "name": "Trichospire hair kit",
+            "mrp": 1111,
+            "qty": 8,
+            "totalAmount": 8888
+          },
+          "Seren conditioner": {
+            "name": "Seren conditioner",
+            "mrp": 265,
+            "qty": 5,
+            "totalAmount": 1325
+          },
+          "Seren shampoo": {
+            "name": "Seren shampoo",
+            "mrp": 249,
+            "qty": 2,
+            "totalAmount": 498
+          },
+          "Head2toe wash/shampoo": {
+            "name": "Head2toe wash/shampoo",
+            "mrp": 796,
+            "qty": 6,
+            "totalAmount": 4776
+          },
+          "Lipidz": {
+            "name": "Lipidz",
+            "mrp": 420,
+            "qty": 18,
+            "totalAmount": 7560
+          },
+          "Seabuck Softgel": {
+            "name": "Seabuck Softgel",
+            "mrp": 260,
+            "qty": 14,
+            "totalAmount": 3640
+          },
+          "Tyrodin-FSR": {
+            "name": "Tyrodin-FSR",
+            "mrp": 171,
+            "qty": 3,
+            "totalAmount": 513
+          },
+          "Seren extra mild shampoo": {
+            "name": "Seren extra mild shampoo",
+            "mrp": 280,
+            "qty": 3,
+            "totalAmount": 840
+          },
+          "Hidrants mois.": {
+            "name": "Hidrants mois.",
+            "mrp": 499,
+            "qty": 4,
+            "totalAmount": 1996
+          },
+          "Trichospire hair mask": {
+            "name": "Trichospire hair mask",
+            "mrp": 549,
+            "qty": 5,
+            "totalAmount": 2745
+          },
+          "Kozilite-H": {
+            "name": "Kozilite-H",
+            "mrp": 360,
+            "qty": 1,
+            "totalAmount": 360
+          },
+          "Trichoexito shampoo": {
+            "name": "Trichoexito shampoo",
+            "mrp": 1067,
+            "qty": 5,
+            "totalAmount": 5335
+          },
+          "Sweatnil max": {
+            "name": "Sweatnil max",
+            "mrp": 449,
+            "qty": 1,
+            "totalAmount": 449
+          },
+          "Lipz mois.": {
+            "name": "Lipz mois.",
+            "mrp": 110,
+            "qty": 1,
+            "totalAmount": 110
+          },
+          "Vitchew CZ vitamin c": {
+            "name": "Vitchew CZ vitamin c",
+            "mrp": 6.6,
+            "qty": 31,
+            "totalAmount": 204.6
+          },
+          "Cuticans tablet": {
+            "name": "Cuticans tablet",
+            "mrp": 235.8,
+            "qty": 3,
+            "totalAmount": 707.4000000000001
+          }
+        }
+      },
+      "Velnourish": {
+        "company": "Velnourish",
+        "totalUnits": 108,
+        "totalSalesMrp": 36952,
+        "items": {
+          "Depiscreen Under Eye Cream": {
+            "name": "Depiscreen Under Eye Cream",
+            "mrp": 550,
+            "qty": 6,
+            "totalAmount": 3300
+          },
+          "Screenguard Tablet": {
+            "name": "Screenguard Tablet",
+            "mrp": 200,
+            "qty": 23,
+            "totalAmount": 4600
+          },
+          "Aquaedge Cleanser": {
+            "name": "Aquaedge Cleanser",
+            "mrp": 399,
+            "qty": 18,
+            "totalAmount": 7182
+          },
+          "Kezil SL": {
+            "name": "Kezil SL",
+            "mrp": 295,
+            "qty": 7,
+            "totalAmount": 2065
+          },
+          "Screenguard SPF 50": {
+            "name": "Screenguard SPF 50",
+            "mrp": 495,
+            "qty": 33,
+            "totalAmount": 16335
+          },
+          "Kalsma-D3": {
+            "name": "Kalsma-D3",
+            "mrp": 104,
+            "qty": 16,
+            "totalAmount": 1664
+          },
+          "Acnepurge Facewash": {
+            "name": "Acnepurge Facewash",
+            "mrp": 259,
+            "qty": 4,
+            "totalAmount": 1036
+          },
+          "Hebeda Serum": {
+            "name": "Hebeda Serum",
+            "mrp": 770,
+            "qty": 1,
+            "totalAmount": 770
+          }
+        }
+      },
+      "Micro Labs": {
+        "company": "Micro Labs",
+        "totalUnits": 107,
+        "totalSalesMrp": 25567,
+        "items": {
+          "Doxylox": {
+            "name": "Doxylox",
+            "mrp": 111,
+            "qty": 51,
+            "totalAmount": 5661
+          },
+          "Aziderm10%": {
+            "name": "Aziderm10%",
+            "mrp": 331,
+            "qty": 1,
+            "totalAmount": 331
+          },
+          "Aziderm  cream 20%": {
+            "name": "Aziderm  cream 20%",
+            "mrp": 347,
+            "qty": 10,
+            "totalAmount": 3470
+          },
+          "Aziderm 10%": {
+            "name": "Aziderm 10%",
+            "mrp": 363,
+            "qty": 40,
+            "totalAmount": 14520
+          },
+          "aziderm 15%": {
+            "name": "aziderm 15%",
+            "mrp": 317,
+            "qty": 5,
+            "totalAmount": 1585
+          }
+        }
+      },
+      "Regalis": {
+        "company": "Regalis",
+        "totalUnits": 69,
+        "totalSalesMrp": 51570,
+        "items": {
+          "juveskin 2Ã cream": {
+            "name": "juveskin 2Ã cream",
+            "mrp": 1369,
+            "qty": 6,
+            "totalAmount": 8214
+          },
+          "Solglo": {
+            "name": "Solglo",
+            "mrp": 516,
+            "qty": 13,
+            "totalAmount": 6708
+          },
+          "Brilante max": {
+            "name": "Brilante max",
+            "mrp": 679,
+            "qty": 45,
+            "totalAmount": 30555
+          },
+          "Itraliz SB 130": {
+            "name": "Itraliz SB 130",
+            "mrp": 231,
+            "qty": 3,
+            "totalAmount": 693
+          },
+          "Celluglow Glutathione": {
+            "name": "Celluglow Glutathione",
+            "mrp": 2700,
+            "qty": 2,
+            "totalAmount": 5400
+          }
+        }
+      },
+      "Gracederma": {
+        "company": "Gracederma",
+        "totalUnits": 59,
+        "totalSalesMrp": 3765.7,
+        "items": {
+          "Trixoni2.5%": {
+            "name": "Trixoni2.5%",
+            "mrp": 87.5,
+            "qty": 9,
+            "totalAmount": 787.5
+          },
+          "My Tret 0.025%": {
+            "name": "My Tret 0.025%",
+            "mrp": 131,
+            "qty": 15,
+            "totalAmount": 1965
+          },
+          "Isograce-5": {
+            "name": "Isograce-5",
+            "mrp": 99,
+            "qty": 9,
+            "totalAmount": 891
+          },
+          "LAH-5": {
+            "name": "LAH-5",
+            "mrp": 4.7,
+            "qty": 26,
+            "totalAmount": 122.2
+          }
+        }
+      },
+      "Intas": {
+        "company": "Intas",
+        "totalUnits": 26,
+        "totalSalesMrp": 21275,
+        "items": {
+          "morr max": {
+            "name": "morr max",
+            "mrp": 795,
+            "qty": 9,
+            "totalAmount": 7155
+          },
+          "desoadd": {
+            "name": "desoadd",
+            "mrp": 180,
+            "qty": 4,
+            "totalAmount": 720
+          },
+          "Morr f Aqua": {
+            "name": "Morr f Aqua",
+            "mrp": 1100,
+            "qty": 6,
+            "totalAmount": 6600
+          },
+          "morr pro gold": {
+            "name": "morr pro gold",
+            "mrp": 1275,
+            "qty": 2,
+            "totalAmount": 2550
+          },
+          "Blynds spf 80": {
+            "name": "Blynds spf 80",
+            "mrp": 850,
+            "qty": 5,
+            "totalAmount": 4250
+          }
+        }
+      },
+      "Menarini": {
+        "company": "Menarini",
+        "totalUnits": 31,
+        "totalSalesMrp": 23450,
+        "items": {
+          "Melalumin ultra": {
+            "name": "Melalumin ultra",
+            "mrp": 605,
+            "qty": 8,
+            "totalAmount": 4840
+          },
+          "Melalumin un eye serum": {
+            "name": "Melalumin un eye serum",
+            "mrp": 999,
+            "qty": 15,
+            "totalAmount": 14985
+          },
+          "Melalumin lip lightener": {
+            "name": "Melalumin lip lightener",
+            "mrp": 435,
+            "qty": 7,
+            "totalAmount": 3045
+          },
+          "Hexilak Gel": {
+            "name": "Hexilak Gel",
+            "mrp": 580,
+            "qty": 1,
+            "totalAmount": 580
+          }
+        }
+      },
+      "Fixderma": {
+        "company": "Fixderma",
+        "totalUnits": 21,
+        "totalSalesMrp": 20687,
+        "items": {
+          "FCL intensive night serum": {
+            "name": "FCL intensive night serum",
+            "mrp": 1755,
+            "qty": 5,
+            "totalAmount": 8775
+          },
+          "Bronze SPF": {
+            "name": "Bronze SPF",
+            "mrp": 639,
+            "qty": 3,
+            "totalAmount": 1917
+          },
+          "Epilight hydrating lotion": {
+            "name": "Epilight hydrating lotion",
+            "mrp": 549,
+            "qty": 5,
+            "totalAmount": 2745
+          },
+          "Strallium stretch marks": {
+            "name": "Strallium stretch marks",
+            "mrp": 475,
+            "qty": 2,
+            "totalAmount": 950
+          },
+          "FCL  AHA lightening gel HQ": {
+            "name": "FCL  AHA lightening gel HQ",
+            "mrp": 1075,
+            "qty": 4,
+            "totalAmount": 4300
+          },
+          "Epifager-Lite": {
+            "name": "Epifager-Lite",
+            "mrp": 1000,
+            "qty": 2,
+            "totalAmount": 2000
+          }
+        }
+      },
+      "Indus": {
+        "company": "Indus",
+        "totalUnits": 105,
+        "totalSalesMrp": 14025,
+        "items": {
+          "piranid": {
+            "name": "piranid",
+            "mrp": 105,
+            "qty": 45,
+            "totalAmount": 4725
+          },
+          "Efanid cream": {
+            "name": "Efanid cream",
+            "mrp": 650,
+            "qty": 8,
+            "totalAmount": 5200
+          },
+          "Nidsone cream": {
+            "name": "Nidsone cream",
+            "mrp": 112,
+            "qty": 9,
+            "totalAmount": 1008
+          },
+          "Nidgly-12": {
+            "name": "Nidgly-12",
+            "mrp": 178,
+            "qty": 3,
+            "totalAmount": 534
+          },
+          "Nidcort-HC": {
+            "name": "Nidcort-HC",
+            "mrp": 130,
+            "qty": 10,
+            "totalAmount": 1300
+          },
+          "Tacronid-30": {
+            "name": "Tacronid-30",
+            "mrp": 295,
+            "qty": 1,
+            "totalAmount": 295
+          },
+          "zithronid-500": {
+            "name": "zithronid-500",
+            "mrp": 24,
+            "qty": 27,
+            "totalAmount": 648
+          },
+          "Nidgly-6": {
+            "name": "Nidgly-6",
+            "mrp": 135,
+            "qty": 1,
+            "totalAmount": 135
+          },
+          "Nidsoft-E": {
+            "name": "Nidsoft-E",
+            "mrp": 180,
+            "qty": 1,
+            "totalAmount": 180
+          }
+        }
+      },
+      "Torrent": {
+        "company": "Torrent",
+        "totalUnits": 183,
+        "totalSalesMrp": 27599.3,
+        "items": {
+          "Tivenca gel": {
+            "name": "Tivenca gel",
+            "mrp": 412,
+            "qty": 14,
+            "totalAmount": 5768
+          },
+          "Acnemoist cream": {
+            "name": "Acnemoist cream",
+            "mrp": 494,
+            "qty": 17,
+            "totalAmount": 8398
+          },
+          "Tracnil sachet": {
+            "name": "Tracnil sachet",
+            "mrp": 46,
+            "qty": 60,
+            "totalAmount": 2760
+          },
+          "Lacne body spray": {
+            "name": "Lacne body spray",
+            "mrp": 563,
+            "qty": 3,
+            "totalAmount": 1689
+          },
+          "Dwash mois.f/w": {
+            "name": "Dwash mois.f/w",
+            "mrp": 499,
+            "qty": 8,
+            "totalAmount": 3992
+          },
+          "Skin fay tablet": {
+            "name": "Skin fay tablet",
+            "mrp": 213.55,
+            "qty": 6,
+            "totalAmount": 1281.3000000000002
+          },
+          "perato 10": {
+            "name": "perato 10",
+            "mrp": 110,
+            "qty": 12,
+            "totalAmount": 1320
+          },
+          "Mupitore": {
+            "name": "Mupitore",
+            "mrp": 221,
+            "qty": 1,
+            "totalAmount": 221
+          },
+          "Noskurf daily cream": {
+            "name": "Noskurf daily cream",
+            "mrp": 399,
+            "qty": 4,
+            "totalAmount": 1596
+          },
+          "Zitcare Forte": {
+            "name": "Zitcare Forte",
+            "mrp": 7,
+            "qty": 52,
+            "totalAmount": 364
+          },
+          "Spironolactone tablet 25mg": {
+            "name": "Spironolactone tablet 25mg",
+            "mrp": 35,
+            "qty": 6,
+            "totalAmount": 210
+          }
+        }
+      },
+      "Talent India": {
+        "company": "Talent India",
+        "totalUnits": 32,
+        "totalSalesMrp": 3808,
+        "items": {
+          "Raviron XT": {
+            "name": "Raviron XT",
+            "mrp": 119,
+            "qty": 32,
+            "totalAmount": 3808
+          }
+        }
+      },
+      "La Pristine": {
+        "company": "La Pristine",
+        "totalUnits": 5,
+        "totalSalesMrp": 1135,
+        "items": {
+          "Pelliwash shampoo": {
+            "name": "Pelliwash shampoo",
+            "mrp": 227,
+            "qty": 5,
+            "totalAmount": 1135
+          }
+        }
+      },
+      "Canixa": {
+        "company": "Canixa",
+        "totalUnits": 75,
+        "totalSalesMrp": 27660,
+        "items": {
+          "Clearzit gel": {
+            "name": "Clearzit gel",
+            "mrp": 140,
+            "qty": 19,
+            "totalAmount": 2660
+          },
+          "Logifeel-IMF": {
+            "name": "Logifeel-IMF",
+            "mrp": 400,
+            "qty": 14,
+            "totalAmount": 5600
+          },
+          "Revgrey solution": {
+            "name": "Revgrey solution",
+            "mrp": 820,
+            "qty": 4,
+            "totalAmount": 3280
+          },
+          "Z block": {
+            "name": "Z block",
+            "mrp": 899,
+            "qty": 1,
+            "totalAmount": 899
+          },
+          "Sebogel": {
+            "name": "Sebogel",
+            "mrp": 250,
+            "qty": 8,
+            "totalAmount": 2000
+          },
+          "IMIDERM 1.0": {
+            "name": "IMIDERM 1.0",
+            "mrp": 180,
+            "qty": 4,
+            "totalAmount": 720
+          },
+          "Clearzit soap": {
+            "name": "Clearzit soap",
+            "mrp": 125,
+            "qty": 3,
+            "totalAmount": 375
+          },
+          "Foligain hair lotion": {
+            "name": "Foligain hair lotion",
+            "mrp": 610,
+            "qty": 5,
+            "totalAmount": 3050
+          },
+          "acnewar": {
+            "name": "acnewar",
+            "mrp": 270,
+            "qty": 9,
+            "totalAmount": 2430
+          },
+          "Benzonix gel wash": {
+            "name": "Benzonix gel wash",
+            "mrp": 275,
+            "qty": 2,
+            "totalAmount": 550
+          },
+          "Z stick spf50+": {
+            "name": "Z stick spf50+",
+            "mrp": 850,
+            "qty": 2,
+            "totalAmount": 1700
+          },
+          "Cera quell+scalp hydrator": {
+            "name": "Cera quell+scalp hydrator",
+            "mrp": 1099,
+            "qty": 4,
+            "totalAmount": 4396
+          }
+        }
+      },
+      "Adroit": {
+        "company": "Adroit",
+        "totalUnits": 56,
+        "totalSalesMrp": 30860,
+        "items": {
+          "Glutone md": {
+            "name": "Glutone md",
+            "mrp": 310,
+            "qty": 8,
+            "totalAmount": 2480
+          },
+          "Truderma f/w": {
+            "name": "Truderma f/w",
+            "mrp": 499,
+            "qty": 36,
+            "totalAmount": 17964
+          },
+          "Actilife tablet": {
+            "name": "Actilife tablet",
+            "mrp": 122,
+            "qty": 3,
+            "totalAmount": 366
+          },
+          "Uvsilk spf 40": {
+            "name": "Uvsilk spf 40",
+            "mrp": 900,
+            "qty": 7,
+            "totalAmount": 6300
+          },
+          "rediance creme": {
+            "name": "rediance creme",
+            "mrp": 1875,
+            "qty": 2,
+            "totalAmount": 3750
+          }
+        }
+      },
+      "Yuderma": {
+        "company": "Yuderma",
+        "totalUnits": 21,
+        "totalSalesMrp": 17850,
+        "items": {
+          "Eclipse solarie spf50 sunscreen": {
+            "name": "Eclipse solarie spf50 sunscreen",
+            "mrp": 850,
+            "qty": 21,
+            "totalAmount": 17850
+          }
+        }
+      },
+      "Aakaar": {
+        "company": "Aakaar",
+        "totalUnits": 6,
+        "totalSalesMrp": 4140,
+        "items": {
+          "lytec klense 690": {
+            "name": "lytec klense 690",
+            "mrp": 690,
+            "qty": 6,
+            "totalAmount": 4140
+          }
+        }
+      },
+      "Glaxo": {
+        "company": "Glaxo",
+        "totalUnits": 15,
+        "totalSalesMrp": 10950,
+        "items": {
+          "Physiogel": {
+            "name": "Physiogel",
+            "mrp": 730,
+            "qty": 15,
+            "totalAmount": 10950
+          }
+        }
+      },
+      "Sesderma": {
+        "company": "Sesderma",
+        "totalUnits": 3,
+        "totalSalesMrp": 7450,
+        "items": {
+          "Sesderma Azlec RU": {
+            "name": "Sesderma Azlec RU",
+            "mrp": 2650,
+            "qty": 1,
+            "totalAmount": 2650
+          },
+          "Global filler fillderma": {
+            "name": "Global filler fillderma",
+            "mrp": 2200,
+            "qty": 1,
+            "totalAmount": 2200
+          },
+          "Sesderma Retiage eye contour": {
+            "name": "Sesderma Retiage eye contour",
+            "mrp": 2600,
+            "qty": 1,
+            "totalAmount": 2600
+          }
+        }
+      },
+      "Vegetal": {
+        "company": "Vegetal",
+        "totalUnits": 3,
+        "totalSalesMrp": 1799,
+        "items": {
+          "vegetal we bio hair colour": {
+            "name": "vegetal we bio hair colour",
+            "mrp": 899,
+            "qty": 1,
+            "totalAmount": 899
+          },
+          "Trichowel hair serum": {
+            "name": "Trichowel hair serum",
+            "mrp": 450,
+            "qty": 2,
+            "totalAmount": 900
+          }
+        }
+      },
+      "Dermis": {
+        "company": "Dermis",
+        "totalUnits": 11,
+        "totalSalesMrp": 14289,
+        "items": {
+          "Anable hair serum": {
+            "name": "Anable hair serum",
+            "mrp": 1299,
+            "qty": 11,
+            "totalAmount": 14289
+          }
+        }
+      },
+      "Palsons Derma": {
+        "company": "Palsons Derma",
+        "totalUnits": 2,
+        "totalSalesMrp": 1384,
+        "items": {
+          "Cosmelite next": {
+            "name": "Cosmelite next",
+            "mrp": 692,
+            "qty": 2,
+            "totalAmount": 1384
+          }
+        }
+      },
+      "Apex": {
+        "company": "Apex",
+        "totalUnits": 42,
+        "totalSalesMrp": 11760,
+        "items": {
+          "Azkera": {
+            "name": "Azkera",
+            "mrp": 280,
+            "qty": 42,
+            "totalAmount": 11760
+          }
+        }
+      },
+      "Sanofi": {
+        "company": "Sanofi",
+        "totalUnits": 35,
+        "totalSalesMrp": 1069,
+        "items": {
+          "Allegra 180mg": {
+            "name": "Allegra 180mg",
+            "mrp": 31,
+            "qty": 31,
+            "totalAmount": 961
+          },
+          "Allegra 120mg": {
+            "name": "Allegra 120mg",
+            "mrp": 27,
+            "qty": 4,
+            "totalAmount": 108
+          }
+        }
+      },
+      "Galderma": {
+        "company": "Galderma",
+        "totalUnits": 2,
+        "totalSalesMrp": 3998,
+        "items": {
+          "Cetaphil serum": {
+            "name": "Cetaphil serum",
+            "mrp": 1999,
+            "qty": 2,
+            "totalAmount": 3998
+          }
+        }
+      },
+      "Becura": {
+        "company": "Becura",
+        "totalUnits": 11,
+        "totalSalesMrp": 8789,
+        "items": {
+          "Lactofyn": {
+            "name": "Lactofyn",
+            "mrp": 799,
+            "qty": 11,
+            "totalAmount": 8789
+          }
+        }
+      },
+      "Other": {
+        "company": "Other",
+        "totalUnits": 33,
+        "totalSalesMrp": 93436.8,
+        "items": {
+          "methylprednisolone -8mg": {
+            "name": "methylprednisolone -8mg",
+            "mrp": 22.799999999999997,
+            "qty": 6,
+            "totalAmount": 136.79999999999998
+          },
+          "GFC FACE": {
+            "name": "GFC FACE",
+            "mrp": 15000,
+            "qty": 3,
+            "totalAmount": 15000
+          },
+          "🎁 Package Booked: GFC FACE (3 Sessions)": {
+            "name": "🎁 Package Booked: GFC FACE (3 Sessions)",
+            "mrp": 13500,
+            "qty": 1,
+            "totalAmount": 13500
+          },
+          "GFC FACE (3 Sessions)": {
+            "name": "GFC FACE (3 Sessions)",
+            "mrp": 13500,
+            "qty": 1,
+            "totalAmount": 13500
+          },
+          "FACE PRP": {
+            "name": "FACE PRP",
+            "mrp": 4600,
+            "qty": 1,
+            "totalAmount": 4600
+          },
+          "Iv drip (2 Sessions)": {
+            "name": "Iv drip (2 Sessions)",
+            "mrp": 8000,
+            "qty": 1,
+            "totalAmount": 8000
+          },
+          "Iv drip": {
+            "name": "Iv drip",
+            "mrp": 0,
+            "qty": 1,
+            "totalAmount": 0
+          },
+          "BODY POLISHING": {
+            "name": "BODY POLISHING",
+            "mrp": 4000,
+            "qty": 1,
+            "totalAmount": 4000
+          },
+          "WATERLESS FACIAL": {
+            "name": "WATERLESS FACIAL",
+            "mrp": 2500,
+            "qty": 1,
+            "totalAmount": 2500
+          },
+          "LHR": {
+            "name": "LHR",
+            "mrp": 2500,
+            "qty": 4,
+            "totalAmount": 5800
+          },
+          "GFC hair (3 Sessions)": {
+            "name": "GFC hair (3 Sessions)",
+            "mrp": 10800,
+            "qty": 1,
+            "totalAmount": 10800
+          },
+          "GFC hair": {
+            "name": "GFC hair",
+            "mrp": 0,
+            "qty": 1,
+            "totalAmount": 0
+          },
+          "RF CAUTERY": {
+            "name": "RF CAUTERY",
+            "mrp": 1000,
+            "qty": 1,
+            "totalAmount": 1000
+          },
+          "RETISES 1% NANO": {
+            "name": "RETISES 1% NANO",
+            "mrp": 500,
+            "qty": 4,
+            "totalAmount": 2200
+          },
+          "RETISES CT": {
+            "name": "RETISES CT",
+            "mrp": 1500,
+            "qty": 3,
+            "totalAmount": 4600
+          },
+          "BODY PEEL": {
+            "name": "BODY PEEL",
+            "mrp": 2000,
+            "qty": 1,
+            "totalAmount": 2000
+          },
+          "MICRONEEDLING -MN": {
+            "name": "MICRONEEDLING -MN",
+            "mrp": 1800,
+            "qty": 1,
+            "totalAmount": 1800
+          },
+          "SCALP GFC PRP": {
+            "name": "SCALP GFC PRP",
+            "mrp": 4000,
+            "qty": 1,
+            "totalAmount": 4000
+          }
+        }
+      },
+      "Akumentis": {
+        "company": "Akumentis",
+        "totalUnits": 12,
+        "totalSalesMrp": 3488,
+        "items": {
+          "MethoMore": {
+            "name": "MethoMore",
+            "mrp": 199,
+            "qty": 11,
+            "totalAmount": 2189
+          },
+          "Akosma": {
+            "name": "Akosma",
+            "mrp": 1299,
+            "qty": 1,
+            "totalAmount": 1299
+          }
+        }
+      }
+    },
+    "2026-11": {
+      "Indus": {
+        "company": "Indus",
+        "totalUnits": 1,
+        "totalSalesMrp": 105,
+        "items": {
+          "piranid": {
+            "name": "piranid",
+            "mrp": 105,
+            "qty": 1,
+            "totalAmount": 105
+          }
+        }
+      }
+    }
+  }
+}

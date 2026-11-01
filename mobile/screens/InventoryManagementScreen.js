@@ -1,3 +1,4 @@
+import { getBrandForMedicine } from '../utils/medicineBrandMap';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal, BackHandler } from 'react-native';
 import axios from 'axios';
@@ -407,7 +408,7 @@ Do you want to proceed?`,
   };
 
   const openAddModal = () => {
-    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0, company: '' };
+    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0, company: '', company: '' };
     setFormData(initial);
     setInitialFormState(initial);
     setIsModalVisible(true);
@@ -426,7 +427,8 @@ Do you want to proceed?`,
       expiry_date: '',
       default_instructions: instructions,
       is_new_batch: true,
-      original_quantity: 0
+      original_quantity: 0,
+      company: item.company || getBrandForMedicine(item.medicine_name) || ''
     };
     setFormData(initial);
     setInitialFormState(initial);
@@ -447,7 +449,8 @@ Do you want to proceed?`,
       expiry_date: item.expiry_date || '',
       default_instructions: instructions,
       is_new_batch: false,
-      original_quantity: currQty
+      original_quantity: currQty,
+      company: item.company || getBrandForMedicine(item.medicine_name) || ''
     };
     setFormData(initial);
     setInitialFormState(initial);
@@ -464,8 +467,7 @@ Do you want to proceed?`,
     const currInst = Array.isArray(formData.default_instructions) ? [...formData.default_instructions].sort().join(',') : '';
     const initInst = Array.isArray(initialFormState.default_instructions) ? [...initialFormState.default_instructions].sort().join(',') : '';
     const instChanged = currInst !== initInst;
-
-    const compChanged = (formData.company || '').trim() !== (initialFormState.company || '').trim();
+    const compChanged = (formData.company || '').trim() !== (initialFormState?.company || '').trim();
     return nameChanged || batchChanged || mrpChanged || qtyChanged || expChanged || instChanged || compChanged;
   };
 
@@ -524,10 +526,15 @@ Do you want to proceed?`,
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
   const filteredInventory = inventory.filter(item => {
+    const itemBrand = (item.company || getBrandForMedicine(item.medicine_name) || 'Other').trim();
+    if (selectedBrandFilter !== 'ALL' && itemBrand !== selectedBrandFilter) {
+      return false;
+    }
     if (!searchQ.trim()) return true;
     const q = searchQ.toLowerCase().trim();
     return (
       (item.medicine_name || '').toLowerCase().includes(q) ||
+      itemBrand.toLowerCase().includes(q) ||
       (item.batch_number || '').toLowerCase().includes(q) ||
       (item.expiry_date || '').toLowerCase().includes(q)
     );
@@ -580,14 +587,58 @@ Do you want to proceed?`,
         </View>
       </View>
 
+      {/* PROMINENT ADD STOCK ACTION BUTTON */}
+      <View style={{ backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6 }}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={openAddModal}
+          style={{
+            backgroundColor: '#5C0B0B',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingVertical: 12,
+            borderRadius: 10,
+            elevation: 3,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.18,
+            shadowRadius: 3
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginRight: 8 }}>➕</Text>
+          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15, letterSpacing: 0.4 }}>ADD NEW MEDICINE / STOCK</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* SEARCH BAR */}
       <View style={{ paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }}>
         <TextInput
           style={{ backgroundColor: '#f9fafb', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, fontSize: 13, borderWidth: 1, borderColor: '#e5e7eb' }}
-          placeholder="🔍 Search medicine name, batch, or expiry..."
+          placeholder="🔍 Search medicine name, brand, batch, or expiry..."
           value={searchQ}
           onChangeText={setSearchQ}
         />
+      </View>
+
+      {/* PHARMA BRAND FILTER PILLS */}
+      <View style={{ backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+          {['ALL', 'Velnourish', 'Ethicare / Ubik', 'Canixa', 'Gracederma', 'Torrent', 'Adroit', 'Fixderma', 'Indus', 'Regalis', 'Menarini', 'Glaxo', 'Intas', 'Akumentis', 'Apex', 'Micro Labs'].map(b => (
+            <TouchableOpacity
+              key={b}
+              style={[
+                { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f3f4f6', marginRight: 6, borderWidth: 1, borderColor: '#e5e7eb' },
+                selectedBrandFilter === b && { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' }
+              ]}
+              onPress={() => setSelectedBrandFilter(b)}
+            >
+              <Text style={[{ fontSize: 12, color: '#4b5563', fontWeight: '600' }, selectedBrandFilter === b && { color: '#fff', fontWeight: 'bold' }]}>
+                {b === 'ALL' ? '🏢 All Brands' : b}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {/* ADMIN ONLY: TOTAL IN-STOCK MRP VALUE CARD */}
@@ -647,6 +698,24 @@ Do you want to proceed?`,
                       <Text style={{ fontSize: 10, color: '#1d4ed8', fontWeight: 'bold' }}>📋 History</Text>
                     </View>
                   )}
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 4 }}>
+                  <View style={{
+                    backgroundColor: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#fdf2f2' : '#eff6ff',
+                    paddingHorizontal: 8,
+                    paddingVertical: 2.5,
+                    borderRadius: 5,
+                    borderWidth: 1,
+                    borderColor: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#fca5a5' : '#bfdbfe'
+                  }}>
+                    <Text style={{
+                      fontSize: 11,
+                      color: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#991b1b' : '#1d4ed8',
+                      fontWeight: 'bold'
+                    }}>
+                      🏢 {item.company || getBrandForMedicine(item.medicine_name) || 'Unassigned Brand'}
+                    </Text>
+                  </View>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                   <Text style={styles.itemDetail}>Batch: <Text style={{fontWeight:'bold', color: '#1e40af'}}>{item.batch_number || 'N/A'}</Text></Text>
@@ -755,6 +824,35 @@ Do you want to proceed?`,
                 editable={!formData.is_new_batch}
                 onChangeText={(v) => setFormData({...formData, medicine_name: v})} 
               />
+
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3, marginTop: 4 }}>
+                🏢 Company / Pharma Brand (Editable)
+              </Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="e.g. Velnourish, Ethicare / Ubik, Canixa, Gracederma..." 
+                value={formData.company} 
+                onChangeText={(v) => setFormData({...formData, company: v})} 
+              />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: 12 }}>
+                {['Velnourish', 'Ethicare / Ubik', 'Canixa', 'Gracederma', 'Torrent', 'Adroit', 'Fixderma', 'Indus', 'Regalis', 'Menarini', 'Glaxo', 'Intas', 'Akumentis', 'Apex', 'Micro Labs'].map(cName => (
+                  <TouchableOpacity
+                    key={cName}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      backgroundColor: formData.company === cName ? '#5C0B0B' : '#f8fafc',
+                      borderRadius: 14,
+                      marginRight: 6,
+                      borderWidth: 1,
+                      borderColor: formData.company === cName ? '#5C0B0B' : '#cbd5e1'
+                    }}
+                    onPress={() => setFormData({...formData, company: cName})}
+                  >
+                    <Text style={{ fontSize: 11, color: formData.company === cName ? '#fff' : '#334155', fontWeight: '600' }}>{cName}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
               <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#374151', marginBottom: 3 }}>Batch Number *</Text>
               <TextInput 
