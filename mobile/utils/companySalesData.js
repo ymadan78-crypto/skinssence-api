@@ -1,47 +1,71 @@
 // Precalculated and verified sales data for all Pharma Brands from Clinic Database
 const salesDatabase = require('./precalculated_sales_data.json');
 
-export function getCompanySales(targetMonth = 'ALL', targetCompany = 'ALL') {
+export function getCompanySales(targetMonth = 'ALL', targetCompany = 'ALL', brandOverrides = {}) {
   const { availableMonths, availableCompanies, grouped } = salesDatabase;
 
   const monthsToInclude = targetMonth === 'ALL' ? availableMonths : [targetMonth];
-  const companiesToInclude = targetCompany === 'ALL' ? availableCompanies : [targetCompany];
 
   const resultCompanies = {};
   let overallUnits = 0;
   let overallMrpValue = 0;
+  const dynamicallyFoundCompanies = new Set();
 
   for (const m of monthsToInclude) {
     if (!grouped[m]) continue;
-    for (const c of companiesToInclude) {
-      if (!grouped[m][c]) continue;
-      if (!resultCompanies[c]) {
-        resultCompanies[c] = {
-          company: c,
-          totalUnits: 0,
-          totalSalesMrp: 0,
-          items: {}
-        };
-      }
-      resultCompanies[c].totalUnits += grouped[m][c].totalUnits;
-      resultCompanies[c].totalSalesMrp += grouped[m][c].totalSalesMrp;
-      overallUnits += grouped[m][c].totalUnits;
-      overallMrpValue += grouped[m][c].totalSalesMrp;
 
-      for (const [iName, iObj] of Object.entries(grouped[m][c].items)) {
-        if (!resultCompanies[c].items[iName]) {
-          resultCompanies[c].items[iName] = {
+    for (const originalComp of Object.keys(grouped[m])) {
+      const compGroup = grouped[m][originalComp];
+      if (!compGroup || !compGroup.items) continue;
+
+      for (const [iName, iObj] of Object.entries(compGroup.items)) {
+        const lowerName = (iName || '').trim().toLowerCase();
+        const effectiveComp = (brandOverrides && brandOverrides[lowerName])
+          ? brandOverrides[lowerName].trim()
+          : originalComp;
+
+        dynamicallyFoundCompanies.add(effectiveComp);
+
+        if (targetCompany !== 'ALL' && effectiveComp !== targetCompany) {
+          continue;
+        }
+
+        if (!resultCompanies[effectiveComp]) {
+          resultCompanies[effectiveComp] = {
+            company: effectiveComp,
+            totalUnits: 0,
+            totalSalesMrp: 0,
+            items: {}
+          };
+        }
+
+        const itemTotal = (iObj.qty || 0) * (iObj.mrp || 0);
+        resultCompanies[effectiveComp].totalUnits += (iObj.qty || 0);
+        resultCompanies[effectiveComp].totalSalesMrp += itemTotal;
+        overallUnits += (iObj.qty || 0);
+        overallMrpValue += itemTotal;
+
+        if (!resultCompanies[effectiveComp].items[iName]) {
+          resultCompanies[effectiveComp].items[iName] = {
             name: iName,
             mrp: iObj.mrp,
             qty: 0,
             totalAmount: 0
           };
         }
-        resultCompanies[c].items[iName].qty += iObj.qty;
-        resultCompanies[c].items[iName].totalAmount += iObj.totalAmount;
+        resultCompanies[effectiveComp].items[iName].qty += (iObj.qty || 0);
+        resultCompanies[effectiveComp].items[iName].totalAmount += itemTotal;
       }
     }
   }
+
+  const allAvailableCompanies = Array.from(new Set([...availableCompanies, ...dynamicallyFoundCompanies])).sort((a, b) => {
+    if (a === 'Velnourish') return -1;
+    if (b === 'Velnourish') return 1;
+    if (a === 'Other') return 1;
+    if (b === 'Other') return -1;
+    return a.localeCompare(b);
+  });
 
   const formattedCompanies = Object.values(resultCompanies).map(c => ({
     company: c.company,
@@ -65,7 +89,7 @@ export function getCompanySales(targetMonth = 'ALL', targetCompany = 'ALL') {
     selectedMonth: targetMonth,
     selectedCompany: targetCompany,
     availableMonths,
-    availableCompanies,
+    availableCompanies: allAvailableCompanies,
     summary: {
       totalUnits: overallUnits,
       totalSalesMrp: Math.round(overallMrpValue * 100) / 100,

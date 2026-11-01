@@ -17,6 +17,7 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
   // --- COMPANY / BRAND SALES STATE ---
   const [selectedCompanyMonth, setSelectedCompanyMonth] = useState('ALL');
   const [selectedCompanyBrand, setSelectedCompanyBrand] = useState('ALL');
+  const [brandOverrides, setBrandOverrides] = useState({});
   const [companySalesData, setCompanySalesData] = useState(() => getCompanySales('ALL', 'ALL'));
   const [companySalesLoading, setCompanySalesLoading] = useState(false);
   const [companySearchQ, setCompanySearchQ] = useState('');
@@ -24,6 +25,17 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
   useEffect(() => {
     fetchAnalytics();
     AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
+    AsyncStorage.getItem('@skinssence_medicine_brands').then(stored => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && typeof parsed === 'object') {
+            setBrandOverrides(parsed);
+            setCompanySalesData(getCompanySales('ALL', 'ALL', parsed));
+          }
+        } catch (e) {}
+      }
+    });
   }, []);
 
   const fetchAnalytics = async () => {
@@ -42,11 +54,24 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
   };
 
   const fetchCompanySales = async (m = selectedCompanyMonth, b = selectedCompanyBrand) => {
-    // 1. Immediately render precalculated & verified data
-    const localData = getCompanySales(m, b);
+    // 1. Load latest brand overrides from AsyncStorage if any
+    let currentOverrides = brandOverrides;
+    try {
+      const stored = await AsyncStorage.getItem('@skinssence_medicine_brands');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') {
+          currentOverrides = parsed;
+          setBrandOverrides(parsed);
+        }
+      }
+    } catch (e) {}
+
+    // 2. Immediately render precalculated & verified data with user overrides applied
+    const localData = getCompanySales(m, b, currentOverrides);
     setCompanySalesData(localData);
 
-    // 2. Try background refresh from cloud server
+    // 3. Try background refresh from cloud server
     try {
       const token = await AsyncStorage.getItem('userToken');
       const res = await axios.get(`https://skinssence-api.onrender.com/api/inventory/company-sales?month=${m}&company=${encodeURIComponent(b)}`, {

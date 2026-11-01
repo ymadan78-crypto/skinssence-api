@@ -11,6 +11,7 @@ function InventoryManagementScreenContent({ navigation }) {
   const [inventory, setInventory] = useState([]);
   const [searchQ, setSearchQ] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('ALL');
+  const [brandOverrides, setBrandOverrides] = useState({});
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [userRole, setUserRole] = useState('');
   const [formData, setFormData] = useState({ id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], original_quantity: 0, is_new_batch: false, company: '' });
@@ -42,8 +43,31 @@ function InventoryManagementScreenContent({ navigation }) {
 
   const BASE_URL = 'https://skinssence-api.onrender.com/api/inventory';
 
+  const resolveItemBrand = (medicineName, serverCompany, overrides = brandOverrides) => {
+    const clean = (medicineName || '').trim().toLowerCase();
+    if (overrides && overrides[clean] && overrides[clean].trim()) {
+      return overrides[clean].trim();
+    }
+    if (serverCompany && serverCompany.trim()) {
+      return serverCompany.trim();
+    }
+    return getBrandForMedicine(medicineName) || 'Unassigned Brand';
+  };
+
   useEffect(() => {
-    fetchInventory();
+    AsyncStorage.getItem('@skinssence_medicine_brands').then(stored => {
+      let initialOverrides = {};
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && typeof parsed === 'object') {
+            initialOverrides = parsed;
+            setBrandOverrides(parsed);
+          }
+        } catch (e) {}
+      }
+      fetchInventory(initialOverrides);
+    });
     AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
   }, []);
 
@@ -272,13 +296,32 @@ function InventoryManagementScreenContent({ navigation }) {
     );
   };
 
-  const fetchInventory = async () => {
+  const fetchInventory = async (passedOverrides = null) => {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
+      let currentOverrides = passedOverrides || brandOverrides;
+      if (!passedOverrides) {
+        const stored = await AsyncStorage.getItem('@skinssence_medicine_brands');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+              currentOverrides = parsed;
+              setBrandOverrides(parsed);
+            }
+          } catch (e) {}
+        }
+      }
+
       // Fetch all stock items (including 0 qty items)
       const response = await axios.get(`${BASE_URL}/all`, { headers: { Authorization: `Bearer ${token}` } });
-      setInventory(response.data || []);
+      const rawData = response.data || [];
+      const merged = rawData.map(item => ({
+        ...item,
+        company: resolveItemBrand(item.medicine_name, item.company, currentOverrides)
+      }));
+      setInventory(merged);
     } catch (error) {
       console.error(error);
       Alert.alert('Error', 'Failed to fetch inventory.');
@@ -313,25 +356,53 @@ function InventoryManagementScreenContent({ navigation }) {
 
     try {
       const token = await AsyncStorage.getItem('userToken');
+      const cleanMedName = formData.medicine_name.trim();
+      const enteredCompany = (formData.company || '').trim();
+
       const payload = {
-        medicine_name: formData.medicine_name.trim(),
+        medicine_name: cleanMedName,
         batch_number: formData.batch_number ? formData.batch_number.trim() : '',
         mrp: parseFloat(formData.mrp) || 0,
         quantity: newQty,
         expiry_date: formData.expiry_date ? formData.expiry_date.trim() : '',
         default_instructions: formData.default_instructions.join(', '),
-        company: formData.company ? formData.company.trim() : ''
+        company: enteredCompany
       };
 
+      // 1. Immediately update brand overrides locally in state and AsyncStorage
+      let updatedOverrides = { ...brandOverrides };
+      if (cleanMedName) {
+        if (enteredCompany) {
+          updatedOverrides[cleanMedName.toLowerCase()] = enteredCompany;
+        }
+        setBrandOverrides(updatedOverrides);
+        await AsyncStorage.setItem('@skinssence_medicine_brands', JSON.stringify(updatedOverrides));
+      }
+
+      // 2. Immediately update local inventory state so UI reflects changes with ZERO delay/flicker
+      if (formData.id) {
+        setInventory(prev => prev.map(it => {
+          if (it.id === formData.id) {
+            return {
+              ...it,
+              ...payload,
+              company: enteredCompany || resolveItemBrand(cleanMedName, it.company, updatedOverrides)
+            };
+          }
+          return it;
+        }));
+      }
+
+      // 3. Send update to backend server
       if (formData.id) {
         await axios.put(`${BASE_URL}/${formData.id}`, payload, { headers: { Authorization: `Bearer ${token}` } });
-        Alert.alert('Success', 'Item updated in stock!');
+        Alert.alert('Success', `"${cleanMedName}" updated in stock!\nBrand: ${enteredCompany || 'Unassigned'}`);
       } else {
         await axios.post(BASE_URL, payload, { headers: { Authorization: `Bearer ${token}` } });
         Alert.alert('Success', 'New stock added successfully!');
       }
       setIsModalVisible(false);
-      fetchInventory();
+      fetchInventory(updatedOverrides);
     } catch (error) {
       Alert.alert('Error', error.response?.data?.error || error.message || 'Failed to save inventory item.');
     }
@@ -408,7 +479,7 @@ Do you want to proceed?`,
   };
 
   const openAddModal = () => {
-    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0, company: '', company: '' };
+    const initial = { id: null, medicine_name: '', batch_number: '', mrp: '', quantity: '', expiry_date: '', default_instructions: [], is_new_batch: false, original_quantity: 0, company: '' };
     setFormData(initial);
     setInitialFormState(initial);
     setIsModalVisible(true);
@@ -418,6 +489,7 @@ Do you want to proceed?`,
     const instructions = item.default_instructions
       ? item.default_instructions.split(',').map(i => i.trim()).filter(Boolean)
       : [];
+    const resolvedComp = resolveItemBrand(item.medicine_name, item.company);
     const initial = {
       id: null, // creates a new stock entry
       medicine_name: item.medicine_name || '',
@@ -428,7 +500,7 @@ Do you want to proceed?`,
       default_instructions: instructions,
       is_new_batch: true,
       original_quantity: 0,
-      company: item.company || getBrandForMedicine(item.medicine_name) || ''
+      company: resolvedComp
     };
     setFormData(initial);
     setInitialFormState(initial);
@@ -440,6 +512,7 @@ Do you want to proceed?`,
       ? item.default_instructions.split(',').map(i => i.trim()).filter(Boolean)
       : [];
     const currQty = item.quantity !== undefined && item.quantity !== null ? item.quantity : 0;
+    const resolvedComp = resolveItemBrand(item.medicine_name, item.company);
     const initial = {
       id: item.id,
       medicine_name: item.medicine_name || '',
@@ -450,7 +523,7 @@ Do you want to proceed?`,
       default_instructions: instructions,
       is_new_batch: false,
       original_quantity: currQty,
-      company: item.company || getBrandForMedicine(item.medicine_name) || ''
+      company: resolvedComp
     };
     setFormData(initial);
     setInitialFormState(initial);
@@ -526,7 +599,7 @@ Do you want to proceed?`,
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
   const filteredInventory = inventory.filter(item => {
-    const itemBrand = (item.company || getBrandForMedicine(item.medicine_name) || 'Other').trim();
+    const itemBrand = (item.company || resolveItemBrand(item.medicine_name, item.company) || 'Other').trim();
     if (selectedBrandFilter !== 'ALL' && itemBrand !== selectedBrandFilter) {
       return false;
     }
@@ -701,19 +774,19 @@ Do you want to proceed?`,
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 4 }}>
                   <View style={{
-                    backgroundColor: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#fdf2f2' : '#eff6ff',
+                    backgroundColor: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#fdf2f2' : '#eff6ff',
                     paddingHorizontal: 8,
                     paddingVertical: 2.5,
                     borderRadius: 5,
                     borderWidth: 1,
-                    borderColor: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#fca5a5' : '#bfdbfe'
+                    borderColor: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#fca5a5' : '#bfdbfe'
                   }}>
                     <Text style={{
                       fontSize: 11,
-                      color: (item.company || getBrandForMedicine(item.medicine_name)) === 'Velnourish' ? '#991b1b' : '#1d4ed8',
+                      color: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#991b1b' : '#1d4ed8',
                       fontWeight: 'bold'
                     }}>
-                      🏢 {item.company || getBrandForMedicine(item.medicine_name) || 'Unassigned Brand'}
+                      🏢 {item.company || resolveItemBrand(item.medicine_name, item.company) || 'Unassigned Brand'}
                     </Text>
                   </View>
                 </View>

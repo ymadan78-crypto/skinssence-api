@@ -143,13 +143,13 @@ export const MEDICINE_BRAND_MAP = {
   // --- AKUMENTIS ---
   'Akosma': 'Akumentis',
   'MethoMore': 'Akumentis',
+  'Altegra 180mg': 'Akumentis',
 
   // --- APEX ---
   'Azkera': 'Apex',
   'Reverage': 'Apex',
 
   // --- MICRO LABS ---
-  'Altegra 180mg': 'Micro Labs',
   'Aziderm  cream 20%': 'Micro Labs',
   'Aziderm 10%': 'Micro Labs',
   'Aziderm10%': 'Micro Labs',
@@ -189,7 +189,13 @@ export function getBrandForMedicine(name, fallbackCompany = '') {
   
   const lower = clean.toLowerCase();
   for (const [k, v] of Object.entries(MEDICINE_BRAND_MAP)) {
-    if (lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower)) {
+    if (k.toLowerCase() === lower) {
+      return v;
+    }
+  }
+
+  for (const [k, v] of Object.entries(MEDICINE_BRAND_MAP)) {
+    if (k.length >= 4 && lower.includes(k.toLowerCase())) {
       return v;
     }
   }
