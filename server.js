@@ -2552,7 +2552,33 @@ app.get('/api/patients/:id/pharmacy-by-date', authenticateToken, (req, res) => {
 
 // --- INVENTORY MANAGEMENT ROUTES ---
 app.get('/api/inventory/all', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM inventory ORDER BY medicine_name ASC', [], (err, rows) => {
+  const query = `
+    SELECT 
+      i.*,
+      COALESCE(m.total_prescribed_qty, n.name_prescribed_qty, 0) as total_prescribed_qty,
+      COALESCE(m.last_prescribed_date, n.name_last_prescribed_date) as last_prescribed_date
+    FROM inventory i
+    LEFT JOIN (
+      SELECT 
+        item_id,
+        ABS(SUM(quantity)) as total_prescribed_qty,
+        MAX(created_at) as last_prescribed_date
+      FROM inventory_stock_movements
+      WHERE movement_type = 'SOLD'
+      GROUP BY item_id
+    ) m ON i.id = m.item_id
+    LEFT JOIN (
+      SELECT 
+        LOWER(TRIM(medicine_name)) as med_name_clean,
+        ABS(SUM(quantity)) as name_prescribed_qty,
+        MAX(created_at) as name_last_prescribed_date
+      FROM inventory_stock_movements
+      WHERE movement_type = 'SOLD'
+      GROUP BY LOWER(TRIM(medicine_name))
+    ) n ON LOWER(TRIM(i.medicine_name)) = n.med_name_clean
+    ORDER BY i.medicine_name ASC
+  `;
+  db.all(query, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });

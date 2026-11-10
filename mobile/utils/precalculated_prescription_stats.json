@@ -1,0 +1,2213 @@
+{
+  "generated_at": "2026-11-10T17:52:55.735Z",
+  "total_inventory_items": 165,
+  "stats_by_id": {
+    "4": {
+      "id": 4,
+      "medicine_name": "Kelocepa silicone gel",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-24 12:09:41",
+      "times_prescribed": 1
+    },
+    "7": {
+      "id": 7,
+      "medicine_name": "Celluglow Glutathione",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-11 07:48:15",
+      "times_prescribed": 4
+    },
+    "9": {
+      "id": 9,
+      "medicine_name": "Akosma",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-02 13:37:40",
+      "times_prescribed": 3
+    },
+    "11": {
+      "id": 11,
+      "medicine_name": "Aziderm  cream 20%",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-09 08:26:23",
+      "times_prescribed": 17
+    },
+    "13": {
+      "id": 13,
+      "medicine_name": "Blynds spf 80",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-30 13:04:26",
+      "times_prescribed": 3
+    },
+    "14": {
+      "id": 14,
+      "medicine_name": "Amoxyclav-625",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "15": {
+      "id": 15,
+      "medicine_name": "Aziderm10%",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-10-01 07:59:26",
+      "times_prescribed": 15
+    },
+    "17": {
+      "id": 17,
+      "medicine_name": "Botopep kit",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "18": {
+      "id": 18,
+      "medicine_name": "Actilife tablet",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-09 08:52:42",
+      "times_prescribed": 5
+    },
+    "19": {
+      "id": 19,
+      "medicine_name": "Botoliss Smooth Hair Serum",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "20": {
+      "id": 20,
+      "medicine_name": "Aquaedge",
+      "total_prescribed_qty": 29,
+      "last_prescribed_date": "2026-11-06 13:15:50",
+      "times_prescribed": 28
+    },
+    "21": {
+      "id": 21,
+      "medicine_name": "Benzonix gel wash",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-23 08:45:56",
+      "times_prescribed": 2
+    },
+    "23": {
+      "id": 23,
+      "medicine_name": "Botoliss Hair Mask",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "24": {
+      "id": 24,
+      "medicine_name": "Botoliss shampoo",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "25": {
+      "id": 25,
+      "medicine_name": "Bronze SPF",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-03 07:24:58",
+      "times_prescribed": 1
+    },
+    "26": {
+      "id": 26,
+      "medicine_name": "Botopep serum",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "28": {
+      "id": 28,
+      "medicine_name": "Clearzit gel",
+      "total_prescribed_qty": 28,
+      "last_prescribed_date": "2026-11-03 12:15:54",
+      "times_prescribed": 28
+    },
+    "29": {
+      "id": 29,
+      "medicine_name": "Cetaphil serum",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-15 14:10:03",
+      "times_prescribed": 3
+    },
+    "32": {
+      "id": 32,
+      "medicine_name": "Cosmelite next",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-08 14:41:33",
+      "times_prescribed": 2
+    },
+    "33": {
+      "id": 33,
+      "medicine_name": "Cuticans",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-23 14:20:05",
+      "times_prescribed": 3
+    },
+    "35": {
+      "id": 35,
+      "medicine_name": "Doxylox",
+      "total_prescribed_qty": 64,
+      "last_prescribed_date": "2026-11-10 13:46:25",
+      "times_prescribed": 38
+    },
+    "36": {
+      "id": 36,
+      "medicine_name": "Dwash mois.f/w",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-10-28 07:43:08",
+      "times_prescribed": 7
+    },
+    "37": {
+      "id": 37,
+      "medicine_name": "Eclipse solarie spf50 sunscreen",
+      "total_prescribed_qty": 25,
+      "last_prescribed_date": "2026-11-07 12:46:08",
+      "times_prescribed": 25
+    },
+    "38": {
+      "id": 38,
+      "medicine_name": "Efanid cream",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-10-26 13:27:37",
+      "times_prescribed": 8
+    },
+    "39": {
+      "id": 39,
+      "medicine_name": "Epifager-Lite",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-31 12:43:23",
+      "times_prescribed": 2
+    },
+    "40": {
+      "id": 40,
+      "medicine_name": "Epilight hydrating lotion",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-10 12:33:07",
+      "times_prescribed": 6
+    },
+    "43": {
+      "id": 43,
+      "medicine_name": "Eyegile am/pm",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "45": {
+      "id": 45,
+      "medicine_name": "Glutone md",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-27 12:48:38",
+      "times_prescribed": 3
+    },
+    "48": {
+      "id": 48,
+      "medicine_name": "Head2toe wash/shampoo",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 12:33:06",
+      "times_prescribed": 9
+    },
+    "49": {
+      "id": 49,
+      "medicine_name": "Hebeda serum",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-09 13:53:07",
+      "times_prescribed": 2
+    },
+    "50": {
+      "id": 50,
+      "medicine_name": "Hexilak Gel",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-02 08:49:56",
+      "times_prescribed": 2
+    },
+    "52": {
+      "id": 52,
+      "medicine_name": "Hexilak ultra",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "53": {
+      "id": 53,
+      "medicine_name": "FCL intensive night serum",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-11-10 13:55:55",
+      "times_prescribed": 8
+    },
+    "54": {
+      "id": 54,
+      "medicine_name": "FCL  AHA lightening gel HQ",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-31 13:54:48",
+      "times_prescribed": 4
+    },
+    "55": {
+      "id": 55,
+      "medicine_name": "Foligain hair lotion",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-10 07:11:17",
+      "times_prescribed": 7
+    },
+    "56": {
+      "id": 56,
+      "medicine_name": "Hidrants mois.",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-10-27 08:42:19",
+      "times_prescribed": 7
+    },
+    "58": {
+      "id": 58,
+      "medicine_name": "IMIDERM 1.0",
+      "total_prescribed_qty": 5,
+      "last_prescribed_date": "2026-11-03 15:05:18",
+      "times_prescribed": 5
+    },
+    "60": {
+      "id": 60,
+      "medicine_name": "Isograce-5",
+      "total_prescribed_qty": 12,
+      "last_prescribed_date": "2026-10-28 14:15:31",
+      "times_prescribed": 3
+    },
+    "61": {
+      "id": 61,
+      "medicine_name": "Itraliz SB 130",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-04 09:28:13",
+      "times_prescribed": 2
+    },
+    "62": {
+      "id": 62,
+      "medicine_name": "Kalsma-D3",
+      "total_prescribed_qty": 25,
+      "last_prescribed_date": "2026-11-10 13:58:45",
+      "times_prescribed": 15
+    },
+    "63": {
+      "id": 63,
+      "medicine_name": "Kezil SL",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-11-02 12:54:31",
+      "times_prescribed": 10
+    },
+    "64": {
+      "id": 64,
+      "medicine_name": "Kozilite-H",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-10 07:48:51",
+      "times_prescribed": 1
+    },
+    "67": {
+      "id": 67,
+      "medicine_name": "Lactofyn",
+      "total_prescribed_qty": 24,
+      "last_prescribed_date": "2026-11-07 07:58:58",
+      "times_prescribed": 10
+    },
+    "68": {
+      "id": 68,
+      "medicine_name": "Lipidz",
+      "total_prescribed_qty": 23,
+      "last_prescribed_date": "2026-11-07 12:46:06",
+      "times_prescribed": 23
+    },
+    "69": {
+      "id": 69,
+      "medicine_name": "Lipz mois.",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-10 13:46:21",
+      "times_prescribed": 3
+    },
+    "70": {
+      "id": 70,
+      "medicine_name": "Logifeel-IMF",
+      "total_prescribed_qty": 24,
+      "last_prescribed_date": "2026-11-10 13:57:52",
+      "times_prescribed": 24
+    },
+    "73": {
+      "id": 73,
+      "medicine_name": "Melalumin ultra",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:56:28",
+      "times_prescribed": 17
+    },
+    "74": {
+      "id": 74,
+      "medicine_name": "Melalumin un eye serum",
+      "total_prescribed_qty": 20,
+      "last_prescribed_date": "2026-10-31 08:09:20",
+      "times_prescribed": 20
+    },
+    "75": {
+      "id": 75,
+      "medicine_name": "LAH-5",
+      "total_prescribed_qty": 55,
+      "last_prescribed_date": "2026-11-02 14:19:44",
+      "times_prescribed": 9
+    },
+    "78": {
+      "id": 78,
+      "medicine_name": "Minotas ER 45",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "79": {
+      "id": 79,
+      "medicine_name": "Morr f Aqua",
+      "total_prescribed_qty": 11,
+      "last_prescribed_date": "2026-11-09 08:27:44",
+      "times_prescribed": 11
+    },
+    "80": {
+      "id": 80,
+      "medicine_name": "My Tret 0.025%",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-10-30 11:46:28",
+      "times_prescribed": 17
+    },
+    "81": {
+      "id": 81,
+      "medicine_name": "My Tret 0.04%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "82": {
+      "id": 82,
+      "medicine_name": "My Tret 0.1%",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-26 13:21:07",
+      "times_prescribed": 1
+    },
+    "83": {
+      "id": 83,
+      "medicine_name": "Nidcort-HC",
+      "total_prescribed_qty": 16,
+      "last_prescribed_date": "2026-11-09 08:52:40",
+      "times_prescribed": 15
+    },
+    "84": {
+      "id": 84,
+      "medicine_name": "Nidgly-12",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-24 05:56:33",
+      "times_prescribed": 3
+    },
+    "86": {
+      "id": 86,
+      "medicine_name": "Nidgly-6",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-19 12:05:17",
+      "times_prescribed": 1
+    },
+    "87": {
+      "id": 87,
+      "medicine_name": "Nidsoft-E",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-19 15:02:49",
+      "times_prescribed": 2
+    },
+    "88": {
+      "id": 88,
+      "medicine_name": "Nidsone cream",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-31 12:44:03",
+      "times_prescribed": 11
+    },
+    "89": {
+      "id": 89,
+      "medicine_name": "Nidtroin-20",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "90": {
+      "id": 90,
+      "medicine_name": "Nidtroin-20",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "91": {
+      "id": 91,
+      "medicine_name": "Noskurf daily cream",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-09 08:27:46",
+      "times_prescribed": 6
+    },
+    "92": {
+      "id": 92,
+      "medicine_name": "OMEZ",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "93": {
+      "id": 93,
+      "medicine_name": "Pelliwash shampoo",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 11:16:27",
+      "times_prescribed": 4
+    },
+    "94": {
+      "id": 94,
+      "medicine_name": "Physiogel",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-30 13:04:23",
+      "times_prescribed": 13
+    },
+    "95": {
+      "id": 95,
+      "medicine_name": "Reverage",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "96": {
+      "id": 96,
+      "medicine_name": "Revgrey solution",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-25 08:42:47",
+      "times_prescribed": 3
+    },
+    "97": {
+      "id": 97,
+      "medicine_name": "Screenguard spf50",
+      "total_prescribed_qty": 43,
+      "last_prescribed_date": "2026-11-10 13:46:24",
+      "times_prescribed": 42
+    },
+    "98": {
+      "id": 98,
+      "medicine_name": "Sebogel",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-11-10 13:56:29",
+      "times_prescribed": 14
+    },
+    "99": {
+      "id": 99,
+      "medicine_name": "Seren shampoo",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-03 13:35:32",
+      "times_prescribed": 3
+    },
+    "100": {
+      "id": 100,
+      "medicine_name": "Seren conditioner",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-09 07:07:48",
+      "times_prescribed": 7
+    },
+    "101": {
+      "id": 101,
+      "medicine_name": "Sesderma Azlec RU",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-05 13:38:13",
+      "times_prescribed": 1
+    },
+    "102": {
+      "id": 102,
+      "medicine_name": "Shadow transparent spf50",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "103": {
+      "id": 103,
+      "medicine_name": "Solasafe sunscreen",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-02 13:37:41",
+      "times_prescribed": 1
+    },
+    "104": {
+      "id": 104,
+      "medicine_name": "Solglo",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-10-30 14:11:18",
+      "times_prescribed": 14
+    },
+    "106": {
+      "id": 106,
+      "medicine_name": "Sweatnil max",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-22 13:00:04",
+      "times_prescribed": 1
+    },
+    "107": {
+      "id": 107,
+      "medicine_name": "Tacronid 0.1%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "108": {
+      "id": 108,
+      "medicine_name": "Tacronid-30",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-05 13:23:22",
+      "times_prescribed": 1
+    },
+    "110": {
+      "id": 110,
+      "medicine_name": "Tracnil sachet",
+      "total_prescribed_qty": 90,
+      "last_prescribed_date": "2026-11-05 14:26:18",
+      "times_prescribed": 3
+    },
+    "111": {
+      "id": 111,
+      "medicine_name": "TrichoExito Repair",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "112": {
+      "id": 112,
+      "medicine_name": "Trichospire hair kit",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 07:40:52",
+      "times_prescribed": 9
+    },
+    "113": {
+      "id": 113,
+      "medicine_name": "Trichospire hair mask",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-10 13:57:48",
+      "times_prescribed": 6
+    },
+    "114": {
+      "id": 114,
+      "medicine_name": "Trichowel hair serum",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-19 15:04:07",
+      "times_prescribed": 2
+    },
+    "116": {
+      "id": 116,
+      "medicine_name": "Truderma f/w",
+      "total_prescribed_qty": 45,
+      "last_prescribed_date": "2026-11-03 12:15:53",
+      "times_prescribed": 45
+    },
+    "117": {
+      "id": 117,
+      "medicine_name": "Uproot lotion hair",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "118": {
+      "id": 118,
+      "medicine_name": "Tyrodin-FSR",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-11-10 07:11:16",
+      "times_prescribed": 5
+    },
+    "119": {
+      "id": 119,
+      "medicine_name": "Z block",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-04 08:05:10",
+      "times_prescribed": 1
+    },
+    "121": {
+      "id": 121,
+      "medicine_name": "Zitcare Forte",
+      "total_prescribed_qty": 50,
+      "last_prescribed_date": "2026-10-25 08:21:24",
+      "times_prescribed": 2
+    },
+    "122": {
+      "id": 122,
+      "medicine_name": "acnepurge f/w",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-10 07:50:27",
+      "times_prescribed": 7
+    },
+    "123": {
+      "id": 123,
+      "medicine_name": "acnewar",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-11-09 07:07:47",
+      "times_prescribed": 14
+    },
+    "124": {
+      "id": 124,
+      "medicine_name": "aziderm 15%",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-09 07:07:49",
+      "times_prescribed": 6
+    },
+    "126": {
+      "id": 126,
+      "medicine_name": "depiscreen UE cream",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-04 13:09:20",
+      "times_prescribed": 7
+    },
+    "128": {
+      "id": 128,
+      "medicine_name": "juveskin 2Ã cream",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-04 13:11:19",
+      "times_prescribed": 6
+    },
+    "129": {
+      "id": 129,
+      "medicine_name": "lytec klense 690",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-11-05 15:16:47",
+      "times_prescribed": 10
+    },
+    "135": {
+      "id": 135,
+      "medicine_name": "Uvsilk spf 40",
+      "total_prescribed_qty": 5,
+      "last_prescribed_date": "2026-10-17 14:07:43",
+      "times_prescribed": 5
+    },
+    "137": {
+      "id": 137,
+      "medicine_name": "morr pro gold",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-14 14:40:35",
+      "times_prescribed": 2
+    },
+    "138": {
+      "id": 138,
+      "medicine_name": "okacet-L",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "139": {
+      "id": 139,
+      "medicine_name": "pantraz DSR pantoprazole",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "140": {
+      "id": 140,
+      "medicine_name": "ozetof",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-22 13:24:22",
+      "times_prescribed": 1
+    },
+    "141": {
+      "id": 141,
+      "medicine_name": "perato 10",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:47:51",
+      "times_prescribed": 7
+    },
+    "142": {
+      "id": 142,
+      "medicine_name": "piranid",
+      "total_prescribed_qty": 68,
+      "last_prescribed_date": "2026-11-09 13:53:08",
+      "times_prescribed": 64
+    },
+    "143": {
+      "id": 143,
+      "medicine_name": "predmet 8mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "144": {
+      "id": 144,
+      "medicine_name": "predmet 16mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "145": {
+      "id": 145,
+      "medicine_name": "rediance creme",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-25 08:47:35",
+      "times_prescribed": 2
+    },
+    "146": {
+      "id": 146,
+      "medicine_name": "salicure 17",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "147": {
+      "id": 147,
+      "medicine_name": "screenguard tablet",
+      "total_prescribed_qty": 40,
+      "last_prescribed_date": "2026-11-10 07:11:18",
+      "times_prescribed": 14
+    },
+    "149": {
+      "id": 149,
+      "medicine_name": "sesderma k- VIT anti dark Serum",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-21 08:19:45",
+      "times_prescribed": 1
+    },
+    "150": {
+      "id": 150,
+      "medicine_name": "vegetal we bio hair colour",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-11-10 07:23:10",
+      "times_prescribed": 4
+    },
+    "152": {
+      "id": 152,
+      "medicine_name": "velmect",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-10 12:33:08",
+      "times_prescribed": 1
+    },
+    "153": {
+      "id": 153,
+      "medicine_name": "Acnewar plus",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-09-22 13:31:38",
+      "times_prescribed": 3
+    },
+    "154": {
+      "id": 154,
+      "medicine_name": "Clearzit soap",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-11-10 07:16:19",
+      "times_prescribed": 8
+    },
+    "155": {
+      "id": 155,
+      "medicine_name": "Brilante max",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-09-21 13:21:29",
+      "times_prescribed": 4
+    },
+    "156": {
+      "id": 156,
+      "medicine_name": "Altegra 180mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "157": {
+      "id": 157,
+      "medicine_name": "Seren extra mild shampoo",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-25 08:47:40",
+      "times_prescribed": 3
+    },
+    "158": {
+      "id": 158,
+      "medicine_name": "zithronid-500",
+      "total_prescribed_qty": 45,
+      "last_prescribed_date": "2026-11-10 07:16:18",
+      "times_prescribed": 5
+    },
+    "159": {
+      "id": 159,
+      "medicine_name": "Melalumin lip lightener",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 13:46:22",
+      "times_prescribed": 9
+    },
+    "160": {
+      "id": 160,
+      "medicine_name": "Lacne body spray",
+      "total_prescribed_qty": 5,
+      "last_prescribed_date": "2026-11-10 07:16:20",
+      "times_prescribed": 5
+    },
+    "161": {
+      "id": 161,
+      "medicine_name": "Bronze SPF",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-22 13:00:02",
+      "times_prescribed": 1
+    },
+    "162": {
+      "id": 162,
+      "medicine_name": "Spf ivory",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-05 15:23:37",
+      "times_prescribed": 1
+    },
+    "164": {
+      "id": 164,
+      "medicine_name": "Instafil gel wrinkle filler",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-21 08:19:45",
+      "times_prescribed": 1
+    },
+    "165": {
+      "id": 165,
+      "medicine_name": "Brilante max",
+      "total_prescribed_qty": 53,
+      "last_prescribed_date": "2026-11-10 13:46:23",
+      "times_prescribed": 53
+    },
+    "166": {
+      "id": 166,
+      "medicine_name": "Seabuck Softgel",
+      "total_prescribed_qty": 29,
+      "last_prescribed_date": "2026-11-10 07:23:13",
+      "times_prescribed": 10
+    },
+    "167": {
+      "id": 167,
+      "medicine_name": "Acnemoist cream",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:55:54",
+      "times_prescribed": 17
+    },
+    "168": {
+      "id": 168,
+      "medicine_name": "Tivenca gel",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-10-31 13:59:26",
+      "times_prescribed": 14
+    },
+    "169": {
+      "id": 169,
+      "medicine_name": "De tan mask",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "170": {
+      "id": 170,
+      "medicine_name": "Strallium stretch marks",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 11:29:14",
+      "times_prescribed": 4
+    },
+    "171": {
+      "id": 171,
+      "medicine_name": "Z stick spf50+",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-05 15:23:38",
+      "times_prescribed": 6
+    },
+    "172": {
+      "id": 172,
+      "medicine_name": "Pinedruff pro scalp Serum",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-24 05:48:04",
+      "times_prescribed": 1
+    },
+    "173": {
+      "id": 173,
+      "medicine_name": "Pinedruff pro scalp Serum",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-01 06:22:16",
+      "times_prescribed": 1
+    },
+    "175": {
+      "id": 175,
+      "medicine_name": "Allegra 180mg",
+      "total_prescribed_qty": 20,
+      "last_prescribed_date": "2026-10-25 08:27:45",
+      "times_prescribed": 3
+    },
+    "177": {
+      "id": 177,
+      "medicine_name": "Spironolactone tablet 25mg",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-10-20 12:04:49",
+      "times_prescribed": 4
+    },
+    "178": {
+      "id": 178,
+      "medicine_name": "Trichospire hair shampoo",
+      "total_prescribed_qty": 39,
+      "last_prescribed_date": "2026-11-10 13:57:49",
+      "times_prescribed": 39
+    },
+    "179": {
+      "id": 179,
+      "medicine_name": "morr max",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-11-10 13:57:50",
+      "times_prescribed": 13
+    },
+    "180": {
+      "id": 180,
+      "medicine_name": "Cera quell+scalp hydrator",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-27 08:42:19",
+      "times_prescribed": 3
+    },
+    "181": {
+      "id": 181,
+      "medicine_name": "Anable hair serum",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-11-10 07:23:12",
+      "times_prescribed": 15
+    },
+    "182": {
+      "id": 182,
+      "medicine_name": "Trichoexito shampoo",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-09 13:35:19",
+      "times_prescribed": 7
+    },
+    "183": {
+      "id": 183,
+      "medicine_name": "Trixoni2.5%",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-10-28 14:16:40",
+      "times_prescribed": 10
+    },
+    "185": {
+      "id": 185,
+      "medicine_name": "Pinedruff pro scalp Serum",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-01 06:22:16",
+      "times_prescribed": 2
+    },
+    "186": {
+      "id": 186,
+      "medicine_name": "Doxylox",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-09-22 13:21:27",
+      "times_prescribed": 4
+    },
+    "187": {
+      "id": 187,
+      "medicine_name": "Aziderm 10%",
+      "total_prescribed_qty": 40,
+      "last_prescribed_date": "2026-11-10 13:55:55",
+      "times_prescribed": 40
+    },
+    "188": {
+      "id": 188,
+      "medicine_name": "Raviron XT",
+      "total_prescribed_qty": 42,
+      "last_prescribed_date": "2026-11-10 13:58:45",
+      "times_prescribed": 14
+    },
+    "189": {
+      "id": 189,
+      "medicine_name": "Azkera",
+      "total_prescribed_qty": 50,
+      "last_prescribed_date": "2026-11-10 07:23:11",
+      "times_prescribed": 17
+    },
+    "190": {
+      "id": 190,
+      "medicine_name": "Cuticans tablet",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-30 14:11:17",
+      "times_prescribed": 1
+    },
+    "191": {
+      "id": 191,
+      "medicine_name": "Skin fay tablet",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 12:33:09",
+      "times_prescribed": 2
+    },
+    "192": {
+      "id": 192,
+      "medicine_name": "Ethisun face+ body sunscreen",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "193": {
+      "id": 193,
+      "medicine_name": "Allegra 180mg",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-10-08 13:41:26",
+      "times_prescribed": 1
+    },
+    "194": {
+      "id": 194,
+      "medicine_name": "Allegra 120mg",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-11 07:41:06",
+      "times_prescribed": 1
+    },
+    "195": {
+      "id": 195,
+      "medicine_name": "Mupitore",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-11 07:41:05",
+      "times_prescribed": 1
+    },
+    "196": {
+      "id": 196,
+      "medicine_name": "Vitchew CZ vitamin c",
+      "total_prescribed_qty": 60,
+      "last_prescribed_date": "2026-11-09 13:53:06",
+      "times_prescribed": 2
+    },
+    "197": {
+      "id": 197,
+      "medicine_name": "Global filler fillderma",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-13 13:27:07",
+      "times_prescribed": 1
+    },
+    "198": {
+      "id": 198,
+      "medicine_name": "Sesderma Retiage eye contour",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-14 13:40:54",
+      "times_prescribed": 1
+    },
+    "199": {
+      "id": 199,
+      "medicine_name": "MethoMore",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-11-10 13:57:51",
+      "times_prescribed": 6
+    },
+    "200": {
+      "id": 200,
+      "medicine_name": "Efanid cream",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-10-26 13:27:37",
+      "times_prescribed": 8
+    },
+    "201": {
+      "id": 201,
+      "medicine_name": "Trichospire hair kit",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-10 13:58:44",
+      "times_prescribed": 3
+    },
+    "202": {
+      "id": 202,
+      "medicine_name": "FCL  AHA lightening gel HQ",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-02 13:36:26",
+      "times_prescribed": 2
+    },
+    "203": {
+      "id": 203,
+      "medicine_name": "Uvsilk spf 40",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 13:20:19",
+      "times_prescribed": 3
+    },
+    "204": {
+      "id": 204,
+      "medicine_name": "desoadd",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-05 14:26:15",
+      "times_prescribed": 2
+    },
+    "205": {
+      "id": 205,
+      "medicine_name": "Allegra 180mg",
+      "total_prescribed_qty": 30,
+      "last_prescribed_date": "2026-10-25 08:27:45",
+      "times_prescribed": 4
+    },
+    "206": {
+      "id": 206,
+      "medicine_name": "Nidcort- C 0.05%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "208": {
+      "id": 208,
+      "medicine_name": "Trichoexito hair mask",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-09 13:35:18",
+      "times_prescribed": 2
+    },
+    "209": {
+      "id": 209,
+      "medicine_name": "Aquaedge bathing bar",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "210": {
+      "id": 210,
+      "medicine_name": "My Tret 0.025%",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-09 08:26:24",
+      "times_prescribed": 2
+    },
+    "211": {
+      "id": 211,
+      "medicine_name": "TrichoExito Repair",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "212": {
+      "id": 212,
+      "medicine_name": "Isograce-5",
+      "total_prescribed_qty": 12,
+      "last_prescribed_date": "2026-10-28 14:15:31",
+      "times_prescribed": 3
+    },
+    "213": {
+      "id": 213,
+      "medicine_name": "Clobenid -GM cream",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    }
+  },
+  "stats_by_name": {
+    "kelocepa silicone gel": {
+      "id": 4,
+      "medicine_name": "Kelocepa silicone gel",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-24 12:09:41",
+      "times_prescribed": 1
+    },
+    "celluglow glutathione": {
+      "id": 7,
+      "medicine_name": "Celluglow Glutathione",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-11 07:48:15",
+      "times_prescribed": 4
+    },
+    "akosma": {
+      "id": 9,
+      "medicine_name": "Akosma",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-02 13:37:40",
+      "times_prescribed": 3
+    },
+    "aziderm  cream 20%": {
+      "id": 11,
+      "medicine_name": "Aziderm  cream 20%",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-09 08:26:23",
+      "times_prescribed": 17
+    },
+    "blynds spf 80": {
+      "id": 13,
+      "medicine_name": "Blynds spf 80",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-30 13:04:26",
+      "times_prescribed": 3
+    },
+    "amoxyclav-625": {
+      "id": 14,
+      "medicine_name": "Amoxyclav-625",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "aziderm10%": {
+      "id": 15,
+      "medicine_name": "Aziderm10%",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-10-01 07:59:26",
+      "times_prescribed": 15
+    },
+    "botopep kit": {
+      "id": 17,
+      "medicine_name": "Botopep kit",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "actilife tablet": {
+      "id": 18,
+      "medicine_name": "Actilife tablet",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-09 08:52:42",
+      "times_prescribed": 5
+    },
+    "botoliss smooth hair serum": {
+      "id": 19,
+      "medicine_name": "Botoliss Smooth Hair Serum",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "aquaedge": {
+      "id": 20,
+      "medicine_name": "Aquaedge",
+      "total_prescribed_qty": 29,
+      "last_prescribed_date": "2026-11-06 13:15:50",
+      "times_prescribed": 28
+    },
+    "benzonix gel wash": {
+      "id": 21,
+      "medicine_name": "Benzonix gel wash",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-23 08:45:56",
+      "times_prescribed": 2
+    },
+    "botoliss hair mask": {
+      "id": 23,
+      "medicine_name": "Botoliss Hair Mask",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "botoliss shampoo": {
+      "id": 24,
+      "medicine_name": "Botoliss shampoo",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "bronze spf": {
+      "id": 161,
+      "medicine_name": "Bronze SPF",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-22 13:00:02",
+      "times_prescribed": 1
+    },
+    "botopep serum": {
+      "id": 26,
+      "medicine_name": "Botopep serum",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "clearzit gel": {
+      "id": 28,
+      "medicine_name": "Clearzit gel",
+      "total_prescribed_qty": 28,
+      "last_prescribed_date": "2026-11-03 12:15:54",
+      "times_prescribed": 28
+    },
+    "cetaphil serum": {
+      "id": 29,
+      "medicine_name": "Cetaphil serum",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-15 14:10:03",
+      "times_prescribed": 3
+    },
+    "cosmelite next": {
+      "id": 32,
+      "medicine_name": "Cosmelite next",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-08 14:41:33",
+      "times_prescribed": 2
+    },
+    "cuticans": {
+      "id": 33,
+      "medicine_name": "Cuticans",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-23 14:20:05",
+      "times_prescribed": 3
+    },
+    "doxylox": {
+      "id": 186,
+      "medicine_name": "Doxylox",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-09-22 13:21:27",
+      "times_prescribed": 4
+    },
+    "dwash mois.f/w": {
+      "id": 36,
+      "medicine_name": "Dwash mois.f/w",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-10-28 07:43:08",
+      "times_prescribed": 7
+    },
+    "eclipse solarie spf50 sunscreen": {
+      "id": 37,
+      "medicine_name": "Eclipse solarie spf50 sunscreen",
+      "total_prescribed_qty": 25,
+      "last_prescribed_date": "2026-11-07 12:46:08",
+      "times_prescribed": 25
+    },
+    "efanid cream": {
+      "id": 200,
+      "medicine_name": "Efanid cream",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-10-26 13:27:37",
+      "times_prescribed": 8
+    },
+    "epifager-lite": {
+      "id": 39,
+      "medicine_name": "Epifager-Lite",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-31 12:43:23",
+      "times_prescribed": 2
+    },
+    "epilight hydrating lotion": {
+      "id": 40,
+      "medicine_name": "Epilight hydrating lotion",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-10 12:33:07",
+      "times_prescribed": 6
+    },
+    "eyegile am/pm": {
+      "id": 43,
+      "medicine_name": "Eyegile am/pm",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "glutone md": {
+      "id": 45,
+      "medicine_name": "Glutone md",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-27 12:48:38",
+      "times_prescribed": 3
+    },
+    "head2toe wash/shampoo": {
+      "id": 48,
+      "medicine_name": "Head2toe wash/shampoo",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 12:33:06",
+      "times_prescribed": 9
+    },
+    "hebeda serum": {
+      "id": 49,
+      "medicine_name": "Hebeda serum",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-09 13:53:07",
+      "times_prescribed": 2
+    },
+    "hexilak gel": {
+      "id": 50,
+      "medicine_name": "Hexilak Gel",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-02 08:49:56",
+      "times_prescribed": 2
+    },
+    "hexilak ultra": {
+      "id": 52,
+      "medicine_name": "Hexilak ultra",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "fcl intensive night serum": {
+      "id": 53,
+      "medicine_name": "FCL intensive night serum",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-11-10 13:55:55",
+      "times_prescribed": 8
+    },
+    "fcl  aha lightening gel hq": {
+      "id": 202,
+      "medicine_name": "FCL  AHA lightening gel HQ",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-02 13:36:26",
+      "times_prescribed": 2
+    },
+    "foligain hair lotion": {
+      "id": 55,
+      "medicine_name": "Foligain hair lotion",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-10 07:11:17",
+      "times_prescribed": 7
+    },
+    "hidrants mois.": {
+      "id": 56,
+      "medicine_name": "Hidrants mois.",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-10-27 08:42:19",
+      "times_prescribed": 7
+    },
+    "imiderm 1.0": {
+      "id": 58,
+      "medicine_name": "IMIDERM 1.0",
+      "total_prescribed_qty": 5,
+      "last_prescribed_date": "2026-11-03 15:05:18",
+      "times_prescribed": 5
+    },
+    "isograce-5": {
+      "id": 212,
+      "medicine_name": "Isograce-5",
+      "total_prescribed_qty": 12,
+      "last_prescribed_date": "2026-10-28 14:15:31",
+      "times_prescribed": 3
+    },
+    "itraliz sb 130": {
+      "id": 61,
+      "medicine_name": "Itraliz SB 130",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-04 09:28:13",
+      "times_prescribed": 2
+    },
+    "kalsma-d3": {
+      "id": 62,
+      "medicine_name": "Kalsma-D3",
+      "total_prescribed_qty": 25,
+      "last_prescribed_date": "2026-11-10 13:58:45",
+      "times_prescribed": 15
+    },
+    "kezil sl": {
+      "id": 63,
+      "medicine_name": "Kezil SL",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-11-02 12:54:31",
+      "times_prescribed": 10
+    },
+    "kozilite-h": {
+      "id": 64,
+      "medicine_name": "Kozilite-H",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-10 07:48:51",
+      "times_prescribed": 1
+    },
+    "lactofyn": {
+      "id": 67,
+      "medicine_name": "Lactofyn",
+      "total_prescribed_qty": 24,
+      "last_prescribed_date": "2026-11-07 07:58:58",
+      "times_prescribed": 10
+    },
+    "lipidz": {
+      "id": 68,
+      "medicine_name": "Lipidz",
+      "total_prescribed_qty": 23,
+      "last_prescribed_date": "2026-11-07 12:46:06",
+      "times_prescribed": 23
+    },
+    "lipz mois.": {
+      "id": 69,
+      "medicine_name": "Lipz mois.",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-10 13:46:21",
+      "times_prescribed": 3
+    },
+    "logifeel-imf": {
+      "id": 70,
+      "medicine_name": "Logifeel-IMF",
+      "total_prescribed_qty": 24,
+      "last_prescribed_date": "2026-11-10 13:57:52",
+      "times_prescribed": 24
+    },
+    "melalumin ultra": {
+      "id": 73,
+      "medicine_name": "Melalumin ultra",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:56:28",
+      "times_prescribed": 17
+    },
+    "melalumin un eye serum": {
+      "id": 74,
+      "medicine_name": "Melalumin un eye serum",
+      "total_prescribed_qty": 20,
+      "last_prescribed_date": "2026-10-31 08:09:20",
+      "times_prescribed": 20
+    },
+    "lah-5": {
+      "id": 75,
+      "medicine_name": "LAH-5",
+      "total_prescribed_qty": 55,
+      "last_prescribed_date": "2026-11-02 14:19:44",
+      "times_prescribed": 9
+    },
+    "minotas er 45": {
+      "id": 78,
+      "medicine_name": "Minotas ER 45",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "morr f aqua": {
+      "id": 79,
+      "medicine_name": "Morr f Aqua",
+      "total_prescribed_qty": 11,
+      "last_prescribed_date": "2026-11-09 08:27:44",
+      "times_prescribed": 11
+    },
+    "my tret 0.025%": {
+      "id": 210,
+      "medicine_name": "My Tret 0.025%",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-09 08:26:24",
+      "times_prescribed": 2
+    },
+    "my tret 0.04%": {
+      "id": 81,
+      "medicine_name": "My Tret 0.04%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "my tret 0.1%": {
+      "id": 82,
+      "medicine_name": "My Tret 0.1%",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-26 13:21:07",
+      "times_prescribed": 1
+    },
+    "nidcort-hc": {
+      "id": 83,
+      "medicine_name": "Nidcort-HC",
+      "total_prescribed_qty": 16,
+      "last_prescribed_date": "2026-11-09 08:52:40",
+      "times_prescribed": 15
+    },
+    "nidgly-12": {
+      "id": 84,
+      "medicine_name": "Nidgly-12",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-24 05:56:33",
+      "times_prescribed": 3
+    },
+    "nidgly-6": {
+      "id": 86,
+      "medicine_name": "Nidgly-6",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-19 12:05:17",
+      "times_prescribed": 1
+    },
+    "nidsoft-e": {
+      "id": 87,
+      "medicine_name": "Nidsoft-E",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-19 15:02:49",
+      "times_prescribed": 2
+    },
+    "nidsone cream": {
+      "id": 88,
+      "medicine_name": "Nidsone cream",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-31 12:44:03",
+      "times_prescribed": 11
+    },
+    "nidtroin-20": {
+      "id": 90,
+      "medicine_name": "Nidtroin-20",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "noskurf daily cream": {
+      "id": 91,
+      "medicine_name": "Noskurf daily cream",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-09 08:27:46",
+      "times_prescribed": 6
+    },
+    "omez": {
+      "id": 92,
+      "medicine_name": "OMEZ",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "pelliwash shampoo": {
+      "id": 93,
+      "medicine_name": "Pelliwash shampoo",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 11:16:27",
+      "times_prescribed": 4
+    },
+    "physiogel": {
+      "id": 94,
+      "medicine_name": "Physiogel",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-10-30 13:04:23",
+      "times_prescribed": 13
+    },
+    "reverage": {
+      "id": 95,
+      "medicine_name": "Reverage",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "revgrey solution": {
+      "id": 96,
+      "medicine_name": "Revgrey solution",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-25 08:42:47",
+      "times_prescribed": 3
+    },
+    "screenguard spf50": {
+      "id": 97,
+      "medicine_name": "Screenguard spf50",
+      "total_prescribed_qty": 43,
+      "last_prescribed_date": "2026-11-10 13:46:24",
+      "times_prescribed": 42
+    },
+    "sebogel": {
+      "id": 98,
+      "medicine_name": "Sebogel",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-11-10 13:56:29",
+      "times_prescribed": 14
+    },
+    "seren shampoo": {
+      "id": 99,
+      "medicine_name": "Seren shampoo",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-03 13:35:32",
+      "times_prescribed": 3
+    },
+    "seren conditioner": {
+      "id": 100,
+      "medicine_name": "Seren conditioner",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-09 07:07:48",
+      "times_prescribed": 7
+    },
+    "sesderma azlec ru": {
+      "id": 101,
+      "medicine_name": "Sesderma Azlec RU",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-05 13:38:13",
+      "times_prescribed": 1
+    },
+    "shadow transparent spf50": {
+      "id": 102,
+      "medicine_name": "Shadow transparent spf50",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "solasafe sunscreen": {
+      "id": 103,
+      "medicine_name": "Solasafe sunscreen",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-02 13:37:41",
+      "times_prescribed": 1
+    },
+    "solglo": {
+      "id": 104,
+      "medicine_name": "Solglo",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-10-30 14:11:18",
+      "times_prescribed": 14
+    },
+    "sweatnil max": {
+      "id": 106,
+      "medicine_name": "Sweatnil max",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-22 13:00:04",
+      "times_prescribed": 1
+    },
+    "tacronid 0.1%": {
+      "id": 107,
+      "medicine_name": "Tacronid 0.1%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "tacronid-30": {
+      "id": 108,
+      "medicine_name": "Tacronid-30",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-05 13:23:22",
+      "times_prescribed": 1
+    },
+    "tracnil sachet": {
+      "id": 110,
+      "medicine_name": "Tracnil sachet",
+      "total_prescribed_qty": 90,
+      "last_prescribed_date": "2026-11-05 14:26:18",
+      "times_prescribed": 3
+    },
+    "trichoexito repair": {
+      "id": 211,
+      "medicine_name": "TrichoExito Repair",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "trichospire hair kit": {
+      "id": 201,
+      "medicine_name": "Trichospire hair kit",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-11-10 13:58:44",
+      "times_prescribed": 3
+    },
+    "trichospire hair mask": {
+      "id": 113,
+      "medicine_name": "Trichospire hair mask",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-10 13:57:48",
+      "times_prescribed": 6
+    },
+    "trichowel hair serum": {
+      "id": 114,
+      "medicine_name": "Trichowel hair serum",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-19 15:04:07",
+      "times_prescribed": 2
+    },
+    "truderma f/w": {
+      "id": 116,
+      "medicine_name": "Truderma f/w",
+      "total_prescribed_qty": 45,
+      "last_prescribed_date": "2026-11-03 12:15:53",
+      "times_prescribed": 45
+    },
+    "uproot lotion hair": {
+      "id": 117,
+      "medicine_name": "Uproot lotion hair",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "tyrodin-fsr": {
+      "id": 118,
+      "medicine_name": "Tyrodin-FSR",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-11-10 07:11:16",
+      "times_prescribed": 5
+    },
+    "z block": {
+      "id": 119,
+      "medicine_name": "Z block",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-04 08:05:10",
+      "times_prescribed": 1
+    },
+    "zitcare forte": {
+      "id": 121,
+      "medicine_name": "Zitcare Forte",
+      "total_prescribed_qty": 50,
+      "last_prescribed_date": "2026-10-25 08:21:24",
+      "times_prescribed": 2
+    },
+    "acnepurge f/w": {
+      "id": 122,
+      "medicine_name": "acnepurge f/w",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-10 07:50:27",
+      "times_prescribed": 7
+    },
+    "acnewar": {
+      "id": 123,
+      "medicine_name": "acnewar",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-11-09 07:07:47",
+      "times_prescribed": 14
+    },
+    "aziderm 15%": {
+      "id": 124,
+      "medicine_name": "aziderm 15%",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-09 07:07:49",
+      "times_prescribed": 6
+    },
+    "depiscreen ue cream": {
+      "id": 126,
+      "medicine_name": "depiscreen UE cream",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-04 13:09:20",
+      "times_prescribed": 7
+    },
+    "juveskin 2ã cream": {
+      "id": 128,
+      "medicine_name": "juveskin 2Ã cream",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-04 13:11:19",
+      "times_prescribed": 6
+    },
+    "lytec klense 690": {
+      "id": 129,
+      "medicine_name": "lytec klense 690",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-11-05 15:16:47",
+      "times_prescribed": 10
+    },
+    "uvsilk spf 40": {
+      "id": 203,
+      "medicine_name": "Uvsilk spf 40",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 13:20:19",
+      "times_prescribed": 3
+    },
+    "morr pro gold": {
+      "id": 137,
+      "medicine_name": "morr pro gold",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-14 14:40:35",
+      "times_prescribed": 2
+    },
+    "okacet-l": {
+      "id": 138,
+      "medicine_name": "okacet-L",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "pantraz dsr pantoprazole": {
+      "id": 139,
+      "medicine_name": "pantraz DSR pantoprazole",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "ozetof": {
+      "id": 140,
+      "medicine_name": "ozetof",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-22 13:24:22",
+      "times_prescribed": 1
+    },
+    "perato 10": {
+      "id": 141,
+      "medicine_name": "perato 10",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:47:51",
+      "times_prescribed": 7
+    },
+    "piranid": {
+      "id": 142,
+      "medicine_name": "piranid",
+      "total_prescribed_qty": 68,
+      "last_prescribed_date": "2026-11-09 13:53:08",
+      "times_prescribed": 64
+    },
+    "predmet 8mg": {
+      "id": 143,
+      "medicine_name": "predmet 8mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "predmet 16mg": {
+      "id": 144,
+      "medicine_name": "predmet 16mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "rediance creme": {
+      "id": 145,
+      "medicine_name": "rediance creme",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-10-25 08:47:35",
+      "times_prescribed": 2
+    },
+    "salicure 17": {
+      "id": 146,
+      "medicine_name": "salicure 17",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "screenguard tablet": {
+      "id": 147,
+      "medicine_name": "screenguard tablet",
+      "total_prescribed_qty": 40,
+      "last_prescribed_date": "2026-11-10 07:11:18",
+      "times_prescribed": 14
+    },
+    "sesderma k- vit anti dark serum": {
+      "id": 149,
+      "medicine_name": "sesderma k- VIT anti dark Serum",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-21 08:19:45",
+      "times_prescribed": 1
+    },
+    "vegetal we bio hair colour": {
+      "id": 150,
+      "medicine_name": "vegetal we bio hair colour",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-11-10 07:23:10",
+      "times_prescribed": 4
+    },
+    "velmect": {
+      "id": 152,
+      "medicine_name": "velmect",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-10 12:33:08",
+      "times_prescribed": 1
+    },
+    "acnewar plus": {
+      "id": 153,
+      "medicine_name": "Acnewar plus",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-09-22 13:31:38",
+      "times_prescribed": 3
+    },
+    "clearzit soap": {
+      "id": 154,
+      "medicine_name": "Clearzit soap",
+      "total_prescribed_qty": 8,
+      "last_prescribed_date": "2026-11-10 07:16:19",
+      "times_prescribed": 8
+    },
+    "brilante max": {
+      "id": 165,
+      "medicine_name": "Brilante max",
+      "total_prescribed_qty": 53,
+      "last_prescribed_date": "2026-11-10 13:46:23",
+      "times_prescribed": 53
+    },
+    "altegra 180mg": {
+      "id": 156,
+      "medicine_name": "Altegra 180mg",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "seren extra mild shampoo": {
+      "id": 157,
+      "medicine_name": "Seren extra mild shampoo",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-25 08:47:40",
+      "times_prescribed": 3
+    },
+    "zithronid-500": {
+      "id": 158,
+      "medicine_name": "zithronid-500",
+      "total_prescribed_qty": 45,
+      "last_prescribed_date": "2026-11-10 07:16:18",
+      "times_prescribed": 5
+    },
+    "melalumin lip lightener": {
+      "id": 159,
+      "medicine_name": "Melalumin lip lightener",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 13:46:22",
+      "times_prescribed": 9
+    },
+    "lacne body spray": {
+      "id": 160,
+      "medicine_name": "Lacne body spray",
+      "total_prescribed_qty": 5,
+      "last_prescribed_date": "2026-11-10 07:16:20",
+      "times_prescribed": 5
+    },
+    "spf ivory": {
+      "id": 162,
+      "medicine_name": "Spf ivory",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-11-05 15:23:37",
+      "times_prescribed": 1
+    },
+    "instafil gel wrinkle filler": {
+      "id": 164,
+      "medicine_name": "Instafil gel wrinkle filler",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-09-21 08:19:45",
+      "times_prescribed": 1
+    },
+    "seabuck softgel": {
+      "id": 166,
+      "medicine_name": "Seabuck Softgel",
+      "total_prescribed_qty": 29,
+      "last_prescribed_date": "2026-11-10 07:23:13",
+      "times_prescribed": 10
+    },
+    "acnemoist cream": {
+      "id": 167,
+      "medicine_name": "Acnemoist cream",
+      "total_prescribed_qty": 17,
+      "last_prescribed_date": "2026-11-10 13:55:54",
+      "times_prescribed": 17
+    },
+    "tivenca gel": {
+      "id": 168,
+      "medicine_name": "Tivenca gel",
+      "total_prescribed_qty": 14,
+      "last_prescribed_date": "2026-10-31 13:59:26",
+      "times_prescribed": 14
+    },
+    "de tan mask": {
+      "id": 169,
+      "medicine_name": "De tan mask",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "strallium stretch marks": {
+      "id": 170,
+      "medicine_name": "Strallium stretch marks",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-24 11:29:14",
+      "times_prescribed": 4
+    },
+    "z stick spf50+": {
+      "id": 171,
+      "medicine_name": "Z stick spf50+",
+      "total_prescribed_qty": 6,
+      "last_prescribed_date": "2026-11-05 15:23:38",
+      "times_prescribed": 6
+    },
+    "pinedruff pro scalp serum": {
+      "id": 185,
+      "medicine_name": "Pinedruff pro scalp Serum",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-01 06:22:16",
+      "times_prescribed": 2
+    },
+    "allegra 180mg": {
+      "id": 205,
+      "medicine_name": "Allegra 180mg",
+      "total_prescribed_qty": 30,
+      "last_prescribed_date": "2026-10-25 08:27:45",
+      "times_prescribed": 4
+    },
+    "spironolactone tablet 25mg": {
+      "id": 177,
+      "medicine_name": "Spironolactone tablet 25mg",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-10-20 12:04:49",
+      "times_prescribed": 4
+    },
+    "trichospire hair shampoo": {
+      "id": 178,
+      "medicine_name": "Trichospire hair shampoo",
+      "total_prescribed_qty": 39,
+      "last_prescribed_date": "2026-11-10 13:57:49",
+      "times_prescribed": 39
+    },
+    "morr max": {
+      "id": 179,
+      "medicine_name": "morr max",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-11-10 13:57:50",
+      "times_prescribed": 13
+    },
+    "cera quell+scalp hydrator": {
+      "id": 180,
+      "medicine_name": "Cera quell+scalp hydrator",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-27 08:42:19",
+      "times_prescribed": 3
+    },
+    "anable hair serum": {
+      "id": 181,
+      "medicine_name": "Anable hair serum",
+      "total_prescribed_qty": 15,
+      "last_prescribed_date": "2026-11-10 07:23:12",
+      "times_prescribed": 15
+    },
+    "trichoexito shampoo": {
+      "id": 182,
+      "medicine_name": "Trichoexito shampoo",
+      "total_prescribed_qty": 7,
+      "last_prescribed_date": "2026-11-09 13:35:19",
+      "times_prescribed": 7
+    },
+    "trixoni2.5%": {
+      "id": 183,
+      "medicine_name": "Trixoni2.5%",
+      "total_prescribed_qty": 10,
+      "last_prescribed_date": "2026-10-28 14:16:40",
+      "times_prescribed": 10
+    },
+    "aziderm 10%": {
+      "id": 187,
+      "medicine_name": "Aziderm 10%",
+      "total_prescribed_qty": 40,
+      "last_prescribed_date": "2026-11-10 13:55:55",
+      "times_prescribed": 40
+    },
+    "raviron xt": {
+      "id": 188,
+      "medicine_name": "Raviron XT",
+      "total_prescribed_qty": 42,
+      "last_prescribed_date": "2026-11-10 13:58:45",
+      "times_prescribed": 14
+    },
+    "azkera": {
+      "id": 189,
+      "medicine_name": "Azkera",
+      "total_prescribed_qty": 50,
+      "last_prescribed_date": "2026-11-10 07:23:11",
+      "times_prescribed": 17
+    },
+    "cuticans tablet": {
+      "id": 190,
+      "medicine_name": "Cuticans tablet",
+      "total_prescribed_qty": 3,
+      "last_prescribed_date": "2026-10-30 14:11:17",
+      "times_prescribed": 1
+    },
+    "skin fay tablet": {
+      "id": 191,
+      "medicine_name": "Skin fay tablet",
+      "total_prescribed_qty": 9,
+      "last_prescribed_date": "2026-11-10 12:33:09",
+      "times_prescribed": 2
+    },
+    "ethisun face+ body sunscreen": {
+      "id": 192,
+      "medicine_name": "Ethisun face+ body sunscreen",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "allegra 120mg": {
+      "id": 194,
+      "medicine_name": "Allegra 120mg",
+      "total_prescribed_qty": 4,
+      "last_prescribed_date": "2026-10-11 07:41:06",
+      "times_prescribed": 1
+    },
+    "mupitore": {
+      "id": 195,
+      "medicine_name": "Mupitore",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-11 07:41:05",
+      "times_prescribed": 1
+    },
+    "vitchew cz vitamin c": {
+      "id": 196,
+      "medicine_name": "Vitchew CZ vitamin c",
+      "total_prescribed_qty": 60,
+      "last_prescribed_date": "2026-11-09 13:53:06",
+      "times_prescribed": 2
+    },
+    "global filler fillderma": {
+      "id": 197,
+      "medicine_name": "Global filler fillderma",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-13 13:27:07",
+      "times_prescribed": 1
+    },
+    "sesderma retiage eye contour": {
+      "id": 198,
+      "medicine_name": "Sesderma Retiage eye contour",
+      "total_prescribed_qty": 1,
+      "last_prescribed_date": "2026-10-14 13:40:54",
+      "times_prescribed": 1
+    },
+    "methomore": {
+      "id": 199,
+      "medicine_name": "MethoMore",
+      "total_prescribed_qty": 13,
+      "last_prescribed_date": "2026-11-10 13:57:51",
+      "times_prescribed": 6
+    },
+    "desoadd": {
+      "id": 204,
+      "medicine_name": "desoadd",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-05 14:26:15",
+      "times_prescribed": 2
+    },
+    "nidcort- c 0.05%": {
+      "id": 206,
+      "medicine_name": "Nidcort- C 0.05%",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "trichoexito hair mask": {
+      "id": 208,
+      "medicine_name": "Trichoexito hair mask",
+      "total_prescribed_qty": 2,
+      "last_prescribed_date": "2026-11-09 13:35:18",
+      "times_prescribed": 2
+    },
+    "aquaedge bathing bar": {
+      "id": 209,
+      "medicine_name": "Aquaedge bathing bar",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    },
+    "clobenid -gm cream": {
+      "id": 213,
+      "medicine_name": "Clobenid -GM cream",
+      "total_prescribed_qty": 0,
+      "last_prescribed_date": null,
+      "times_prescribed": 0
+    }
+  }
+}

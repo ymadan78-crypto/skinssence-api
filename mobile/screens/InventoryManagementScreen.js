@@ -1,16 +1,161 @@
 import { getBrandForMedicine } from '../utils/medicineBrandMap';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal, BackHandler } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const precalculatedStats = require('../utils/precalculated_prescription_stats.json');
+
 const INSTRUCTION_PRESETS = ['OD (Once Daily)', 'BD (Twice Daily)', 'TDS (Thrice Daily)', 'SOS (When Needed)', 'Apply at Night', 'Apply in Morning', 'Wash after 2 hrs', 'Wash after 30 min', 'Local application only', 'Use on alternate days', 'Weekly once'];
+
+const SORT_OPTIONS = [
+  {
+    key: 'ALPHA_ASC',
+    label: 'Alphabetical: A → Z',
+    badgeText: '🔤 A → Z',
+    category: 'Alphabetical',
+    description: 'Medicines sorted alphabetically in standard order (default)'
+  },
+  {
+    key: 'ALPHA_DESC',
+    label: 'Alphabetical: Z → A',
+    badgeText: '🔤 Z → A',
+    category: 'Alphabetical',
+    description: 'Medicines sorted alphabetically in reverse order'
+  },
+  {
+    key: 'PRESCRIBED_LONGEST',
+    label: 'Prescription: Longest Back First (Oldest / Idle First)',
+    badgeText: '⏳ Longest Ago Rx',
+    category: 'Prescription Recency',
+    description: 'Idle stock: never prescribed or prescribed furthest in the past first'
+  },
+  {
+    key: 'PRESCRIBED_RECENT',
+    label: 'Prescription: Recently Prescribed (Newest First)',
+    badgeText: '🕒 Recent Rx',
+    category: 'Prescription Recency',
+    description: 'Medicines prescribed today or most recently first'
+  },
+  {
+    key: 'QTY_ASC',
+    label: 'Quantity: Low to High (Min to Max)',
+    badgeText: '📉 Min Qty First',
+    category: 'Stock Level',
+    description: 'Out-of-stock (0 units) & lowest stock medicines first'
+  },
+  {
+    key: 'QTY_DESC',
+    label: 'Quantity: High to Low (Max to Min)',
+    badgeText: '📈 Max Qty First',
+    category: 'Stock Level',
+    description: 'Well-stocked medicines with maximum quantity first'
+  },
+  {
+    key: 'TIMES_DESC',
+    label: 'Total Prescribed: Most to Least (Best Sellers)',
+    badgeText: '🔥 Most Prescribed',
+    category: 'Prescription Volume',
+    description: 'Highest total prescribed units first, down to least prescribed'
+  },
+  {
+    key: 'TIMES_ASC',
+    label: 'Total Prescribed: Least to Most (Least Prescribed)',
+    badgeText: '❄️ Least Prescribed',
+    category: 'Prescription Volume',
+    description: 'Zero prescribed & lowest volume prescribed medicines first'
+  },
+  {
+    key: 'EXPIRY_ASC',
+    label: 'Expiry: Expiring Soonest First (Early Expiry)',
+    badgeText: '⚠️ Soonest Expiry',
+    category: 'Expiry Date',
+    description: 'Medicines nearest to expiry or already expired first'
+  },
+  {
+    key: 'EXPIRY_DESC',
+    label: 'Expiry: Expiring Furthest First (Latest Expiry)',
+    badgeText: '📅 Latest Expiry',
+    category: 'Expiry Date',
+    description: 'Medicines with longest remaining shelf life first'
+  }
+];
+
+const getPrescriptionStats = (item) => {
+  if (item && item.total_prescribed_qty !== undefined && item.last_prescribed_date !== undefined) {
+    return {
+      total_prescribed_qty: parseFloat(item.total_prescribed_qty) || 0,
+      last_prescribed_date: item.last_prescribed_date || null
+    };
+  }
+  const byId = precalculatedStats?.stats_by_id?.[item?.id];
+  if (byId) {
+    return {
+      total_prescribed_qty: byId.total_prescribed_qty || 0,
+      last_prescribed_date: byId.last_prescribed_date || null
+    };
+  }
+  const cleanName = (item?.medicine_name || '').trim().toLowerCase();
+  const byName = precalculatedStats?.stats_by_name?.[cleanName];
+  if (byName) {
+    return {
+      total_prescribed_qty: byName.total_prescribed_qty || 0,
+      last_prescribed_date: byName.last_prescribed_date || null
+    };
+  }
+  return { total_prescribed_qty: 0, last_prescribed_date: null };
+};
+
+const parseExpiryTimestamp = (expiryStr) => {
+  if (!expiryStr || !expiryStr.trim()) return Infinity;
+  const clean = expiryStr.trim();
+  const parts = clean.split(/[\/\-\.]/);
+  if (parts.length >= 2) {
+    let month = parseInt(parts[0], 10) || 1;
+    let year = parseInt(parts[1], 10);
+    if (year < 100) year += 2000;
+    return new Date(year, month, 0).getTime();
+  }
+  const parsed = Date.parse(clean);
+  return isNaN(parsed) ? Infinity : parsed;
+};
+
+const parsePrescribedTimestamp = (dateStr) => {
+  if (!dateStr || !dateStr.trim()) return 0;
+  try {
+    const d = new Date(dateStr.replace(' ', 'T'));
+    const t = d.getTime();
+    return isNaN(t) ? 0 : t;
+  } catch {
+    return 0;
+  }
+};
+
+const formatLastPrescribed = (dateStr) => {
+  if (!dateStr) return 'Never';
+  try {
+    const d = new Date(dateStr.replace(' ', 'T'));
+    if (isNaN(d.getTime())) return dateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays > 1 && diffDays < 30) return `${diffDays}d ago`;
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+  } catch {
+    return dateStr;
+  }
+};
 
 function InventoryManagementScreenContent({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [inventory, setInventory] = useState([]);
   const [searchQ, setSearchQ] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('ALL');
+  const [selectedSort, setSelectedSort] = useState('ALPHA_ASC');
+  const [isSortModalVisible, setIsSortModalVisible] = useState(false);
   const [brandOverrides, setBrandOverrides] = useState({});
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [userRole, setUserRole] = useState('');
@@ -598,20 +743,97 @@ Do you want to proceed?`,
 
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
-  const filteredInventory = inventory.filter(item => {
-    const itemBrand = (item.company || resolveItemBrand(item.medicine_name, item.company) || 'Other').trim();
-    if (selectedBrandFilter !== 'ALL' && itemBrand !== selectedBrandFilter) {
-      return false;
-    }
-    if (!searchQ.trim()) return true;
-    const q = searchQ.toLowerCase().trim();
-    return (
-      (item.medicine_name || '').toLowerCase().includes(q) ||
-      itemBrand.toLowerCase().includes(q) ||
-      (item.batch_number || '').toLowerCase().includes(q) ||
-      (item.expiry_date || '').toLowerCase().includes(q)
-    );
-  });
+  const filteredAndSortedInventory = useMemo(() => {
+    const filtered = inventory.filter(item => {
+      const itemBrand = (item.company || resolveItemBrand(item.medicine_name, item.company) || 'Other').trim();
+      if (selectedBrandFilter !== 'ALL' && itemBrand !== selectedBrandFilter) {
+        return false;
+      }
+      if (!searchQ.trim()) return true;
+      const q = searchQ.toLowerCase().trim();
+      return (
+        (item.medicine_name || '').toLowerCase().includes(q) ||
+        itemBrand.toLowerCase().includes(q) ||
+        (item.batch_number || '').toLowerCase().includes(q) ||
+        (item.expiry_date || '').toLowerCase().includes(q)
+      );
+    });
+
+    return filtered.slice().sort((a, b) => {
+      const statsA = getPrescriptionStats(a);
+      const statsB = getPrescriptionStats(b);
+
+      switch (selectedSort) {
+        case 'ALPHA_ASC':
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        case 'ALPHA_DESC':
+          return (b.medicine_name || '').localeCompare(a.medicine_name || '');
+
+        case 'PRESCRIBED_LONGEST': {
+          // Longest back prescribed first: never prescribed or oldest date first
+          const timeA = parsePrescribedTimestamp(statsA.last_prescribed_date);
+          const timeB = parsePrescribedTimestamp(statsB.last_prescribed_date);
+          if (timeA !== timeB) return timeA - timeB;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'PRESCRIBED_RECENT': {
+          // Recently prescribed first: newest date first, never prescribed at end
+          const timeA = parsePrescribedTimestamp(statsA.last_prescribed_date);
+          const timeB = parsePrescribedTimestamp(statsB.last_prescribed_date);
+          if (timeA !== timeB) return timeB - timeA;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'QTY_ASC': {
+          const qtyA = parseFloat(a.quantity) || 0;
+          const qtyB = parseFloat(b.quantity) || 0;
+          if (qtyA !== qtyB) return qtyA - qtyB;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'QTY_DESC': {
+          const qtyA = parseFloat(a.quantity) || 0;
+          const qtyB = parseFloat(b.quantity) || 0;
+          if (qtyA !== qtyB) return qtyB - qtyA;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'TIMES_ASC': {
+          const qA = statsA.total_prescribed_qty;
+          const qB = statsB.total_prescribed_qty;
+          if (qA !== qB) return qA - qB;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'TIMES_DESC': {
+          const qA = statsA.total_prescribed_qty;
+          const qB = statsB.total_prescribed_qty;
+          if (qA !== qB) return qB - qA;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'EXPIRY_ASC': {
+          const expA = parseExpiryTimestamp(a.expiry_date);
+          const expB = parseExpiryTimestamp(b.expiry_date);
+          if (expA !== expB) return expA - expB;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        case 'EXPIRY_DESC': {
+          const expA = parseExpiryTimestamp(a.expiry_date);
+          const expB = parseExpiryTimestamp(b.expiry_date);
+          if (expA === Infinity && expB !== Infinity) return 1;
+          if (expB === Infinity && expA !== Infinity) return -1;
+          if (expA !== expB) return expB - expA;
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+        }
+
+        default:
+          return (a.medicine_name || '').localeCompare(b.medicine_name || '');
+      }
+    });
+  }, [inventory, selectedBrandFilter, searchQ, selectedSort, brandOverrides]);
 
   const isAdmin = userRole === 'ADMIN' || userRole === 'DOCTOR';
 
@@ -632,7 +854,7 @@ Do you want to proceed?`,
       }
     });
 
-    filteredInventory.forEach(item => {
+    filteredAndSortedInventory.forEach(item => {
       const qty = Number(item.quantity) || 0;
       const mrp = Number(item.mrp) || 0;
       if (qty > 0) {
@@ -714,6 +936,67 @@ Do you want to proceed?`,
         </ScrollView>
       </View>
 
+      {/* SORTING CONTROLS BAR */}
+      <View style={{ backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#5C0B0B',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 8
+            }}
+            onPress={() => setIsSortModalVisible(true)}
+          >
+            <Ionicons name="swap-vertical" size={15} color="#fff" style={{ marginRight: 5 }} />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+              Sort: {SORT_OPTIONS.find(s => s.key === selectedSort)?.badgeText || '🔤 A → Z'}
+            </Text>
+            <Ionicons name="chevron-down" size={13} color="#fff" style={{ marginLeft: 4 }} />
+          </TouchableOpacity>
+
+          <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '500' }}>
+            {filteredAndSortedInventory.length} item{filteredAndSortedInventory.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+
+        {/* Quick Sort Switch Chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+          {SORT_OPTIONS.map(opt => {
+            const isSelected = selectedSort === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 14,
+                    backgroundColor: '#f8fafc',
+                    marginRight: 6,
+                    borderWidth: 1,
+                    borderColor: '#e2e8f0'
+                  },
+                  isSelected && { backgroundColor: '#fdf2f2', borderColor: '#5C0B0B' }
+                ]}
+                onPress={() => setSelectedSort(opt.key)}
+              >
+                <Text style={[
+                  { fontSize: 11, color: '#475569', fontWeight: '600' },
+                  isSelected && { color: '#5C0B0B', fontWeight: 'bold' }
+                ]}>
+                  {opt.badgeText}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       {/* ADMIN ONLY: TOTAL IN-STOCK MRP VALUE CARD */}
       {isAdmin && (
         <View style={styles.adminValuationCard}>
@@ -754,7 +1037,9 @@ Do you want to proceed?`,
 
       {loading ? <ActivityIndicator size="large" color="#5C0B0B" style={{marginTop: 50}} /> : (
         <ScrollView style={styles.scrollContent}>
-          {filteredInventory.map(item => (
+          {filteredAndSortedInventory.map(item => {
+            const stats = getPrescriptionStats(item);
+            return (
             <TouchableOpacity
               key={item.id}
               activeOpacity={0.85}
@@ -799,6 +1084,15 @@ Do you want to proceed?`,
                   <Text style={styles.itemDetail}>Stock: <Text style={{fontWeight:'bold', color: item.quantity > 5 ? '#10b981' : (item.quantity === 0 ? '#b91c1c' : '#f59e0b')}}>{item.quantity} {item.unit || 'units'}</Text></Text>
                   <Text style={styles.itemDetail}>MRP: <Text style={{fontWeight: 'bold', color: '#111827'}}>₹{item.mrp}</Text></Text>
                 </View>
+                {/* PRESCRIPTION STATS & RECENCY ROW */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 5, backgroundColor: '#f8fafc', paddingHorizontal: 8, paddingVertical: 4.5, borderRadius: 6, borderWidth: 1, borderColor: '#f1f5f9' }}>
+                  <Text style={{ fontSize: 11, color: stats.total_prescribed_qty > 0 ? '#0f766e' : '#64748b', fontWeight: '600' }}>
+                    💊 Prescribed: <Text style={{ fontWeight: 'bold', color: stats.total_prescribed_qty > 0 ? '#0f766e' : '#334155' }}>{stats.total_prescribed_qty} units</Text>
+                  </Text>
+                  <Text style={{ fontSize: 11, color: stats.last_prescribed_date ? '#1d4ed8' : '#94a3b8', fontWeight: '500' }}>
+                    🕒 {stats.last_prescribed_date ? `Last: ${formatLastPrescribed(stats.last_prescribed_date)}` : 'Never prescribed'}
+                  </Text>
+                </View>
                 {item.default_instructions ? (
                   <View style={styles.instrBadgeRow}>
                     {item.default_instructions.split(',').map((i, idx) => (
@@ -827,8 +1121,9 @@ Do you want to proceed?`,
                 )}
               </View>
             </TouchableOpacity>
-          ))}
-          {filteredInventory.length === 0 && <Text style={{textAlign: 'center', marginTop: 50, color: '#6b7280', fontSize: 16}}>No matching stock found.</Text>}
+            );
+          })}
+          {filteredAndSortedInventory.length === 0 && <Text style={{textAlign: 'center', marginTop: 50, color: '#6b7280', fontSize: 16}}>No matching stock found.</Text>}
         </ScrollView>
       )}
 
@@ -1702,6 +1997,91 @@ Do you want to proceed?`,
               </View>
             </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* 5. SORT SELECTION MODAL */}
+      <Modal
+        visible={isSortModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsSortModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#5C0B0B' }}>
+                  ↕️ Sort Medicines List
+                </Text>
+                <Text style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                  Tap any option to sort ({filteredAndSortedInventory.length} items)
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsSortModalVisible(false)} style={styles.modalTopCloseBtn}>
+                <Text style={styles.modalTopCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ marginTop: 8 }} showsVerticalScrollIndicator={false}>
+              {SORT_OPTIONS.map((opt) => {
+                const isSelected = selectedSort === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    activeOpacity={0.7}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      borderRadius: 8,
+                      marginBottom: 8,
+                      backgroundColor: isSelected ? '#fdf2f2' : '#f8fafc',
+                      borderWidth: 1.5,
+                      borderColor: isSelected ? '#5C0B0B' : '#e2e8f0'
+                    }}
+                    onPress={() => {
+                      setSelectedSort(opt.key);
+                      setIsSortModalVisible(false);
+                    }}
+                  >
+                    <View style={{ marginRight: 10 }}>
+                      <Ionicons
+                        name={isSelected ? "radio-button-on" : "radio-button-off"}
+                        size={20}
+                        color={isSelected ? "#5C0B0B" : "#94a3b8"}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text style={{
+                          fontSize: 13,
+                          fontWeight: isSelected ? 'bold' : '600',
+                          color: isSelected ? '#5C0B0B' : '#1e293b'
+                        }}>
+                          {opt.label}
+                        </Text>
+                        <View style={{
+                          backgroundColor: isSelected ? '#fee2e2' : '#e2e8f0',
+                          paddingHorizontal: 6,
+                          paddingVertical: 1.5,
+                          borderRadius: 4
+                        }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: isSelected ? '#991b1b' : '#475569' }}>
+                            {opt.category}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#64748b' }}>
+                        {opt.description}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
         </View>
       </Modal>
 
