@@ -2014,6 +2014,221 @@ app.delete('/api/visits/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Helper: Check if a date string/timestamp is from "Today" in Indian Standard Time (IST)
+function isTodayIST(dateInput) {
+  if (!dateInput) return false;
+  try {
+    const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' };
+    const todayStr = new Intl.DateTimeFormat('en-CA', options).format(new Date()); // YYYY-MM-DD
+    
+    let targetDate;
+    if (typeof dateInput === 'string' && dateInput.includes('T')) {
+      targetDate = new Date(dateInput);
+    } else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+      targetDate = new Date(dateInput.substring(0, 10) + 'T12:00:00+05:30');
+    } else {
+      targetDate = new Date(dateInput);
+    }
+    
+    if (isNaN(targetDate.getTime())) return false;
+    const targetStr = new Intl.DateTimeFormat('en-CA', options).format(targetDate);
+    return todayStr === targetStr;
+  } catch (e) {
+    return false;
+  }
+}
+
+// GET /api/visits/:id/details - Fetch full bill breakdown for editing with role permission check
+app.get('/api/visits/:id/details', authenticateToken, async (req, res) => {
+  const visitId = parseInt(req.params.id, 10);
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  try {
+    const visit = await db.getAsync(`
+      SELECT v.*, p.first_name, p.last_name, p.mobile, p.skinssence_id
+      FROM visits v
+      LEFT JOIN patients p ON v.patient_id = p.id
+      WHERE v.id = ?
+    `, [visitId]);
+
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    const procs = await db.allAsync('SELECT * FROM procedures WHERE visit_id = ? ORDER BY id ASC', [visitId]);
+    const meds = await db.allAsync('SELECT * FROM medicines WHERE visit_id = ? ORDER BY id ASC', [visitId]);
+    const payments = await db.allAsync('SELECT * FROM payments WHERE visit_id = ? ORDER BY id ASC', [visitId]);
+
+    // Check edit permission for current user:
+    // - Doctor/Admin: Can edit ANY bill (today or previous days)
+    // - Staff: Can ONLY edit today's bills
+    const role = (req.user?.role || '').toUpperCase();
+    const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
+    const isToday = isTodayIST(visit.visit_date || visit.created_at);
+    const canEdit = isPrivileged || isToday;
+
+    res.json({
+      visit,
+      patient: {
+        id: visit.patient_id,
+        name: `${visit.first_name || ''} ${visit.last_name || ''}`.trim(),
+        mobile: visit.mobile,
+        skinssence_id: visit.skinssence_id
+      },
+      procedures: procs || [],
+      medicines: meds || [],
+      payments: payments || [],
+      canEdit,
+      isToday,
+      userRole: role,
+      restrictionReason: !canEdit ? "Staff can only edit today's bills. Previous days' bills can only be edited by Doctor or Admin." : null
+    });
+  } catch (err) {
+    console.error('Error fetching visit details:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/visits/:id - Edit prepared bill (procedures, fee, discount, payment)
+app.put('/api/visits/:id', authenticateToken, async (req, res) => {
+  const visitId = parseInt(req.params.id, 10);
+  if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
+
+  const role = (req.user?.role || '').toUpperCase();
+  const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
+
+  try {
+    const existingVisit = await db.getAsync('SELECT * FROM visits WHERE id = ?', [visitId]);
+    if (!existingVisit) return res.status(404).json({ error: 'Visit not found' });
+
+    // Date restriction check for Staff
+    const visitDate = existingVisit.visit_date || existingVisit.created_at;
+    const isToday = isTodayIST(visitDate);
+
+    if (!isPrivileged && !isToday) {
+      return res.status(403).json({
+        error: "Permission denied: Staff can only edit today's bills. Previous days' bills can only be edited by Doctor or Admin."
+      });
+    }
+
+    const {
+      consultation_fee,
+      procedures = [],
+      discount_type = 'NONE',
+      discount_value = 0,
+      discount_amount: reqDiscountAmount,
+      planned_procedures,
+      payment_mode = 'CASH',
+      amount_received,
+      reason = 'Bill edited by user'
+    } = req.body;
+
+    // Calculate procedure total
+    const procTotal = (procedures || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+    // Calculate medicine total (preserve existing medicines)
+    const existingMeds = await db.allAsync('SELECT amount FROM medicines WHERE visit_id = ?', [visitId]);
+    const medTotal = (existingMeds || []).reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+
+    const cFee = parseFloat(consultation_fee) || 0;
+    const subtotal = cFee + procTotal + medTotal;
+
+    // Discount calculation
+    const dType = (discount_type || 'NONE').toUpperCase();
+    const dVal = parseFloat(discount_value) || 0;
+    let finalDiscountAmount = 0;
+    if (dType === 'PERCENTAGE') {
+      finalDiscountAmount = Math.round((subtotal * Math.min(100, Math.max(0, dVal))) / 100);
+    } else if (dType === 'FLAT' || dType === 'FIXED') {
+      finalDiscountAmount = Math.min(subtotal, Math.max(0, dVal));
+    } else if (reqDiscountAmount !== undefined && reqDiscountAmount !== null) {
+      finalDiscountAmount = Math.min(subtotal, Math.max(0, parseFloat(reqDiscountAmount) || 0));
+    }
+
+    const netPayable = Math.max(0, subtotal - finalDiscountAmount);
+    const finalPayment = (amount_received !== undefined && amount_received !== null)
+      ? parseFloat(amount_received)
+      : netPayable;
+
+    await db.withTransaction(async (tx) => {
+      // 1. Update visit details
+      await tx.run(`
+        UPDATE visits 
+        SET consultation_fee = ?,
+            subtotal = ?,
+            discount_type = ?,
+            discount_value = ?,
+            discount_amount = ?,
+            net_payable = ?,
+            planned_procedures = ?
+        WHERE id = ?
+      `, [
+        cFee,
+        subtotal,
+        dType,
+        dVal,
+        finalDiscountAmount,
+        netPayable,
+        planned_procedures !== undefined ? planned_procedures : existingVisit.planned_procedures,
+        visitId
+      ]);
+
+      // 2. Replace procedures list
+      await tx.run('DELETE FROM procedures WHERE visit_id = ?', [visitId]);
+      for (const p of procedures) {
+        if (!p.name || !p.name.trim()) continue;
+        await tx.run(`
+          INSERT INTO procedures (visit_id, name, amount, notes, area, procedure_id)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          visitId,
+          p.name.trim(),
+          parseFloat(p.amount) || 0,
+          p.notes ? p.notes.trim() : '',
+          p.area ? p.area.trim() : '',
+          p.procedure_id || null
+        ]);
+      }
+
+      // 3. Update payment
+      const existingPay = await tx.get('SELECT id FROM payments WHERE visit_id = ? ORDER BY id ASC LIMIT 1', [visitId]);
+      if (existingPay) {
+        await tx.run(`
+          UPDATE payments
+          SET mode = ?, amount_received = ?
+          WHERE id = ?
+        `, [payment_mode, finalPayment, existingPay.id]);
+      } else if (finalPayment > 0) {
+        await tx.run(`
+          INSERT INTO payments (visit_id, mode, amount_received, payment_date, patient_id, purpose)
+          VALUES (?, ?, ?, ?, ?, 'VISIT')
+        `, [visitId, payment_mode, finalPayment, visitDate, existingVisit.patient_id]);
+      }
+    });
+
+    writeAudit(
+      req.user,
+      'EDIT_BILL',
+      'VISITS',
+      visitId,
+      { consultation_fee: existingVisit.consultation_fee, subtotal: existingVisit.subtotal, net_payable: existingVisit.net_payable },
+      { consultation_fee: cFee, subtotal, net_payable: netPayable, procCount: (procedures || []).length },
+      reason
+    );
+
+    res.json({
+      message: 'Bill updated successfully!',
+      visit_id: visitId,
+      subtotal,
+      discount_amount: finalDiscountAmount,
+      net_payable: netPayable,
+      amount_received: finalPayment
+    });
+
+  } catch (err) {
+    console.error('Error updating bill:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/pharmacy/sell', authenticateToken, idempotencyMiddleware, (req, res) => {
   const { 
     patient_id, 

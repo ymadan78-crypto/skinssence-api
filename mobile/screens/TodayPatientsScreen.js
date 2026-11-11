@@ -4,7 +4,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import { Linking, Alert } from 'react-native';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
+import EditBillModal from '../components/EditBillModal';
+import { sendFeedbackRequestWhatsApp } from '../utils/whatsappHelper';
 import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 export default function TodayPatientsScreen({ navigation }) {
@@ -14,6 +17,8 @@ export default function TodayPatientsScreen({ navigation }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [correctingVisitId, setCorrectingVisitId] = useState(null);
   const [correctionModalVisible, setCorrectionModalVisible] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState(null);
+  const [editBillModalVisible, setEditBillModalVisible] = useState(false);
   const [reminderModalVisible, setReminderModalVisible] = useState(false);
   const [selectedFollowupPatient, setSelectedFollowupPatient] = useState(null);
 
@@ -251,9 +256,53 @@ export default function TodayPatientsScreen({ navigation }) {
           </View>
         )}
 
-        {/* PAYMENT EDIT BUTTON FOR PHARMACY / VISIT */}
+        {/* BILL ACTIONS: EDIT BILL, FEEDBACK, QUICK PAYMENT MODE */}
         {item.visit_id ? (
-          <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
+          <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 }}>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#fef3c7',
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: '#fcd34d'
+              }}
+              onPress={() => {
+                setEditingVisitId(item.visit_id);
+                setEditBillModalVisible(true);
+              }}
+            >
+              <Ionicons name="pencil" size={13} color="#b45309" style={{ marginRight: 4 }} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#b45309' }}>
+                ✏️ Edit Bill
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#e0e7ff',
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: '#c7d2fe'
+              }}
+              onPress={() => {
+                const pName = item.patient_name || (item.first_name ? (item.first_name + ' ' + (item.last_name || '')) : 'Patient');
+                sendFeedbackRequestWhatsApp(item.mobile, pName, Linking, Alert);
+              }}
+            >
+              <Ionicons name="star" size={13} color="#4338ca" style={{ marginRight: 4 }} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338ca' }}>
+                ⭐ Feedback
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={{
                 flexDirection: 'row',
@@ -272,7 +321,7 @@ export default function TodayPatientsScreen({ navigation }) {
             >
               <Ionicons name="create-outline" size={13} color="#1d4ed8" style={{ marginRight: 4 }} />
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#1d4ed8' }}>
-                Edit Payment Mode (Cash ↔ UPI)
+                Cash ↔ UPI
               </Text>
             </TouchableOpacity>
           </View>
@@ -397,6 +446,16 @@ export default function TodayPatientsScreen({ navigation }) {
           }
         />
       )}
+
+      <EditBillModal
+        visible={editBillModalVisible}
+        visitId={editingVisitId}
+        onClose={() => {
+          setEditBillModalVisible(false);
+          setEditingVisitId(null);
+        }}
+        onUpdated={fetchTodayVisits}
+      />
 
       <PharmacyCorrectionModal
         visible={correctionModalVisible}

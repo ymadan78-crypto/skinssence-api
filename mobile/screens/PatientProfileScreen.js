@@ -6,6 +6,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
+import EditBillModal from '../components/EditBillModal';
+import { sendFeedbackRequestWhatsApp } from '../utils/whatsappHelper';
 import { renameBillPdfAsync, formatSkinssenceBillFilename } from '../utils/billNaming';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,6 +65,8 @@ function PatientProfileScreenContent({ route, navigation }) {
   }, [patient, patientId, route?.params?.patientId, fetchPatientDetails]);
   const [correctionModalVisible, setCorrectionModalVisible] = useState(false);
   const [correctingVisitId, setCorrectingVisitId] = useState(null);
+  const [editBillModalVisible, setEditBillModalVisible] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState(null);
   const isSharingBillRef = useRef(false);
 
   // Wallet Modal
@@ -1120,6 +1124,19 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                 </TouchableOpacity>
               </View>
 
+              {/* ACTION BUTTONS ROW: Request Google Feedback */}
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 10}}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, {flex: 1, backgroundColor: '#1e40af', marginTop: 0}]}
+                  onPress={() => {
+                    const pName = ((patient && patient.first_name) ? (patient.first_name + ' ' + (patient.last_name || '')) : (patient ? patient.name : 'Patient')).trim();
+                    sendFeedbackRequestWhatsApp(patient && patient.mobile, pName, Linking, Alert);
+                  }}
+                >
+                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>⭐ Request Google Feedback (WhatsApp)</Text>
+                </TouchableOpacity>
+              </View>
+
               {/* ACTION BUTTONS ROW 3: Pre-Bridal Treatment Planner */}
               <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 10}}>
                 <TouchableOpacity
@@ -1380,6 +1397,24 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                     <View style={{flexDirection: 'row', marginTop: 12, gap: 8, flexWrap: 'wrap'}}>
                       <TouchableOpacity style={[styles.receiptBtn, {flex: 1.2, minWidth: 140, marginTop: 0}]} onPress={() => handleGenerateBill(visit)}>
                         <Text style={styles.receiptBtnText}>🖨️ Generate Bill</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.receiptBtn, {backgroundColor: '#b45309', flex: 1, minWidth: 105, marginTop: 0}]} 
+                        onPress={() => {
+                          setEditingVisitId(visit.visit_id);
+                          setEditBillModalVisible(true);
+                        }}>
+                        <Text style={styles.receiptBtnText}>✏️ Edit Bill</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.receiptBtn, {backgroundColor: '#4338ca', flex: 1, minWidth: 110, marginTop: 0}]} 
+                        onPress={() => {
+                          const pName = ((patient && patient.first_name) ? (patient.first_name + ' ' + (patient.last_name || '')) : (patient ? patient.name : 'Patient')).trim();
+                          sendFeedbackRequestWhatsApp(patient && patient.mobile, pName, Linking, Alert);
+                        }}>
+                        <Text style={styles.receiptBtnText}>⭐ Feedback</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity 
@@ -1736,6 +1771,21 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       </Modal>
 
       {/* PHARMACY TRANSACTION CORRECTION MODAL */}
+      <EditBillModal
+        visible={editBillModalVisible}
+        visitId={editingVisitId}
+        onClose={() => {
+          setEditBillModalVisible(false);
+          setEditingVisitId(null);
+        }}
+        onUpdated={() => {
+          fetchHistory();
+          if (patient && (patient.id || patientId)) {
+            fetchPatientDetails(patient.id || patientId);
+          }
+        }}
+      />
+
       <PharmacyCorrectionModal
         visible={correctionModalVisible}
         visitId={correctingVisitId}

@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
+import EditBillModal from '../components/EditBillModal';
 
 function DailyDiaryScreenContent({ navigation, route }) {
   // Helper to format Date to YYYY-MM-DD
@@ -238,16 +239,29 @@ function DailyDiaryScreenContent({ navigation, route }) {
           ) : <View />}
 
           {item.visit_id ? (
-            <TouchableOpacity
-              style={styles.correctActionBtn}
-              onPress={() => {
-                setCorrectingVisitId(item.visit_id);
-                setCorrectionModalVisible(true);
-              }}
-            >
-              <Ionicons name="build-outline" size={13} color="#5C0B0B" style={{ marginRight: 4 }} />
-              <Text style={styles.correctActionBtnText}>Edit / Correct Sale</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              <TouchableOpacity
+                style={[styles.correctActionBtn, { backgroundColor: '#fef3c7', borderColor: '#fcd34d' }]}
+                onPress={() => {
+                  setEditingVisitId(item.visit_id);
+                  setEditBillModalVisible(true);
+                }}
+              >
+                <Ionicons name="pencil" size={13} color="#b45309" style={{ marginRight: 4 }} />
+                <Text style={[styles.correctActionBtnText, { color: '#b45309' }]}>✏️ Edit Bill</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.correctActionBtn}
+                onPress={() => {
+                  setCorrectingVisitId(item.visit_id);
+                  setCorrectionModalVisible(true);
+                }}
+              >
+                <Ionicons name="build-outline" size={13} color="#5C0B0B" style={{ marginRight: 4 }} />
+                <Text style={styles.correctActionBtnText}>Pharmacy / Refund</Text>
+              </TouchableOpacity>
+            </View>
           ) : null}
         </View>
       </TouchableOpacity>
@@ -475,6 +489,18 @@ function DailyDiaryScreenContent({ navigation, route }) {
       </Modal>
 
       {/* PHARMACY & SALE CORRECTION MODAL */}
+      <EditBillModal
+        visible={editBillModalVisible}
+        visitId={editingVisitId}
+        onClose={() => {
+          setEditBillModalVisible(false);
+          setEditingVisitId(null);
+        }}
+        onUpdated={() => {
+          fetchDiary(selectedDate);
+        }}
+      />
+
       <PharmacyCorrectionModal
         visible={correctionModalVisible}
         visitId={correctingVisitId}
