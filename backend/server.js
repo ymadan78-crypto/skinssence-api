@@ -75,6 +75,18 @@ app.use(cors({
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
+// Lightweight Ping & Health Check Endpoints (Zero-dependency, immediate 200 response)
+app.get(['/', '/ping', '/health', '/api/ping'], (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: 'Skinssence API is active and healthy',
+    app: 'skinssence-api',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 // Rate limiter for heavy Excel/database exports to prevent memory exhaustion
 const backupExportLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
