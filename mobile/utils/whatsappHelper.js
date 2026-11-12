@@ -96,3 +96,100 @@ export const sendFeedbackRequestWhatsApp = async (rawMobile, patientName, Linkin
     }
   }
 };
+
+/**
+ * Generates personalized Birthday greeting message for patients.
+ */
+export const generateBirthdayMessage = (patientName) => {
+  const name = (patientName && String(patientName).trim()) ? String(patientName).trim() : 'Patient';
+  return `Dear ${name}, 🎂✨
+
+Wishing you a very Happy Birthday from Dr. Ashima Madan and the entire team at Skinssence Laser & Skincare Clinic! 🎉💐
+
+May your year ahead be blessed with radiant health, joy, and glowing skin! Whenever you would like to treat yourself for your special occasion, we are always here for you.
+
+Warmest regards,
+Dr. Ashima Madan & Team Skinssence
+Talwandi, Kota 📍`;
+};
+
+/**
+ * Opens WhatsApp with the Birthday greeting message.
+ */
+export const sendBirthdayWhatsApp = async (rawMobile, patientName, Linking, Alert) => {
+  const name = (patientName && String(patientName).trim()) ? String(patientName).trim() : 'Patient';
+  const message = generateBirthdayMessage(name);
+  const encodedMsg = encodeURIComponent(message);
+  const cleanMobile = rawMobile ? String(rawMobile).replace(/\D/g, '').slice(-10) : '';
+
+  if (cleanMobile && cleanMobile.length === 10) {
+    const nativeUrl = `whatsapp://send?phone=91${cleanMobile}&text=${encodedMsg}`;
+    const webUrl = `https://wa.me/91${cleanMobile}?text=${encodedMsg}`;
+    try {
+      const supported = await Linking.canOpenURL(nativeUrl);
+      if (supported) {
+        await Linking.openURL(nativeUrl);
+      } else {
+        await Linking.openURL(webUrl);
+      }
+    } catch (e) {
+      await Linking.openURL(webUrl);
+    }
+  } else {
+    const nativeUrl = `whatsapp://send?text=${encodedMsg}`;
+    try {
+      await Linking.openURL(nativeUrl);
+    } catch (e) {
+      if (Alert) Alert.alert('Error', 'Unable to launch WhatsApp on this device.');
+    }
+  }
+};
+
+/**
+ * Generates follow-up reminder message for a patient who visited the clinic.
+ */
+export const generateStaffFollowupMessage = (patientName, procedures) => {
+  const name = (patientName && String(patientName).trim()) ? String(patientName).trim() : 'Patient';
+  const procText = (procedures && String(procedures).trim()) ? ` after your ${procedures} treatment` : '';
+  return `Hello ${name},
+
+This is a gentle follow-up from Skinssence Laser & Skincare Clinic regarding your recent visit${procText} with Dr. Ashima Madan.
+
+We hope you are doing well and feeling great! If you need to schedule your next follow-up session or have any questions about your post-care, please reply to this message or call us.
+
+Skinssence Laser & Skincare Clinic
+Talwandi, Kota
+📞 +91 95091 97578`;
+};
+
+/**
+ * Opens WhatsApp with staff follow-up reminder message.
+ */
+export const sendFollowupWhatsApp = async (rawMobile, patientName, procedures, Linking, Alert) => {
+  const name = (patientName && String(patientName).trim()) ? String(patientName).trim() : 'Patient';
+  const message = generateStaffFollowupMessage(name, procedures);
+  const encodedMsg = encodeURIComponent(message);
+  const cleanMobile = rawMobile ? String(rawMobile).replace(/\D/g, '').slice(-10) : '';
+
+  if (cleanMobile && cleanMobile.length === 10) {
+    const nativeUrl = `whatsapp://send?phone=91${cleanMobile}&text=${encodedMsg}`;
+    const webUrl = `https://wa.me/91${cleanMobile}?text=${encodedMsg}`;
+    try {
+      const supported = await Linking.canOpenURL(nativeUrl);
+      if (supported) {
+        await Linking.openURL(nativeUrl);
+      } else {
+        await Linking.openURL(webUrl);
+      }
+    } catch (e) {
+      await Linking.openURL(webUrl);
+    }
+  } else {
+    const nativeUrl = `whatsapp://send?text=${encodedMsg}`;
+    try {
+      await Linking.openURL(nativeUrl);
+    } catch (e) {
+      if (Alert) Alert.alert('Error', 'Unable to launch WhatsApp on this device.');
+    }
+  }
+};

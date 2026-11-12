@@ -18,20 +18,30 @@ export default function StaffDashboard({ navigation }) {
   });
   const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
   const [pendingFollowupPatients, setPendingFollowupPatients] = useState([]);
+  const [birthdaysTodayCount, setBirthdaysTodayCount] = useState(0);
+  const [reviewsPendingCount, setReviewsPendingCount] = useState(0);
+  const [summarySubmitted, setSummarySubmitted] = useState(false);
+  const [initialModalTab, setInitialModalTab] = useState('followups');
   const [followupModalVisible, setFollowupModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [canSeeDailyDiary, setCanSeeDailyDiary] = useState(false);
   const [clinicQrStatus, setClinicQrStatus] = useState({ completed: true, count: 0 });
 
-  const checkHourlyReminder = async (count) => {
+  const checkHourlyReminder = async (fCount, bCount, rCount, isSummaryDone) => {
     try {
-      if (!count || count <= 0) return;
+      const now = new Date();
+      const istOffset = 5.5 * 60 * 60 * 1000;
+      const istHours = new Date(now.getTime() + istOffset).getUTCHours();
+      const isEvening = istHours >= 17; // after 5:00 PM IST
+
+      const hasTasks = (fCount > 0) || (bCount > 0) || (rCount > 0) || (isEvening && !isSummaryDone);
+      if (!hasTasks) return;
+
       const lastTime = await AsyncStorage.getItem('@last_followup_reminder_time');
-      const now = Date.now();
       const ONE_HOUR = 60 * 60 * 1000;
-      if (!lastTime || (now - parseInt(lastTime, 10)) >= ONE_HOUR) {
+      if (!lastTime || (Date.now() - parseInt(lastTime, 10)) >= ONE_HOUR) {
         setFollowupModalVisible(true);
-        await AsyncStorage.setItem('@last_followup_reminder_time', now.toString());
+        await AsyncStorage.setItem('@last_followup_reminder_time', Date.now().toString());
       }
     } catch (e) {
       console.log('Error checking hourly reminder', e);
@@ -94,11 +104,17 @@ export default function StaffDashboard({ navigation }) {
         });
         const pCount = todayRes.data.pending_followups_count || 0;
         const pList = todayRes.data.pending_followup_patients || [];
+        const bCount = todayRes.data.birthdays_today_count || 0;
+        const rCount = todayRes.data.reviews_pending_count || 0;
+        const sDone = !!todayRes.data.daily_summary_submitted;
+
         setPendingFollowupsCount(pCount);
         setPendingFollowupPatients(pList);
-        if (pCount > 0) {
-          checkHourlyReminder(pCount);
-        }
+        setBirthdaysTodayCount(bCount);
+        setReviewsPendingCount(rCount);
+        setSummarySubmitted(sDone);
+
+        checkHourlyReminder(pCount, bCount, rCount, sDone);
       }
     } catch (e) {
       console.log('Error loading staff dashboard', e);
@@ -187,22 +203,46 @@ export default function StaffDashboard({ navigation }) {
           </TouchableOpacity>
         )}
 
-        {/* PENDING FOLLOW-UP REMINDER BANNER */}
-        {pendingFollowupsCount > 0 && (
-          <TouchableOpacity 
-            style={styles.followupBanner}
-            onPress={() => setFollowupModalVisible(true)}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="calendar-outline" size={17} color="#334155" style={{ marginRight: 8 }} />
-                <Text style={styles.followupBannerTitle}>
-                  Follow-ups pending: <Text style={{ fontWeight: 'bold' }}>{pendingFollowupsCount}</Text>
-                </Text>
+        {/* STAFF DAILY OPERATIONS & REMINDERS HUB BANNER */}
+        <View style={styles.dailyHubCard}>
+          <View style={styles.dailyHubHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.hubIconCircle}>
+                <Ionicons name="clipboard-outline" size={16} color="#5C0B0B" />
               </View>
-              <Text style={styles.followupActionText}>Review ›</Text>
+              <Text style={styles.dailyHubTitle}>Daily Tasks & Reminders</Text>
             </View>
-          </TouchableOpacity>
-        )}
+            <TouchableOpacity onPress={() => { setInitialModalTab('followups'); setFollowupModalVisible(true); }}>
+              <Text style={styles.dailyHubOpenAll}>Open Hub ›</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.hubPillsRow}>
+            <TouchableOpacity 
+              style={[styles.hubPill, pendingFollowupsCount > 0 ? styles.hubPillAlert : styles.hubPillSuccess]}
+              onPress={() => { setInitialModalTab('followups'); setFollowupModalVisible(true); }}>
+              <Text style={styles.hubPillText}>📞 {pendingFollowupsCount} Follow-ups</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.hubPill, birthdaysTodayCount > 0 ? styles.hubPillGold : styles.hubPillMuted]}
+              onPress={() => { setInitialModalTab('birthdays'); setFollowupModalVisible(true); }}>
+              <Text style={styles.hubPillText}>🎂 {birthdaysTodayCount} Birthdays</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.hubPill, reviewsPendingCount > 0 ? styles.hubPillAlert : styles.hubPillSuccess]}
+              onPress={() => { setInitialModalTab('reviews'); setFollowupModalVisible(true); }}>
+              <Text style={styles.hubPillText}>⭐ {reviewsPendingCount} Reviews</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.hubPill, summarySubmitted ? styles.hubPillSuccess : styles.hubPillAlert]}
+              onPress={() => { setInitialModalTab('summary'); setFollowupModalVisible(true); }}>
+              <Text style={styles.hubPillText}>📝 {summarySubmitted ? 'Summary Done' : 'Summary Due'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* TOP STATS CARDS */}
         <View style={styles.statsRow}>
@@ -333,6 +373,7 @@ export default function StaffDashboard({ navigation }) {
         navigation={navigation}
         onUpdated={loadStaffData}
         initialPatients={pendingFollowupPatients}
+        initialTab={initialModalTab}
       />
     </View>
   );
@@ -350,6 +391,77 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
   headerSubtitle: { fontSize: 16, color: '#e2e8f0', marginTop: 5 },
+  dailyHubCard: {
+    backgroundColor: '#ffffff',
+    marginHorizontal: 20,
+    marginBottom: 15,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2
+  },
+  dailyHubHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10
+  },
+  hubIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#fef2f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8
+  },
+  dailyHubTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a'
+  },
+  dailyHubOpenAll: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5C0B0B'
+  },
+  hubPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6
+  },
+  hubPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1
+  },
+  hubPillAlert: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca'
+  },
+  hubPillSuccess: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0'
+  },
+  hubPillGold: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fde68a'
+  },
+  hubPillMuted: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0'
+  },
+  hubPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155'
+  },
   followupBanner: {
     backgroundColor: '#f8fafc',
     paddingVertical: 10,

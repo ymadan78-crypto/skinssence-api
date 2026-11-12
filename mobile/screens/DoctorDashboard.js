@@ -268,6 +268,9 @@ export default function DoctorDashboard({ navigation }) {
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('TodayPatients')}>
             <Text style={[styles.listText, { color: '#5C0B0B', fontWeight: 'bold' }]}>👥 Today's Visited Patients & Bills</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.listItem, { backgroundColor: '#f0fdf4', paddingHorizontal: 8, borderRadius: 8, marginVertical: 4 }]} onPress={() => setFollowupModalVisible(true)}>
+            <Text style={[styles.listText, { color: '#15803d', fontWeight: 'bold' }]}>📋 Staff Daily Operations & Reminders Hub</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.listItem} onPress={() => navigation.navigate('AllPatients')}>
             <Text style={styles.listText}>All Patients</Text>
           </TouchableOpacity>
