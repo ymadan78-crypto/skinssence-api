@@ -1774,6 +1774,8 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       <EditBillModal
         visible={editBillModalVisible}
         visitId={editingVisitId}
+        initialVisit={history.find(h => h.visit_id === editingVisitId)}
+        initialPatient={patient}
         onClose={() => {
           setEditBillModalVisible(false);
           setEditingVisitId(null);

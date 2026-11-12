@@ -33,7 +33,7 @@ const QUICK_PROCEDURES = [
   { name: 'Tattoo Removal', defaultAmount: 2000 }
 ];
 
-export default function EditBillModal({ visible, visitId, onClose, onUpdated }) {
+export default function EditBillModal({ visible, visitId, initialVisit, initialPatient, onClose, onUpdated }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [billDetails, setBillDetails] = useState(null);
@@ -84,6 +84,34 @@ export default function EditBillModal({ visible, visitId, onClose, onUpdated }) 
   };
 
   const loadBillDetails = async () => {
+    if (typeof visitId === 'string' && visitId.startsWith('pkg_')) {
+      Alert.alert('Package Bill', 'Prepaid package entries can be reviewed and edited from the Packages section.');
+      onClose();
+      return;
+    }
+
+    // Pre-populate from initialVisit if available
+    if (initialVisit) {
+      const v = initialVisit;
+      setConsultationFee(v.consultation_fee !== null && v.consultation_fee !== undefined ? String(v.consultation_fee) : '0');
+      setPlannedProcedures(v.planned_procedures || '');
+      if (Array.isArray(v.procedures) && v.procedures.length > 0) {
+        setProcedures(v.procedures.map(p => ({
+          id: p.id || `temp_${Math.random()}`,
+          name: p.name || '',
+          amount: String(p.amount || 0),
+          area: p.area || '',
+          notes: p.notes || ''
+        })));
+      }
+      setDiscountType(v.discount_type || 'NONE');
+      setDiscountValue(v.discount_value !== null && v.discount_value !== undefined ? String(v.discount_value) : '0');
+      if (Array.isArray(v.payments) && v.payments.length > 0) {
+        setPaymentMode((v.payments[0].mode || 'CASH').toUpperCase());
+        setAmountReceived(String(v.payments[0].amount_received || v.net_payable || 0));
+      }
+    }
+
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -130,8 +158,15 @@ export default function EditBillModal({ visible, visitId, onClose, onUpdated }) 
       }
     } catch (err) {
       console.error('Error loading bill details:', err);
-      const errMsg = err.response?.data?.error || err.message || 'Failed to load bill details';
-      Alert.alert('Error', errMsg);
+      if (err.response?.status === 404) {
+        Alert.alert(
+          'Render Deployment Required',
+          'The backend on Render is still deploying the latest updates.\n\nPlease open your Render Dashboard (dashboard.render.com) -> skinssence-api -> click "Manual Deploy" -> "Deploy latest commit". Once live, bill editing will be fully operational.'
+        );
+      } else {
+        const errMsg = err.response?.data?.error || err.message || 'Failed to load bill details';
+        Alert.alert('Error', errMsg);
+      }
       onClose();
     } finally {
       setLoading(false);

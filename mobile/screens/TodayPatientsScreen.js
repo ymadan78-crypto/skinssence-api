@@ -450,6 +450,7 @@ export default function TodayPatientsScreen({ navigation }) {
       <EditBillModal
         visible={editBillModalVisible}
         visitId={editingVisitId}
+        initialVisit={visits.find(v => v.visit_id === editingVisitId)}
         onClose={() => {
           setEditBillModalVisible(false);
           setEditingVisitId(null);
