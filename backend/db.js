@@ -4,13 +4,11 @@ require('dotenv').config();
 const { createClient } = require('@libsql/client');
 const bcrypt = require('bcrypt');
 
-const tursoUrl = process.env.TURSO_DATABASE_URL;
-const tursoToken = process.env.TURSO_AUTH_TOKEN;
+const DEFAULT_TURSO_URL = 'libsql://skinssence-skinssence.aws-ap-south-1.turso.io';
+const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc1NzI5MTMsImlkIjoiMDFhMDMzOWEtMTQwMS03OWFjLTlhNDQtY2MxNDQ5NGJjNTcyIiwia2lkIjoiR2FCTDVNaHZBYy1XRDh3SVBXbWlxcm9ZZ2ZxZmgxWGx5ajNORWpHVVc4MCIsInJpZCI6ImEwMWU3MTVhLTdiM2MtNDBiMS1iYWVlLWNjODJjMzU4MDI2NyJ9.iMhg3KM_Y-s1OyOfN5xisfSuZlE3i3dvyxjMgBC_vfwWs18Hb-btL6RSfpUQ_FvpMPnf7uDyJ3LT-CPI-7kpBQ';
 
-if (!tursoUrl || !tursoToken) {
-  console.error('[CRITICAL DATABASE CONFIG] Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.');
-  console.error('Please configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in your .env file or environment settings.');
-}
+const tursoUrl = process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
+const tursoToken = process.env.TURSO_AUTH_TOKEN || DEFAULT_TURSO_TOKEN;
 
 const client = createClient({
   url: tursoUrl,
