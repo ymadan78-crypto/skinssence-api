@@ -1,4 +1,9 @@
-const { google } = require('googleapis');
+let google;
+try {
+  google = require('googleapis').google;
+} catch (e) {
+  console.warn('[GoogleContactsService] googleapis module optional/not available yet');
+}
 const path = require('path');
 const fs = require('fs');
 
@@ -20,6 +25,7 @@ class GoogleContactsService {
    * Initializes Google Auth client using available configuration in environment.
    */
   async getPeopleClient() {
+    if (!google) return null;
     if (this.peopleService) return this.peopleService;
 
     // Option A: Service Account via Key File or JSON string
