@@ -883,6 +883,34 @@ db.run(`CREATE TABLE IF NOT EXISTS treatment_plan_milestones (
 db.run(`CREATE INDEX IF NOT EXISTS idx_treatment_plans_patient ON treatment_plans(patient_id)`, () => {});
 db.run(`CREATE INDEX IF NOT EXISTS idx_treatment_plan_milestones_plan ON treatment_plan_milestones(plan_id)`, () => {});
 
+// Staff Daily Reports & Patient Review Requests Tables
+db.run(`CREATE TABLE IF NOT EXISTS patient_review_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    visit_id INTEGER,
+    staff_id INTEGER,
+    staff_name TEXT,
+    requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'SENT'
+)`, () => {});
+
+db.run(`CREATE TABLE IF NOT EXISTS staff_daily_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date TEXT NOT NULL,
+    staff_id INTEGER,
+    staff_name TEXT,
+    followup_calls_count INTEGER DEFAULT 0,
+    followup_whatsapp_count INTEGER DEFAULT 0,
+    birthday_messages_count INTEGER DEFAULT 0,
+    reviews_collected_count INTEGER DEFAULT 0,
+    total_visiting_patients INTEGER DEFAULT 0,
+    summary_notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`, () => {});
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_staff_daily_reports_date ON staff_daily_reports(report_date)`, () => {});
+db.run(`CREATE INDEX IF NOT EXISTS idx_patient_review_requests_pat ON patient_review_requests(patient_id)`, () => {});
+
 
 // Seed patient_s_number sequence from max existing patient ID if not yet seeded
 db.get(`
@@ -4337,6 +4365,73 @@ const getISTDate = () => {
   return new Date(now.getTime() + istOffset).toISOString().split('T')[0];
 };
 
+// Helper to parse DOB in various formats (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
+function parseDob(dobStr) {
+  if (!dobStr) return null;
+  const s = dobStr.trim();
+  let day, month, year;
+  if (s.includes('/')) {
+    const p = s.split('/');
+    if (p.length === 3) {
+      if (p[0].length === 4) { year = parseInt(p[0], 10); month = parseInt(p[1], 10); day = parseInt(p[2], 10); }
+      else { day = parseInt(p[0], 10); month = parseInt(p[1], 10); year = parseInt(p[2], 10); }
+    }
+  } else if (s.includes('-')) {
+    const p = s.split('-');
+    if (p.length === 3) {
+      if (p[0].length === 4) { year = parseInt(p[0], 10); month = parseInt(p[1], 10); day = parseInt(p[2], 10); }
+      else { day = parseInt(p[0], 10); month = parseInt(p[1], 10); year = parseInt(p[2], 10); }
+    }
+  }
+  if (!day || !month || isNaN(day) || isNaN(month) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { day, month, year };
+}
+
+// Helper to get patients having birthdays today and in upcoming days
+async function getUpcomingBirthdaysList(daysAhead = 3) {
+  try {
+    const rows = await db.allAsync("SELECT id, skinssence_id, first_name, last_name, mobile, dob FROM patients WHERE dob IS NOT NULL AND dob != ''");
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(now.getTime() + istOffset);
+    const currentMonth = istDate.getMonth() + 1;
+    const currentDay = istDate.getDate();
+    const currentYear = istDate.getFullYear();
+
+    const list = [];
+    rows.forEach(p => {
+      const parsed = parseDob(p.dob);
+      if (!parsed) return;
+      const bdayThisYear = new Date(currentYear, parsed.month - 1, parsed.day);
+      let diffDays = Math.round((bdayThisYear.setHours(0,0,0,0) - new Date(currentYear, currentMonth - 1, currentDay, 0,0,0,0).getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) {
+        const bdayNextYear = new Date(currentYear + 1, parsed.month - 1, parsed.day);
+        diffDays = Math.round((bdayNextYear.setHours(0,0,0,0) - new Date(currentYear, currentMonth - 1, currentDay, 0,0,0,0).getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      if (diffDays >= 0 && diffDays <= daysAhead) {
+        list.push({
+          id: p.id,
+          skinssence_id: p.skinssence_id,
+          name: `${p.first_name} ${p.last_name || ''}`.trim(),
+          mobile: p.mobile,
+          dob: p.dob,
+          is_today: diffDays === 0,
+          days_until: diffDays,
+          turning_age: parsed.year ? currentYear - parsed.year : null
+        });
+      }
+    });
+
+    list.sort((a, b) => a.days_until - b.days_until || a.name.localeCompare(b.name));
+    return list;
+  } catch (err) {
+    console.error('Error fetching upcoming birthdays:', err);
+    return [];
+  }
+}
+
 // Helper to normalize payment modes for reporting
 function normalizePaymentMode(rawMode) {
   if (!rawMode) return 'CASH';
@@ -5481,7 +5576,35 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
 
                   const adminTotalSale = cFeeTotal + procTotal + medTotal + redeemedPkgTotal;
 
-                  getPendingFollowupsData(today, (errF, fData) => {
+                  getPendingFollowupsData(today, async (errF, fData) => {
+                    let bdaysToday = 0;
+                    let bdaysUpcoming = 0;
+                    let summarySubmitted = false;
+                    let reviewsPending = 0;
+
+                    try {
+                      const bdays = await getUpcomingBirthdaysList(3);
+                      bdaysToday = bdays.filter(b => b.is_today).length;
+                      bdaysUpcoming = bdays.filter(b => !b.is_today).length;
+                    } catch (e) {}
+
+                    try {
+                      const sumRow = await db.getAsync('SELECT id FROM staff_daily_reports WHERE report_date = ? LIMIT 1', [today]);
+                      summarySubmitted = !!sumRow;
+                    } catch (e) {}
+
+                    try {
+                      const unreviewed = await db.getAsync(`
+                        SELECT COUNT(*) as cnt FROM visits v
+                        WHERE (date(v.visit_date) = ? OR v.visit_date LIKE ?)
+                          AND (v.planned_procedures IS NULL OR (v.planned_procedures NOT LIKE '%CANCEL%' AND v.planned_procedures NOT LIKE '%VOID%'))
+                          AND v.patient_id NOT IN (
+                            SELECT patient_id FROM patient_review_requests WHERE date(requested_at) = ? OR visit_id = v.id
+                          )
+                      `, [today, `${today}%`, today]);
+                      reviewsPending = unreviewed?.cnt || 0;
+                    } catch (e) {}
+
                     res.json({
                       patients: patRow?.patients || 0,
                       total_sale: adminTotalSale,
@@ -5499,7 +5622,11 @@ app.get('/api/dashboard/today', authenticateToken, (req, res) => {
                       clinic_qr_amount: colData?.clinic_qr_amount || 0,
                       clinic_qr_completed: !!colData?.clinic_qr_completed,
                       pending_followups_count: fData ? fData.pendingCount : 0,
-                      pending_followup_patients: fData ? fData.pendingPatients : []
+                      pending_followup_patients: fData ? fData.pendingPatients : [],
+                      birthdays_today_count: bdaysToday,
+                      birthdays_upcoming_count: bdaysUpcoming,
+                      reviews_pending_count: reviewsPending,
+                      daily_summary_submitted: summarySubmitted
                     });
                   });
                 });
@@ -5857,6 +5984,149 @@ app.post('/api/appointments/followup-not-required', authenticateToken, (req, res
       res.json({ success: true, message: 'Follow-up marked as not required' });
     }
   );
+});
+
+// --- STAFF DAILY OPERATIONS & REMINDERS HUB ---
+
+// 1. Fetch complete staff daily tasks (Followups, Birthdays, Visiting Patients Review Status, Day Summary)
+app.get('/api/staff/daily-tasks', authenticateToken, async (req, res) => {
+  try {
+    const dateStr = req.query.date || getISTDate();
+
+    // 1. Followups
+    const followupsData = await new Promise((resolve, reject) => {
+      getPendingFollowupsData(dateStr, (err, data) => {
+        if (err) return reject(err);
+        resolve(data);
+      });
+    });
+
+    // 2. Birthdays (next 3 days)
+    const birthdays = await getUpcomingBirthdaysList(3);
+
+    // 3. Visiting patients today with review status
+    const visitingPatients = await db.allAsync(`
+      SELECT v.id as visit_id, v.patient_id, v.visit_date, v.planned_procedures, v.net_payable,
+             p.skinssence_id, p.first_name, p.last_name, p.mobile,
+             (SELECT COUNT(*) FROM patient_review_requests prr WHERE prr.patient_id = p.id AND (date(prr.requested_at) = ? OR prr.visit_id = v.id)) as review_sent_count
+      FROM visits v
+      JOIN patients p ON v.patient_id = p.id
+      WHERE (date(v.visit_date) = ? OR v.visit_date LIKE ?)
+        AND (v.planned_procedures IS NULL OR (v.planned_procedures NOT LIKE '%CANCEL%' AND v.planned_procedures NOT LIKE '%VOID%'))
+      ORDER BY v.id DESC
+    `, [dateStr, dateStr, `${dateStr}%`]);
+
+    // 4. End-of-day summary status
+    const summaryRow = await db.getAsync(`
+      SELECT * FROM staff_daily_reports WHERE report_date = ? ORDER BY id DESC LIMIT 1
+    `, [dateStr]);
+
+    res.json({
+      date: dateStr,
+      followups: followupsData.pendingPatients || [],
+      totalVisited: followupsData.totalVisited || visitingPatients.length,
+      birthdays: birthdays,
+      birthdaysTodayCount: birthdays.filter(b => b.is_today).length,
+      birthdaysUpcomingCount: birthdays.filter(b => !b.is_today).length,
+      visitingPatients: visitingPatients.map(vp => ({
+        ...vp,
+        review_sent: (vp.review_sent_count || 0) > 0
+      })),
+      reviewsPendingCount: visitingPatients.filter(vp => (vp.review_sent_count || 0) === 0).length,
+      reviewsSentCount: visitingPatients.filter(vp => (vp.review_sent_count || 0) > 0).length,
+      dailySummarySubmitted: !!summaryRow,
+      lastSummary: summaryRow || null
+    });
+  } catch (err) {
+    console.error('Error fetching staff daily tasks:', err);
+    res.status(500).json({ error: 'Failed to fetch staff daily tasks' });
+  }
+});
+
+// 2. Track when a Google Review Request WhatsApp was sent to a patient
+app.post('/api/staff/review-requested', authenticateToken, async (req, res) => {
+  try {
+    const { patient_id, visit_id } = req.body;
+    if (!patient_id) return res.status(400).json({ error: 'patient_id is required' });
+    const staff_id = req.user?.id || null;
+    const staff_name = req.user?.username || req.user?.name || 'Staff';
+
+    await db.runAsync(`
+      INSERT INTO patient_review_requests (patient_id, visit_id, staff_id, staff_name)
+      VALUES (?, ?, ?, ?)
+    `, [patient_id, visit_id || null, staff_id, staff_name]);
+
+    res.json({ success: true, message: 'Review request tracked' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Submit End-of-Day Summary Report by Staff
+app.post('/api/staff/daily-summary', authenticateToken, async (req, res) => {
+  try {
+    const {
+      report_date,
+      followup_calls_count,
+      followup_whatsapp_count,
+      birthday_messages_count,
+      reviews_collected_count,
+      total_visiting_patients,
+      summary_notes
+    } = req.body;
+
+    const rDate = report_date || getISTDate();
+    const staff_id = req.user?.id || null;
+    const staff_name = req.user?.username || req.user?.name || 'Staff';
+
+    const result = await db.runAsync(`
+      INSERT INTO staff_daily_reports (
+        report_date, staff_id, staff_name,
+        followup_calls_count, followup_whatsapp_count,
+        birthday_messages_count, reviews_collected_count,
+        total_visiting_patients, summary_notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      rDate,
+      staff_id,
+      staff_name,
+      parseInt(followup_calls_count, 10) || 0,
+      parseInt(followup_whatsapp_count, 10) || 0,
+      parseInt(birthday_messages_count, 10) || 0,
+      parseInt(reviews_collected_count, 10) || 0,
+      parseInt(total_visiting_patients, 10) || 0,
+      summary_notes || ''
+    ]);
+
+    res.json({
+      success: true,
+      id: result?.lastID || null,
+      message: 'Daily summary report submitted successfully'
+    });
+  } catch (err) {
+    console.error('Error submitting staff daily summary:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Retrieve Staff Daily Summaries (Doctor / Admin review & Staff history)
+app.get('/api/staff/daily-summary', authenticateToken, async (req, res) => {
+  try {
+    const { date, limit = 30 } = req.query;
+    let rows;
+    if (date) {
+      rows = await db.allAsync(`
+        SELECT * FROM staff_daily_reports WHERE report_date = ? ORDER BY id DESC
+      `, [date]);
+    } else {
+      rows = await db.allAsync(`
+        SELECT * FROM staff_daily_reports ORDER BY id DESC LIMIT ?
+      `, [parseInt(limit, 10) || 30]);
+    }
+    res.json({ reports: rows || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- USER & HR MANAGEMENT (ADMIN ONLY) ---
