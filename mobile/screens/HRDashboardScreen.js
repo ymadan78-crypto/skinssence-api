@@ -16,7 +16,7 @@ export default function HRDashboardScreen({ navigation }) {
   const [salaryMonth, setSalaryMonth] = useState(new Date().toISOString().substring(0, 7)); // YYYY-MM
   const [salaryReport, setSalaryReport] = useState([]);
 
-  const API_URL = 'https://skinssence-api.onrender.com/api';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api';
 
   useEffect(() => {
     if (activeTab === 'attendance') fetchStaffForAttendance();

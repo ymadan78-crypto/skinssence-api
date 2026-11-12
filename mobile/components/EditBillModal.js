@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 
-const API_BASE_URL = 'https://skinssence-api.onrender.com';
+const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
 
 const QUICK_PROCEDURES = [
   { name: 'Hydrafacial', defaultAmount: 2500 },

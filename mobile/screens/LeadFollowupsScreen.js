@@ -16,7 +16,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 
-const API_BASE = 'https://skinssence-api.onrender.com/api/leads';
+const API_BASE = 'https://skinssence-api-1.onrender.com/api/leads';
 
 export default function LeadFollowupsScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('TODAY'); // 'TODAY', 'OVERDUE', 'UPCOMING'

@@ -38,7 +38,7 @@ function PatientProfileScreenContent({ route, navigation }) {
       const token = await AsyncStorage.getItem('userToken');
       let res;
       try {
-        res = await axios.get(`https://skinssence-api.onrender.com/api/patients/${id}`, {
+        res = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
       } catch (eCloud) {
@@ -140,7 +140,7 @@ function PatientProfileScreenContent({ route, navigation }) {
     if (!id) return;
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const response = await axios.get(`https://skinssence-api.onrender.com/api/patients/${id}/visits`, {
+      const response = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/${id}/visits`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setHistory(response.data || []);
@@ -156,7 +156,7 @@ function PatientProfileScreenContent({ route, navigation }) {
     if (!id) return;
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const pkgRes = await axios.get(`https://skinssence-api.onrender.com/api/patients/${id}/packages`, {
+      const pkgRes = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/${id}/packages`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setPackages(pkgRes.data || []);
@@ -170,7 +170,7 @@ function PatientProfileScreenContent({ route, navigation }) {
     if (!id) return;
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get(`https://skinssence-api.onrender.com/api/treatment-plans/patient/${id}`, {
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/treatment-plans/patient/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTreatmentPlans(res.data || []);
@@ -201,7 +201,7 @@ function PatientProfileScreenContent({ route, navigation }) {
     if (!currentId) return;
     try {
       const token = await AsyncStorage.getItem('userToken');
-      await axios.put(`https://skinssence-api.onrender.com/api/patients/${currentId}`, editForm, {
+      await axios.put(`https://skinssence-api-1.onrender.com/api/patients/${currentId}`, editForm, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setPatient(editForm);
@@ -220,11 +220,11 @@ function PatientProfileScreenContent({ route, navigation }) {
     setIsSubmitting(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      await axios.post(`https://skinssence-api.onrender.com/api/patients/${patient.id}/wallet`, {
+      await axios.post(`https://skinssence-api-1.onrender.com/api/patients/${patient.id}/wallet`, {
         amount, type: 'CREDIT', description: 'Prepaid Package Recharge', mode: rechargeMode
       }, { headers: { Authorization: `Bearer ${token}` } });
       
-      const response = await axios.get(`https://skinssence-api.onrender.com/api/patients/by-snumber/${patient.skinssence_id}`, {
+      const response = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/by-snumber/${patient.skinssence_id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setPatient(response.data);
@@ -276,7 +276,7 @@ function PatientProfileScreenContent({ route, navigation }) {
       }
 
       const token = await AsyncStorage.getItem('userToken');
-      await axios.post(`https://skinssence-api.onrender.com/api/patients/${patient.id}/packages`, {
+      await axios.post(`https://skinssence-api-1.onrender.com/api/patients/${patient.id}/packages`, {
         package_name: pkgName,
         total_sessions: parseInt(pkgSessions, 10),
         original_price: origP,
@@ -375,7 +375,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                   }
                 ]
               };
-              await axios.post('https://skinssence-api.onrender.com/api/visits', payload, {
+              await axios.post('https://skinssence-api-1.onrender.com/api/visits', payload, {
                 headers: { Authorization: `Bearer ${token}` }
               });
               Alert.alert('Session Redeemed!', `Session ${nextSession} of ${pkg.total_sessions} redeemed successfully at ₹0!`);
@@ -424,14 +424,14 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
               const token = await AsyncStorage.getItem('userToken');
               if (isPkg) {
                 const pkgId = visitId.replace('pkg_', '');
-                await axios.delete(`https://skinssence-api.onrender.com/api/patients/${patient.id}/packages/${pkgId}`, {
+                await axios.delete(`https://skinssence-api-1.onrender.com/api/patients/${patient.id}/packages/${pkgId}`, {
                   headers: { Authorization: `Bearer ${token}` }
                 });
                 Alert.alert('Deleted', 'Package record deleted.');
                 fetchPackages();
                 fetchHistory();
               } else {
-                await axios.delete(`https://skinssence-api.onrender.com/api/visits/${visitId}`, {
+                await axios.delete(`https://skinssence-api-1.onrender.com/api/visits/${visitId}`, {
                   headers: { Authorization: `Bearer ${token}` }
                 });
                 Alert.alert('Deleted', 'Visit record deleted.');
@@ -532,7 +532,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
     if (nextApptOverride === undefined && !nextAppt) {
       try {
         const token = await AsyncStorage.getItem('userToken');
-        const apptRes = await axios.get(`https://skinssence-api.onrender.com/api/appointments`, { headers: { Authorization: `Bearer ${token}` } });
+        const apptRes = await axios.get(`https://skinssence-api-1.onrender.com/api/appointments`, { headers: { Authorization: `Bearer ${token}` } });
         if (apptRes.data && Array.isArray(apptRes.data)) {
           const todayStr = new Date().toISOString().split('T')[0];
           const matched = apptRes.data.filter(a => 
@@ -713,7 +713,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       const token = await AsyncStorage.getItem('userToken');
       let savedInvoiceNumber = invoiceNo;
       try {
-        const invRes = await axios.post('https://skinssence-api.onrender.com/api/invoices', {
+        const invRes = await axios.post('https://skinssence-api-1.onrender.com/api/invoices', {
           patient_id: patient.id,
           visit_id: visit.visit_id,
           items_json: [
@@ -783,7 +783,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
       let upcomingAppt = null;
 
       try {
-        const apptRes = await axios.get('https://skinssence-api.onrender.com/api/appointments', {
+        const apptRes = await axios.get('https://skinssence-api-1.onrender.com/api/appointments', {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (apptRes.data && Array.isArray(apptRes.data)) {
@@ -858,7 +858,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
         status: 'SCHEDULED'
       };
 
-      await axios.post('https://skinssence-api.onrender.com/api/appointments', payload, {
+      await axios.post('https://skinssence-api-1.onrender.com/api/appointments', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -1075,7 +1075,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                         onPress: async () => {
                           try {
                             const token = await AsyncStorage.getItem('userToken');
-                            await axios.delete(`https://skinssence-api.onrender.com/api/patients/${patient.id}`, { headers: { Authorization: `Bearer ${token}` } });
+                            await axios.delete(`https://skinssence-api-1.onrender.com/api/patients/${patient.id}`, { headers: { Authorization: `Bearer ${token}` } });
                             Alert.alert('Deleted', 'Patient deleted.');
                             navigation.goBack();
                           } catch (err) {

@@ -62,7 +62,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
     try {
       const token = await AsyncStorage.getItem('userToken');
       // Use configured render API
-      const res = await axios.get(`https://skinssence-api.onrender.com/api/admin/diary?date=${target}`, {
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/admin/diary?date=${target}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDiaryData(res.data);

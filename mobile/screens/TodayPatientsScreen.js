@@ -25,7 +25,7 @@ export default function TodayPatientsScreen({ navigation }) {
   const fetchTodayVisits = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api.onrender.com/api/dashboard/today-visits', {
+      const res = await axios.get('https://skinssence-api-1.onrender.com/api/dashboard/today-visits', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setVisits(res.data || []);

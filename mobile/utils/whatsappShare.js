@@ -5,7 +5,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'https://skinssence-api.onrender.com';
+const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
 
 /**
  * Normalizes an Indian mobile number to a clean 10-digit string.

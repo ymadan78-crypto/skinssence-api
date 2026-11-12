@@ -20,7 +20,7 @@ import {
   sharePrebridalToWhatsAppAsync
 } from '../utils/prebridalPdf';
 
-const CLOUD_URL = 'https://skinssence-api.onrender.com';
+const CLOUD_URL = 'https://skinssence-api-1.onrender.com';
 
 export default function TreatmentPlannerScreen({ navigation, route }) {
   const { patient, existingPlan } = route.params || {};

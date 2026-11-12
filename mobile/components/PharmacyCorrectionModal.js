@@ -36,7 +36,7 @@ export default function PharmacyCorrectionModal({ visible, visitId, onClose, onU
 
   const getApiUrl = async () => {
     // Cloud URL default
-    return 'https://skinssence-api.onrender.com';
+    return 'https://skinssence-api-1.onrender.com';
   };
 
   const loadSaleDetails = async () => {

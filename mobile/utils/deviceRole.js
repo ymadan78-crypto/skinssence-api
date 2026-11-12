@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-const API_BASE = 'https://skinssence-api.onrender.com/api/leads/clinic-device';
+const API_BASE = 'https://skinssence-api-1.onrender.com/api/leads/clinic-device';
 const DEVICE_ID_KEY = 'skinssence_device_id';
 const DEVICE_NAME_KEY = 'skinssence_device_custom_name';
 const LOCAL_CLINIC_PHONE_KEY = 'skinssence_is_local_clinic_phone';

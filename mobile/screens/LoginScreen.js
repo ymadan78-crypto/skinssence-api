@@ -10,7 +10,7 @@ export default function LoginScreen({ navigation }) {
 
   // Note: For Android Emulator localhost is typically 10.0.2.2.
   // For Expo Go on physical device, you'd use your computer's IP address on the network (e.g. 192.168.1.100).
-  const API_URL = 'https://skinssence-api.onrender.com/api/login'; 
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/login'; 
 
   const handleLogin = async () => {
     if (!username || !password) {

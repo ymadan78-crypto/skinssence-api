@@ -14,7 +14,7 @@ export default function UserManagementScreen({ navigation }) {
   const [resetId, setResetId] = useState(null);
   const [newPassword, setNewPassword] = useState('');
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/users';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/users';
 
   useEffect(() => {
     fetchUsers();
@@ -108,7 +108,7 @@ export default function UserManagementScreen({ navigation }) {
 
       const token = await AsyncStorage.getItem('userToken');
       try {
-        await axios.put(`https://skinssence-api.onrender.com/api/users/${user.id}/permissions`, { permissions: perms }, {
+        await axios.put(`https://skinssence-api-1.onrender.com/api/users/${user.id}/permissions`, { permissions: perms }, {
           headers: { Authorization: `Bearer ${token}` }
         });
       } catch (cloudErr) {

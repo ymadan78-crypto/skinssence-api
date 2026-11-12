@@ -14,7 +14,7 @@ export default function MyAttendanceScreen({ navigation }) {
   const fetchAttendance = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api.onrender.com/api/staff/my-attendance', {
+      const res = await axios.get('https://skinssence-api-1.onrender.com/api/staff/my-attendance', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAttendance(res.data);

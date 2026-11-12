@@ -12,7 +12,7 @@ export default function StaffCollectionScreen({ navigation }) {
     total_collection: 0
   });
   
-  const API_URL = 'https://skinssence-api.onrender.com/api/staff/collection/today';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/staff/collection/today';
 
   useEffect(() => {
     fetchCollection();

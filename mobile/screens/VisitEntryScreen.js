@@ -82,7 +82,7 @@ export default function VisitEntryScreen({ route, navigation }) {
     setNextFollowupDate(formatted);
   };
 
-  const API_URL = 'https://skinssence-api.onrender.com/api';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api';
 
   const getDateStr = (d) => {
     return d.toISOString().split('T')[0];

@@ -2,7 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
-const CLOUD_API = 'https://skinssence-api.onrender.com/api/payments/daily-clinic-qr-status';
+const CLOUD_API = 'https://skinssence-api-1.onrender.com/api/payments/daily-clinic-qr-status';
 const LOCAL_API = 'http://localhost:3000/api/payments/daily-clinic-qr-status';
 
 /**

@@ -186,7 +186,7 @@ function InventoryManagementScreenContent({ navigation }) {
   const [adjustForm, setAdjustForm] = useState({ direction: 'REDUCE', quantity: '', reason_type: 'Damaged', notes: '' });
   const [adjustLoading, setAdjustLoading] = useState(false);
 
-  const BASE_URL = 'https://skinssence-api.onrender.com/api/inventory';
+  const BASE_URL = 'https://skinssence-api-1.onrender.com/api/inventory';
 
   const resolveItemBrand = (medicineName, serverCompany, overrides = brandOverrides) => {
     const clean = (medicineName || '').trim().toLowerCase();
@@ -348,7 +348,7 @@ function InventoryManagementScreenContent({ navigation }) {
     setClinicUseLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api.onrender.com/api/inventory/clinic-use/summary', {
+      const res = await axios.get('https://skinssence-api-1.onrender.com/api/inventory/clinic-use/summary', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setClinicUseSummary(res.data);
@@ -575,7 +575,7 @@ function InventoryManagementScreenContent({ navigation }) {
     setRecLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api.onrender.com/api/inventory/reconciliation/preview', {
+      const res = await axios.get('https://skinssence-api-1.onrender.com/api/inventory/reconciliation/preview', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setRecPreview(res.data);
@@ -605,7 +605,7 @@ Do you want to proceed?`,
             try {
               const token = await AsyncStorage.getItem('userToken');
               const res = await axios.post(
-                'https://skinssence-api.onrender.com/api/inventory/reconciliation/apply',
+                'https://skinssence-api-1.onrender.com/api/inventory/reconciliation/apply',
                 {},
                 { headers: { Authorization: `Bearer ${token}` } }
               );

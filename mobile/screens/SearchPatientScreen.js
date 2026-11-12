@@ -8,7 +8,7 @@ export default function SearchPatientScreen({ navigation }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/patients/search';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/patients/search';
 
   function parsePatientRegistrationTimestamp(dStr) {
     if (!dStr || typeof dStr !== 'string') return 0;

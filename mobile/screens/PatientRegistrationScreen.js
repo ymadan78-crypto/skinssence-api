@@ -29,7 +29,7 @@ export default function PatientRegistrationScreen({ navigation }) {
     })();
   }, []);
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/patients';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/patients';
 
   const skinConcernsList = ['Acne', 'Pigmentation', 'Scar', 'Open Pores', 'Under Eye', 'Body Hair', 'Tattoo', 'Mole', 'Dark Lips', 'Elbow/Knee'];
   const hairConcernsList = ['Hair Thinning', 'Dandruff/ Flaky Scalp', 'Oily Scalp', 'Dry Scalp', 'Dry & Frizzy Hair', 'Hair Fall', 'Brittle / Damaged Hair', 'Rough / Unmanageable Hair', 'Split Ends'];
@@ -138,7 +138,7 @@ export default function PatientRegistrationScreen({ navigation }) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const checkRes = await axios.get(`https://skinssence-api.onrender.com/api/patients/check-mobile/${formData.mobile}`, { headers: { Authorization: `Bearer ${token}` } });
+      const checkRes = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/check-mobile/${formData.mobile}`, { headers: { Authorization: `Bearer ${token}` } });
       if (checkRes.data.exists) {
         setLoading(false);
         Alert.alert('Duplicate Number', 'This mobile number is already registered. Continue?', [{ text: 'No', style: 'cancel' }, { text: 'Yes', onPress: () => submitRegistration(true) }]);

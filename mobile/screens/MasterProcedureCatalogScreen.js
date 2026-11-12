@@ -16,7 +16,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 
-const API_URL = 'https://skinssence-api.onrender.com/api/procedures/master';
+const API_URL = 'https://skinssence-api-1.onrender.com/api/procedures/master';
 
 export default function MasterProcedureCatalogScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -215,7 +215,7 @@ export default function MasterProcedureCatalogScreen({ navigation }) {
             setMerging(true);
             try {
               const token = await AsyncStorage.getItem('userToken');
-              const res = await axios.post('https://skinssence-api.onrender.com/api/procedures/master/merge', {
+              const res = await axios.post('https://skinssence-api-1.onrender.com/api/procedures/master/merge', {
                 source_id: sourceProc.id,
                 target_id: targetProc.id
               }, { headers: { Authorization: `Bearer ${token}` } });

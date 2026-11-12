@@ -57,7 +57,7 @@ export default function PendingFollowupReminderModal({
       const token = await AsyncStorage.getItem('userToken');
       let res;
       try {
-        res = await axios.get('https://skinssence-api.onrender.com/api/appointments/pending-followups', {
+        res = await axios.get('https://skinssence-api-1.onrender.com/api/appointments/pending-followups', {
           headers: { Authorization: `Bearer ${token}` }
         });
       } catch (cloudErr) {
@@ -127,7 +127,7 @@ export default function PendingFollowupReminderModal({
       };
 
       try {
-        await axios.post('https://skinssence-api.onrender.com/api/appointments/followup-not-required', payload, {
+        await axios.post('https://skinssence-api-1.onrender.com/api/appointments/followup-not-required', payload, {
           headers: { Authorization: `Bearer ${token}` }
         });
       } catch (cloudErr) {

@@ -46,8 +46,8 @@ export default function DoctorDashboard({ navigation }) {
 
       const token = await AsyncStorage.getItem('userToken');
       const [analyticsRes, todayRes] = await Promise.all([
-        axios.get('https://skinssence-api.onrender.com/api/inventory/analytics', { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get('https://skinssence-api.onrender.com/api/dashboard/today', { headers: { Authorization: `Bearer ${token}` } })
+        axios.get('https://skinssence-api-1.onrender.com/api/inventory/analytics', { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get('https://skinssence-api-1.onrender.com/api/dashboard/today', { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (analyticsRes.data && analyticsRes.data.expiringSoon) {
         setExpiringItems(analyticsRes.data.expiringSoon);
@@ -107,7 +107,7 @@ export default function DoctorDashboard({ navigation }) {
       const todayStr = new Date().toISOString().split('T')[0];
       const filename = `Skinssence_Backup_${todayStr}.xlsx`;
       const fileUri = `${FileSystem.documentDirectory}${filename}`;
-      const downloadUrl = 'https://skinssence-api.onrender.com/api/admin/backup';
+      const downloadUrl = 'https://skinssence-api-1.onrender.com/api/admin/backup';
 
       const downloadResult = await FileSystem.downloadAsync(downloadUrl, fileUri, {
         headers: {

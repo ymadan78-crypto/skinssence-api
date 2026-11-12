@@ -42,7 +42,7 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api.onrender.com/api/inventory/analytics', {
+      const res = await axios.get('https://skinssence-api-1.onrender.com/api/inventory/analytics', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setData(res.data);
@@ -74,7 +74,7 @@ export default function PharmacyAnalyticsScreen({ navigation }) {
     // 3. Try background refresh from cloud server
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get(`https://skinssence-api.onrender.com/api/inventory/company-sales?month=${m}&company=${encodeURIComponent(b)}`, {
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/inventory/company-sales?month=${m}&company=${encodeURIComponent(b)}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 6000
       });

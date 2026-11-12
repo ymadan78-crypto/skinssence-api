@@ -150,7 +150,7 @@ export default function SmartPharmacyCameraModal({
         raw_text: textData || null
       };
 
-      const res = await axios.post('https://skinssence-api.onrender.com/api/pharmacy/camera/analyze', payload, {
+      const res = await axios.post('https://skinssence-api-1.onrender.com/api/pharmacy/camera/analyze', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -190,7 +190,7 @@ export default function SmartPharmacyCameraModal({
     if (query.length > 2) {
       try {
         const token = await AsyncStorage.getItem('userToken');
-        const res = await axios.get(`https://skinssence-api.onrender.com/api/patients/search?q=${query}`, {
+        const res = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/search?q=${query}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPatientCandidates(res.data);
@@ -350,7 +350,7 @@ export default function SmartPharmacyCameraModal({
 
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.post('https://skinssence-api.onrender.com/api/pharmacy/camera/confirm', payload, {
+      const res = await axios.post('https://skinssence-api-1.onrender.com/api/pharmacy/camera/confirm', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
 

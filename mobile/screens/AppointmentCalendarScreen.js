@@ -60,7 +60,7 @@ export default function AppointmentCalendarScreen({ navigation, route }) {
   };
 
   const timeSlots = generateTimeSlots(selectedDate);
-  const API_URL = 'https://skinssence-api.onrender.com/api/appointments';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/appointments';
 
   useEffect(() => {
     fetchAppointmentsForDate(selectedDate);
@@ -82,7 +82,7 @@ export default function AppointmentCalendarScreen({ navigation, route }) {
     if (!formData.patient_id) return;
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get(`https://skinssence-api.onrender.com/api/patients/by-snumber/${formData.patient_id}`, {
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/by-snumber/${formData.patient_id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data) {

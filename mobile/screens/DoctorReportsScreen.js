@@ -14,7 +14,7 @@ export default function DoctorReportsScreen({ navigation }) {
   const [medSubTab, setMedSubTab] = useState('qty'); // 'qty', 'revenue', 'history'
   const [followupModalVisible, setFollowupModalVisible] = useState(false);
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/admin/reports';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/admin/reports';
 
   useEffect(() => {
     fetchReports();

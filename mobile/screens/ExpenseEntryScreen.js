@@ -35,7 +35,7 @@ export default function ExpenseEntryScreen({ navigation }) {
     setInventoryItems(updated);
   };
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/expenses';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/expenses';
 
   const categories = [
     'MEDICINES', 

@@ -37,7 +37,7 @@ import {
   normalizeMobileForMatching
 } from '../utils/recordingService';
 
-const API_BASE = 'https://skinssence-api.onrender.com/api/leads';
+const API_BASE = 'https://skinssence-api-1.onrender.com/api/leads';
 
 function LeadsScreenInner({ navigation }) {
   const [leads, setLeads] = useState([]);

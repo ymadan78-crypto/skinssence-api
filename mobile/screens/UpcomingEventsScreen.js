@@ -10,7 +10,7 @@ export default function UpcomingEventsScreen({ navigation }) {
   const [festivalType, setFestivalType] = useState('Raksha Bandhan'); 
   const [festivalPatients, setFestivalPatients] = useState([]);
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/events/upcoming';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/events/upcoming';
 
   useEffect(() => {
     if (activeTab === 'events') fetchEvents();
@@ -22,7 +22,7 @@ export default function UpcomingEventsScreen({ navigation }) {
     try {
       const token = await AsyncStorage.getItem('userToken');
       const rel = type === 'Eid' ? 'muslim' : 'hindu';
-      const res = await axios.get(`https://skinssence-api.onrender.com/api/events/festival/${rel}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/events/festival/${rel}`, { headers: { Authorization: `Bearer ${token}` } });
       setFestivalPatients(res.data);
     } catch (err) { console.log(err); } finally { setLoading(false); }
   };

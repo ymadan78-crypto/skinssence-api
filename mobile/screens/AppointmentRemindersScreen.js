@@ -29,7 +29,7 @@ export default function AppointmentRemindersScreen({ navigation }) {
   const [selectedOutcome, setSelectedOutcome] = useState('Spoke - Response Taken / Confirmed');
   const [reportNote, setReportNote] = useState('');
 
-  const API_URL = 'https://skinssence-api.onrender.com/api/appointments';
+  const API_URL = 'https://skinssence-api-1.onrender.com/api/appointments';
 
   useEffect(() => {
     fetchReminders();
