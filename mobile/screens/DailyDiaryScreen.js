@@ -55,6 +55,8 @@ function DailyDiaryScreenContent({ navigation, route }) {
   const [userRole, setUserRole] = useState('');
   const [correctionModalVisible, setCorrectionModalVisible] = useState(false);
   const [correctingVisitId, setCorrectingVisitId] = useState(null);
+  const [editBillModalVisible, setEditBillModalVisible] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState(null);
 
   const fetchDiary = async (dateToFetch) => {
     const target = dateToFetch || selectedDate;
@@ -492,6 +494,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
       <EditBillModal
         visible={editBillModalVisible}
         visitId={editingVisitId}
+        initialVisit={diaryData?.timeline?.find(t => t.visit_id === editingVisitId)}
         onClose={() => {
           setEditBillModalVisible(false);
           setEditingVisitId(null);
