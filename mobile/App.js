@@ -59,6 +59,7 @@ axios.interceptors.response.use(undefined, async (err) => {
 const Stack = createNativeStackNavigator();
 
 import { View, Text, TouchableOpacity } from 'react-native';
+import * as Updates from 'expo-updates';
 import { Ionicons } from '@expo/vector-icons';
 
 class GlobalErrorBoundary extends React.Component {
@@ -102,6 +103,22 @@ class GlobalErrorBoundary extends React.Component {
 
 
 export default function App() {
+  React.useEffect(() => {
+    async function checkOta() {
+      if (__DEV__) return;
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        console.log('[EAS Updates] Check skipped or offline:', e.message);
+      }
+    }
+    checkOta();
+  }, []);
+
   return (
     <GlobalErrorBoundary>
       <NavigationContainer>

@@ -20,6 +20,14 @@ import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
 
 function DailyDiaryScreenContent({ navigation, route }) {
+  // Safe currency / number formatter
+  const formatCurrency = (val) => {
+    if (val === null || val === undefined) return '0';
+    const num = parseFloat(val);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
   // Helper to format Date to YYYY-MM-DD
   const formatDateToYMD = (dateObj) => {
     const y = dateObj.getFullYear();
@@ -217,7 +225,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
                 <Text style={styles.timeBadgeText}>{item.time}</Text>
               </View>
             ) : null}
-            <View style={[styles.categoryBadge, { backgroundColor: item.badge_color ? `${item.badge_color}18` : '#f1f5f9' }]}>
+            <View style={[styles.categoryBadge, { backgroundColor: (item.badge_color && item.badge_color.startsWith('#') && item.badge_color.length === 7) ? `${item.badge_color}18` : '#f1f5f9' }]}>
               <Text style={[styles.categoryBadgeText, { color: item.badge_color || '#334155' }]}>
                 {item.badge}
               </Text>
@@ -225,7 +233,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
           </View>
           {item.amount !== null && item.amount !== undefined ? (
             <Text style={[styles.entryAmount, item.is_debit ? styles.debitAmount : styles.creditAmount]}>
-              {item.is_debit ? '-' : ''}₹{item.amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+              {item.is_debit ? '-' : ''}₹{formatCurrency(item.amount)}
             </Text>
           ) : null}
         </View>
@@ -380,11 +388,11 @@ function DailyDiaryScreenContent({ navigation, route }) {
                 <View style={styles.finRow}>
                   <View style={styles.finCol}>
                     <Text style={styles.finLabel}>Total Sales/Billed</Text>
-                    <Text style={styles.finValBilled}>₹{summary.total_sales.toLocaleString('en-IN')}</Text>
+                    <Text style={styles.finValBilled}>₹{formatCurrency(summary?.total_sales)}</Text>
                   </View>
                   <View style={styles.finCol}>
                     <Text style={styles.finLabel}>Actual Collected</Text>
-                    <Text style={styles.finValCollected}>₹{summary.total_collection.toLocaleString('en-IN')}</Text>
+                    <Text style={styles.finValCollected}>₹{formatCurrency(summary?.total_collection)}</Text>
                   </View>
                 </View>
 
@@ -393,12 +401,12 @@ function DailyDiaryScreenContent({ navigation, route }) {
                 <View style={styles.finRow}>
                   <View style={styles.finCol}>
                     <Text style={styles.finLabel}>Total Expenses</Text>
-                    <Text style={styles.finValExpense}>₹{summary.total_expenses.toLocaleString('en-IN')}</Text>
+                    <Text style={styles.finValExpense}>₹{formatCurrency(summary?.total_expenses)}</Text>
                   </View>
                   <View style={styles.finCol}>
                     <Text style={styles.finLabel}>Net Cash Balance</Text>
                     <Text style={[styles.finValNet, summary.net_balance >= 0 ? styles.posNet : styles.negNet]}>
-                      {summary.net_balance >= 0 ? '+' : ''}₹{summary.net_balance.toLocaleString('en-IN')}
+                      {parseFloat(summary?.net_balance || 0) >= 0 ? '+' : ''}₹{formatCurrency(summary?.net_balance)}
                     </Text>
                   </View>
                 </View>
@@ -411,7 +419,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
                       {Object.entries(summary.collection_by_mode).map(([mode, amt]) => (
                         <View key={mode} style={styles.modeChip}>
                           <Text style={styles.modeChipText}>
-                            {mode}: ₹{amt.toLocaleString('en-IN')}
+                            {mode}: ₹{formatCurrency(amt)}
                           </Text>
                         </View>
                       ))}
@@ -427,15 +435,15 @@ function DailyDiaryScreenContent({ navigation, route }) {
                   <Text style={styles.opLabel}>Patients</Text>
                 </View>
                 <View style={styles.opCard}>
-                  <Text style={styles.opVal}>₹{summary.consultation_revenue.toLocaleString('en-IN')}</Text>
+                  <Text style={styles.opVal}>₹{formatCurrency(summary?.consultation_revenue)}</Text>
                   <Text style={styles.opLabel}>Consultation</Text>
                 </View>
                 <View style={styles.opCard}>
-                  <Text style={styles.opVal}>₹{summary.procedure_revenue.toLocaleString('en-IN')}</Text>
+                  <Text style={styles.opVal}>₹{formatCurrency(summary?.procedure_revenue)}</Text>
                   <Text style={styles.opLabel}>Procedures</Text>
                 </View>
                 <View style={styles.opCard}>
-                  <Text style={styles.opVal}>₹{summary.medicine_revenue.toLocaleString('en-IN')}</Text>
+                  <Text style={styles.opVal}>₹{formatCurrency(summary?.medicine_revenue)}</Text>
                   <Text style={styles.opLabel}>Pharmacy</Text>
                 </View>
               </View>
@@ -535,9 +543,16 @@ class DailyDiaryErrorBoundary extends React.Component {
           <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginTop: 14, marginBottom: 8, textAlign: 'center' }}>
             Daily Diary Error
           </Text>
-          <Text style={{ fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 18 }}>
-            An unexpected error occurred while loading this date\'s timeline. The screen was safely kept from going blank.
+          <Text style={{ fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 12, lineHeight: 18 }}>
+            An unexpected error occurred while loading this date's timeline.
           </Text>
+          {this.state.error ? (
+            <View style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5', padding: 10, borderRadius: 8, marginBottom: 20, width: '100%' }}>
+              <Text style={{ fontSize: 12, color: '#991b1b', fontWeight: 'bold', textAlign: 'center' }}>
+                {this.state.error?.name || 'Error'}: {this.state.error?.message || String(this.state.error)}
+              </Text>
+            </View>
+          ) : null}
           <TouchableOpacity 
             style={{ backgroundColor: '#5C0B0B', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
             onPress={() => this.props.navigation?.goBack()}
