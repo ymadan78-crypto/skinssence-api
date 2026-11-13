@@ -33,6 +33,22 @@ const QUICK_PROCEDURES = [
   { name: 'Tattoo Removal', defaultAmount: 2000 }
 ];
 
+function parseMedicineDetailsString(details) {
+  if (!details || typeof details !== 'string') return { name: 'Medicine', qty: 1, batch: '' };
+  let name = details;
+  let batch = '';
+  let qty = 1;
+
+  const qtyMatch = details.match(/\(Qty:\s*(\d+)\)/i);
+  if (qtyMatch) qty = parseInt(qtyMatch[1], 10) || 1;
+
+  const batchMatch = details.match(/\[Batch:\s*([^\]]+)\]/i);
+  if (batchMatch) batch = batchMatch[1].trim();
+
+  name = details.split('[')[0].split('(Qty:')[0].split('|')[0].trim();
+  return { name: name || details, qty, batch };
+}
+
 export default function EditBillModal({ visible, visitId, initialVisit, initialPatient, onClose, onUpdated }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -42,22 +58,42 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
   const [userRole, setUserRole] = useState('');
   const [isToday, setIsToday] = useState(false);
 
-  // Form State
+  // Form State: 1. Consultation Fee
   const [consultationFee, setConsultationFee] = useState('0');
+
+  // Form State: 2. Procedures
   const [plannedProcedures, setPlannedProcedures] = useState('');
   const [procedures, setProcedures] = useState([]);
+
+  // Form State: 3. Pharmacy Medicines
+  const [medicines, setMedicines] = useState([]);
+
+  // Form State: 4. Discount
   const [discountType, setDiscountType] = useState('NONE'); // NONE, PERCENTAGE, FLAT
   const [discountValue, setDiscountValue] = useState('0');
-  const [paymentMode, setPaymentMode] = useState('CASH');
+
+  // Form State: 5. Payment Receipt & Split Payments
+  const [paymentMode, setPaymentMode] = useState('CASH'); // CASH, UPI, CARD, SPLIT
   const [amountReceived, setAmountReceived] = useState('0');
+  const [splitCash, setSplitCash] = useState('0');
+  const [splitUpi, setSplitUpi] = useState('0');
+  const [splitUpiMode, setSplitUpiMode] = useState('UPI'); // UPI, UPI (Clinic), UPI (Store)
   const [reason, setReason] = useState('Staff/Doctor bill adjustment');
   const [autoSyncPayment, setAutoSyncPayment] = useState(true);
 
-  // Quick procedure picker modal state
+  // Modals
   const [showProcPicker, setShowProcPicker] = useState(false);
   const [customProcName, setCustomProcName] = useState('');
   const [customProcAmount, setCustomProcAmount] = useState('');
   const [customProcArea, setCustomProcArea] = useState('');
+
+  const [showMedPicker, setShowMedPicker] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [medSearch, setMedSearch] = useState('');
+  const [customMedName, setCustomMedName] = useState('');
+  const [customMedQty, setCustomMedQty] = useState('1');
+  const [customMedAmount, setCustomMedAmount] = useState('');
 
   useEffect(() => {
     if (visible && visitId) {
@@ -74,13 +110,36 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
     setConsultationFee('0');
     setPlannedProcedures('');
     setProcedures([]);
+    setMedicines([]);
     setDiscountType('NONE');
     setDiscountValue('0');
     setPaymentMode('CASH');
     setAmountReceived('0');
+    setSplitCash('0');
+    setSplitUpi('0');
+    setSplitUpiMode('UPI');
     setReason('Staff/Doctor bill adjustment');
     setAutoSyncPayment(true);
     setShowProcPicker(false);
+    setShowMedPicker(false);
+  };
+
+  const loadInventory = async () => {
+    if (inventoryItems.length > 0) return;
+    setInventoryLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const res = await axios.get(`${API_BASE_URL}/api/inventory`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (Array.isArray(res.data)) {
+        setInventoryItems(res.data);
+      }
+    } catch (err) {
+      console.log('Error fetching inventory in EditBillModal:', err.message);
+    } finally {
+      setInventoryLoading(false);
+    }
   };
 
   const loadBillDetails = async () => {
@@ -104,9 +163,31 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
           notes: p.notes || ''
         })));
       }
+      if (Array.isArray(v.medicines) && v.medicines.length > 0) {
+        setMedicines(v.medicines.map((m, idx) => {
+          const parsed = parseMedicineDetailsString(m.details || m.name);
+          return {
+            id: m.id || `init_med_${idx}_${Date.now()}`,
+            name: parsed.name,
+            qty: String(parsed.qty || 1),
+            amount: String(m.amount !== undefined && m.amount !== null ? m.amount : 0),
+            batch: parsed.batch || ''
+          };
+        }));
+      }
       setDiscountType(v.discount_type || 'NONE');
       setDiscountValue(v.discount_value !== null && v.discount_value !== undefined ? String(v.discount_value) : '0');
-      if (Array.isArray(v.payments) && v.payments.length > 0) {
+
+      if (Array.isArray(v.payments) && v.payments.length > 1) {
+        const cashPay = v.payments.find(p => (p.mode || '').toUpperCase().includes('CASH'));
+        const upiPay = v.payments.find(p => (p.mode || '').toUpperCase().includes('UPI'));
+        if (cashPay || upiPay) {
+          setPaymentMode('SPLIT');
+          setSplitCash(String(cashPay ? cashPay.amount_received : 0));
+          setSplitUpi(String(upiPay ? upiPay.amount_received : 0));
+          setSplitUpiMode(upiPay ? upiPay.mode : 'UPI');
+        }
+      } else if (Array.isArray(v.payments) && v.payments.length > 0) {
         setPaymentMode((v.payments[0].mode || 'CASH').toUpperCase());
         setAmountReceived(String(v.payments[0].amount_received || v.net_payable || 0));
       }
@@ -143,15 +224,50 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
       }));
       setProcedures(loadedProcs);
 
+      // Load medicines
+      const loadedMeds = (data.medicines || []).map((m, idx) => {
+        const parsed = parseMedicineDetailsString(m.details);
+        return {
+          id: m.id || `med_${idx}_${Date.now()}`,
+          name: parsed.name,
+          qty: String(parsed.qty || 1),
+          amount: String(m.amount !== undefined && m.amount !== null ? m.amount : 0),
+          batch: parsed.batch || ''
+        };
+      });
+      setMedicines(loadedMeds);
+
       // Discount
       setDiscountType(v.discount_type || 'NONE');
       setDiscountValue(v.discount_value !== null && v.discount_value !== undefined ? String(v.discount_value) : '0');
 
-      // Payment
-      const primaryPayment = (data.payments && data.payments.length > 0) ? data.payments[0] : null;
-      if (primaryPayment) {
-        setPaymentMode((primaryPayment.mode || 'CASH').toUpperCase());
-        setAmountReceived(String(primaryPayment.amount_received || v.net_payable || 0));
+      // Payment & Split Detection
+      const pays = data.payments || [];
+      if (pays.length > 1) {
+        const cashPay = pays.find(p => (p.mode || '').toUpperCase().includes('CASH'));
+        const upiPay = pays.find(p => (p.mode || '').toUpperCase().includes('UPI'));
+        if (cashPay || upiPay) {
+          setPaymentMode('SPLIT');
+          setSplitCash(String(cashPay ? cashPay.amount_received : 0));
+          setSplitUpi(String(upiPay ? upiPay.amount_received : 0));
+          setSplitUpiMode(upiPay ? upiPay.mode : 'UPI');
+        } else {
+          setPaymentMode('SPLIT');
+          setSplitCash(String(pays[0]?.amount_received || 0));
+          setSplitUpi(String(pays[1]?.amount_received || 0));
+        }
+      } else if (pays.length === 1) {
+        const p = pays[0];
+        const pMode = (p.mode || 'CASH').toUpperCase();
+        if (pMode === 'SPLIT') {
+          setPaymentMode('SPLIT');
+          const half = Math.round((v.net_payable || 0) / 2);
+          setSplitCash(String(half));
+          setSplitUpi(String((v.net_payable || 0) - half));
+        } else {
+          setPaymentMode(pMode);
+          setAmountReceived(String(p.amount_received !== undefined && p.amount_received !== null ? p.amount_received : (v.net_payable || 0)));
+        }
       } else {
         setPaymentMode('CASH');
         setAmountReceived(String(v.net_payable || 0));
@@ -161,7 +277,7 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
       if (err.response?.status === 404) {
         Alert.alert(
           'Render Deployment Required',
-          'The backend on Render is still deploying the latest updates.\n\nPlease open your Render Dashboard (dashboard.render.com) -> skinssence-api -> click "Manual Deploy" -> "Deploy latest commit". Once live, bill editing will be fully operational.'
+          'The backend on Render is still deploying the latest updates.\n\nPlease check your Render Dashboard (dashboard.render.com) -> skinssence-api-1. Once live, bill editing will be fully operational.'
         );
       } else {
         const errMsg = err.response?.data?.error || err.message || 'Failed to load bill details';
@@ -176,7 +292,7 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
   // Calculations
   const cFeeNum = parseFloat(consultationFee) || 0;
   const procsTotal = procedures.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  const medsTotal = (billDetails?.medicines || []).reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+  const medsTotal = medicines.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
   const subtotal = cFeeNum + procsTotal + medsTotal;
 
   const dValNum = parseFloat(discountValue) || 0;
@@ -192,9 +308,18 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
   useEffect(() => {
     if (autoSyncPayment) {
       setAmountReceived(String(netPayable));
+      if (paymentMode === 'SPLIT') {
+        const cashVal = parseFloat(splitCash) || 0;
+        if (cashVal > 0 && cashVal <= netPayable) {
+          setSplitUpi(String(netPayable - cashVal));
+        } else if (cashVal === 0) {
+          setSplitUpi(String(netPayable));
+        }
+      }
     }
   }, [netPayable, autoSyncPayment]);
 
+  // --- Procedures Handlers ---
   const handleAddProcedure = (procItem) => {
     setProcedures(prev => [
       ...prev,
@@ -237,6 +362,50 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
     });
   };
 
+  // --- Medicines Handlers ---
+  const handleAddMedicine = (medItem) => {
+    setMedicines(prev => [
+      ...prev,
+      {
+        id: `temp_med_${Date.now()}_${Math.random()}`,
+        name: medItem.name,
+        qty: String(medItem.qty || 1),
+        amount: String(medItem.amount || 0),
+        batch: medItem.batch || ''
+      }
+    ]);
+    setShowMedPicker(false);
+    setCustomMedName('');
+    setCustomMedQty('1');
+    setCustomMedAmount('');
+  };
+
+  const handleAddCustomMedicine = () => {
+    if (!customMedName.trim()) {
+      Alert.alert('Medicine Name Required', 'Please enter a name for the medicine.');
+      return;
+    }
+    handleAddMedicine({
+      name: customMedName.trim(),
+      qty: parseInt(customMedQty, 10) || 1,
+      amount: parseFloat(customMedAmount) || 0,
+      batch: ''
+    });
+  };
+
+  const handleRemoveMedicine = (index) => {
+    setMedicines(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleMedicineChange = (index, field, value) => {
+    setMedicines(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  // --- Save Handler ---
   const handleSaveBill = async () => {
     if (!canEdit) {
       Alert.alert('Permission Denied', restrictionReason || "Staff cannot edit previous days' bills.");
@@ -247,6 +416,15 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
       Alert.alert('Invalid Procedure', 'Please make sure all procedures have a name or remove empty rows.');
       return;
     }
+
+    if (medicines.some(m => !m.name || !m.name.trim())) {
+      Alert.alert('Invalid Medicine', 'Please make sure all medicines have a name or remove empty rows.');
+      return;
+    }
+
+    const isSplit = paymentMode === 'SPLIT';
+    const cashAmt = parseFloat(splitCash) || 0;
+    const upiAmt = parseFloat(splitUpi) || 0;
 
     setSaving(true);
     try {
@@ -260,12 +438,22 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
           notes: p.notes ? p.notes.trim() : '',
           procedure_id: p.procedure_id || null
         })),
+        medicines: medicines.map(m => ({
+          name: m.name.trim(),
+          qty: parseInt(m.qty, 10) || 1,
+          amount: parseFloat(m.amount) || 0,
+          batch: m.batch ? m.batch.trim() : ''
+        })),
         planned_procedures: plannedProcedures.trim(),
         discount_type: discountType,
         discount_value: dValNum,
         discount_amount: calculatedDiscount,
         payment_mode: paymentMode,
-        amount_received: parseFloat(amountReceived) || netPayable,
+        split_payments: isSplit ? [
+          { mode: 'CASH', amount: cashAmt },
+          { mode: splitUpiMode || 'UPI', amount: upiAmt }
+        ] : null,
+        amount_received: isSplit ? (cashAmt + upiAmt) : (parseFloat(amountReceived) || netPayable),
         reason: reason.trim() || 'Bill edited by user'
       };
 
@@ -402,47 +590,41 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                     ))}
                   </View>
                 </View>
-
-                {/* Doctor Note / Planned */}
-                <Text style={styles.fieldLabel}>Doctor Advice / Procedures Note</Text>
-                <TextInput
-                  style={[styles.textInputArea, !canEdit && styles.disabledInput]}
-                  value={plannedProcedures}
-                  onChangeText={setPlannedProcedures}
-                  editable={canEdit}
-                  placeholder="Doctor's plan, notes, or advice"
-                  multiline
-                />
               </View>
 
-              {/* 2. PROCEDURES */}
+              {/* 2. CLINIC PROCEDURES */}
               <View style={styles.sectionCard}>
                 <View style={styles.sectionHeaderRow}>
-                  <View>
-                    <Text style={styles.sectionTitle}>2. Procedures & Services</Text>
-                    <Text style={styles.sectionSubtitle}>{procedures.length} procedure(s) included</Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.sectionTitle}>2. Clinic Procedures</Text>
+                      <View style={styles.countBadge}>
+                        <Text style={styles.countBadgeText}>{procedures.length}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.sectionSubtitle}>Services performed in clinic</Text>
                   </View>
                   {canEdit && (
                     <TouchableOpacity
                       style={styles.addProcBtn}
                       onPress={() => setShowProcPicker(true)}
                     >
-                      <Ionicons name="add-circle" size={16} color="#fff" style={{ marginRight: 4 }} />
-                      <Text style={styles.addProcBtnText}>+ Add Procedure</Text>
+                      <Ionicons name="add" size={16} color="#fff" />
+                      <Text style={styles.addProcBtnText}>+ Add Proc</Text>
                     </TouchableOpacity>
                   )}
                 </View>
 
                 {procedures.length === 0 ? (
                   <View style={styles.emptyProcBox}>
-                    <Ionicons name="sparkles-outline" size={24} color="#94a3b8" />
-                    <Text style={styles.emptyProcText}>No procedures in this bill.</Text>
+                    <Ionicons name="bandage-outline" size={26} color="#94a3b8" />
+                    <Text style={styles.emptyProcText}>No procedures in this bill</Text>
                     {canEdit && (
                       <TouchableOpacity
                         style={styles.emptyAddBtn}
                         onPress={() => setShowProcPicker(true)}
                       >
-                        <Text style={styles.emptyAddBtnText}>+ Add First Procedure</Text>
+                        <Text style={styles.emptyAddBtnText}>+ Add Procedure</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -496,28 +678,104 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                 )}
               </View>
 
-              {/* 3. PHARMACY MEDICINES (READ-ONLY IN VISIT BILL) */}
-              {billDetails?.medicines && billDetails.medicines.length > 0 && (
-                <View style={styles.sectionCard}>
-                  <View style={styles.sectionHeaderRow}>
-                    <View>
+              {/* 3. PHARMACY MEDICINES (EDITABLE & EXPANDABLE) */}
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <Text style={styles.sectionTitle}>3. Prescribed Medicines</Text>
-                      <Text style={styles.sectionSubtitle}>Billed in pharmacy (inventory tracked)</Text>
+                      <View style={styles.countBadge}>
+                        <Text style={styles.countBadgeText}>{medicines.length}</Text>
+                      </View>
                     </View>
-                    <Text style={styles.medsTotalBadge}>₹{medsTotal.toFixed(0)}</Text>
+                    <Text style={styles.sectionSubtitle}>Edit quantities, amounts, or add new medicines</Text>
                   </View>
-                  {billDetails.medicines.map((m, mIdx) => (
-                    <View key={m.id || mIdx} style={styles.medItemRow}>
-                      <Text style={styles.medBullet}>💊</Text>
-                      <Text style={styles.medNameText}>{m.details || 'Medicine'}</Text>
-                      <Text style={styles.medAmountText}>₹{(parseFloat(m.amount) || 0).toFixed(0)}</Text>
-                    </View>
-                  ))}
-                  <Text style={styles.medsFootnote}>
-                    * Note: To add or return pharmacy items, use "+ Pharmacy" or Pharmacy Correction.
-                  </Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.medsTotalBadge}>Total: ₹{medsTotal.toLocaleString('en-IN')}</Text>
+                    {canEdit && (
+                      <TouchableOpacity
+                        style={styles.addMedBtn}
+                        onPress={() => {
+                          loadInventory();
+                          setShowMedPicker(true);
+                        }}
+                      >
+                        <Ionicons name="add" size={15} color="#fff" />
+                        <Text style={styles.addProcBtnText}>+ Add Med</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
-              )}
+
+                {medicines.length === 0 ? (
+                  <View style={styles.emptyProcBox}>
+                    <Ionicons name="medkit-outline" size={26} color="#94a3b8" />
+                    <Text style={styles.emptyProcText}>No pharmacy medicines in this visit bill</Text>
+                    {canEdit && (
+                      <TouchableOpacity
+                        style={styles.emptyAddBtn}
+                        onPress={() => {
+                          loadInventory();
+                          setShowMedPicker(true);
+                        }}
+                      >
+                        <Text style={styles.emptyAddBtnText}>+ Add Medicine from Pharmacy</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
+                  medicines.map((med, mIdx) => (
+                    <View key={med.id || mIdx} style={styles.medItemCard}>
+                      <View style={styles.medItemTopRow}>
+                        <Text style={styles.medBulletTag}>💊 #{mIdx + 1}</Text>
+                        <TextInput
+                          style={[styles.medNameInput, !canEdit && styles.disabledInput]}
+                          value={med.name}
+                          onChangeText={(v) => handleMedicineChange(mIdx, 'name', v)}
+                          editable={canEdit}
+                          placeholder="Medicine Name"
+                        />
+                        {canEdit && (
+                          <TouchableOpacity
+                            onPress={() => handleRemoveMedicine(mIdx)}
+                            style={styles.removeProcBtn}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      <View style={styles.medItemBottomRow}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={styles.procFieldLabel}>Quantity (Units/Strips)</Text>
+                          <TextInput
+                            style={[styles.procSmallInput, !canEdit && styles.disabledInput]}
+                            keyboardType="numeric"
+                            value={med.qty}
+                            onChangeText={(v) => handleMedicineChange(mIdx, 'qty', v)}
+                            editable={canEdit}
+                            placeholder="1"
+                          />
+                        </View>
+                        <View style={{ width: 130 }}>
+                          <Text style={styles.procFieldLabel}>Line Total (₹)</Text>
+                          <TextInput
+                            style={[styles.procAmountInput, !canEdit && styles.disabledInput]}
+                            keyboardType="numeric"
+                            value={med.amount}
+                            onChangeText={(v) => handleMedicineChange(mIdx, 'amount', v)}
+                            editable={canEdit}
+                            placeholder="0"
+                          />
+                        </View>
+                      </View>
+                      {med.batch ? (
+                        <Text style={styles.medBatchNote}>Batch: {med.batch}</Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+              </View>
 
               {/* 4. DISCOUNT */}
               <View style={styles.sectionCard}>
@@ -591,7 +849,7 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
 
                 {medsTotal > 0 && (
                   <View style={styles.summaryLine}>
-                    <Text style={styles.summaryLabel}>Pharmacy Medicines:</Text>
+                    <Text style={styles.summaryLabel}>Pharmacy Medicines ({medicines.length}):</Text>
                     <Text style={styles.summaryVal}>₹{medsTotal.toLocaleString('en-IN')}</Text>
                   </View>
                 )}
@@ -618,13 +876,13 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                 </View>
               </View>
 
-              {/* 6. PAYMENT MODE & AMOUNT RECEIVED */}
+              {/* 6. PAYMENT RECEIPT & SPLIT (CASH + UPI) */}
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>5. Payment Receipt</Text>
                 
                 <Text style={styles.fieldLabel}>Payment Mode</Text>
                 <View style={styles.paymentModesRow}>
-                  {['CASH', 'UPI', 'CARD', 'WALLET'].map(mode => (
+                  {['CASH', 'UPI', 'CARD', 'SPLIT'].map(mode => (
                     <TouchableOpacity
                       key={mode}
                       disabled={!canEdit}
@@ -633,7 +891,16 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                         paymentMode === mode && styles.paymentModeChipActive,
                         !canEdit && styles.disabledBtn
                       ]}
-                      onPress={() => setPaymentMode(mode)}
+                      onPress={() => {
+                        setPaymentMode(mode);
+                        if (mode === 'SPLIT') {
+                          const half = Math.round(netPayable / 2);
+                          if (parseFloat(splitCash) === 0 && parseFloat(splitUpi) === 0) {
+                            setSplitCash(String(half));
+                            setSplitUpi(String(netPayable - half));
+                          }
+                        }
+                      }}
                     >
                       <Text
                         style={[
@@ -641,40 +908,143 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                           paymentMode === mode && styles.paymentModeChipTextActive
                         ]}
                       >
-                        {mode}
+                        {mode === 'SPLIT' ? '⚡ SPLIT (Cash+UPI)' : mode}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
 
-                <View style={{ marginTop: 12 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={styles.fieldLabel}>Amount Received (₹)</Text>
-                    <TouchableOpacity
-                      disabled={!canEdit}
-                      onPress={() => {
-                        setAutoSyncPayment(true);
-                        setAmountReceived(String(netPayable));
-                      }}
-                    >
-                      <Text style={{ fontSize: 11, color: '#5C0B0B', fontWeight: '600' }}>
-                        Match Net Payable (₹{netPayable})
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                {/* SPLIT PAYMENT BOX */}
+                {paymentMode === 'SPLIT' ? (
+                  <View style={styles.splitBox}>
+                    <View style={styles.splitHeaderRow}>
+                      <Ionicons name="git-branch-outline" size={16} color="#0369a1" />
+                      <Text style={styles.splitBoxTitle}>Split Payment Breakdown (Cash + UPI)</Text>
+                    </View>
 
-                  <TextInput
-                    style={[styles.numericInput, !canEdit && styles.disabledInput]}
-                    keyboardType="numeric"
-                    value={amountReceived}
-                    onChangeText={(val) => {
-                      setAutoSyncPayment(false);
-                      setAmountReceived(val);
-                    }}
-                    editable={canEdit}
-                    placeholder="0"
-                  />
-                </View>
+                    <View style={styles.splitInputsRow}>
+                      {/* CASH INPUT */}
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.splitInputLabel}>💵 Cash Amount (₹)</Text>
+                        <TextInput
+                          style={[styles.splitNumericInput, !canEdit && styles.disabledInput]}
+                          keyboardType="numeric"
+                          value={splitCash}
+                          onChangeText={(val) => {
+                            setSplitCash(val);
+                            const cashVal = parseFloat(val) || 0;
+                            const remaining = Math.max(0, netPayable - cashVal);
+                            setSplitUpi(String(remaining));
+                          }}
+                          editable={canEdit}
+                          placeholder="0"
+                        />
+                      </View>
+
+                      {/* UPI INPUT */}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.splitInputLabel}>📱 UPI Amount (₹)</Text>
+                        <TextInput
+                          style={[styles.splitNumericInput, !canEdit && styles.disabledInput]}
+                          keyboardType="numeric"
+                          value={splitUpi}
+                          onChangeText={(val) => setSplitUpi(val)}
+                          editable={canEdit}
+                          placeholder="0"
+                        />
+                      </View>
+                    </View>
+
+                    {/* UPI SUB-TYPE SELECTOR */}
+                    <View style={styles.upiModeSelectorRow}>
+                      <Text style={styles.upiSubLabel}>UPI Account:</Text>
+                      {['UPI', 'UPI (Clinic)', 'UPI (Store)'].map(um => (
+                        <TouchableOpacity
+                          key={um}
+                          disabled={!canEdit}
+                          style={[
+                            styles.upiChip,
+                            splitUpiMode === um && styles.upiChipActive
+                          ]}
+                          onPress={() => setSplitUpiMode(um)}
+                        >
+                          <Text style={[styles.upiChipText, splitUpiMode === um && styles.upiChipTextActive]}>
+                            {um}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {/* SPLIT BALANCING BANNER */}
+                    {(() => {
+                      const cashAmt = parseFloat(splitCash) || 0;
+                      const upiAmt = parseFloat(splitUpi) || 0;
+                      const totalSplit = cashAmt + upiAmt;
+                      const diff = totalSplit - netPayable;
+                      const isBalanced = Math.abs(diff) < 0.5;
+
+                      return (
+                        <View style={[styles.splitStatusBanner, isBalanced ? styles.splitStatusOk : styles.splitStatusWarning]}>
+                          <Ionicons
+                            name={isBalanced ? 'checkmark-circle' : 'alert-circle'}
+                            size={16}
+                            color={isBalanced ? '#15803d' : '#b45309'}
+                            style={{ marginRight: 6 }}
+                          />
+                          <Text style={[styles.splitStatusText, { color: isBalanced ? '#15803d' : '#b45309' }]}>
+                            {isBalanced
+                              ? `Total ₹${totalSplit} matches Net Payable (₹${netPayable})`
+                              : diff < 0
+                                ? `Short by ₹${Math.abs(diff)} (Total: ₹${totalSplit} / Net: ₹${netPayable})`
+                                : `Excess by ₹${diff} (Total: ₹${totalSplit} / Net: ₹${netPayable})`
+                            }
+                          </Text>
+                          {!isBalanced && canEdit && (
+                            <TouchableOpacity
+                              style={styles.autoBalanceBtn}
+                              onPress={() => {
+                                const rem = Math.max(0, netPayable - cashAmt);
+                                setSplitUpi(String(rem));
+                              }}
+                            >
+                              <Text style={styles.autoBalanceBtnText}>Balance UPI</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      );
+                    })()}
+                  </View>
+                ) : (
+                  /* SINGLE PAYMENT AMOUNT INPUT */
+                  <View style={{ marginTop: 12 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={styles.fieldLabel}>Amount Received (₹)</Text>
+                      <TouchableOpacity
+                        disabled={!canEdit}
+                        onPress={() => {
+                          setAutoSyncPayment(true);
+                          setAmountReceived(String(netPayable));
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, color: '#5C0B0B', fontWeight: '600' }}>
+                          Match Net Payable (₹{netPayable})
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <TextInput
+                      style={[styles.numericInput, !canEdit && styles.disabledInput]}
+                      keyboardType="numeric"
+                      value={amountReceived}
+                      onChangeText={(val) => {
+                        setAutoSyncPayment(false);
+                        setAmountReceived(val);
+                      }}
+                      editable={canEdit}
+                      placeholder="0"
+                    />
+                  </View>
+                )}
 
                 <View style={{ marginTop: 12 }}>
                   <Text style={styles.fieldLabel}>Reason / Edit Remarks</Text>
@@ -683,14 +1053,14 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                     value={reason}
                     onChangeText={setReason}
                     editable={canEdit}
-                    placeholder="e.g. Corrected consultation fee, added procedure"
+                    placeholder="e.g. Corrected consultation fee, updated pharmacy items, split payment"
                   />
                 </View>
               </View>
             </ScrollView>
           )}
 
-          {/* FOOTER ACTIONS */}
+          {/* FOOTER ACTIONS - ELEVATED WITH HIGH PADDING FOR ANDROID NAVIGATION BAR */}
           <View style={styles.modalFooter}>
             <TouchableOpacity
               style={styles.cancelBtn}
@@ -786,6 +1156,116 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
             </View>
           </View>
         </Modal>
+
+        {/* QUICK MEDICINE SELECTION SUB-MODAL */}
+        <Modal
+          visible={showMedPicker}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowMedPicker(false)}
+        >
+          <View style={styles.pickerOverlay}>
+            <View style={styles.pickerContent}>
+              <View style={styles.pickerHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="medkit" size={20} color="#5C0B0B" />
+                  <Text style={styles.pickerTitle}>Add Medicine to Bill</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowMedPicker(false)}>
+                  <Ionicons name="close-circle" size={24} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
+                {/* Custom Medicine Input Box */}
+                <View style={styles.customProcBox}>
+                  <Text style={styles.customProcBoxTitle}>Custom Medicine Item</Text>
+                  <TextInput
+                    style={styles.customInput}
+                    placeholder="Medicine Name (e.g. Sebogel / Sunscreen)"
+                    value={customMedName}
+                    onChangeText={setCustomMedName}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                    <TextInput
+                      style={[styles.customInput, { width: 90 }]}
+                      placeholder="Qty (e.g. 1)"
+                      keyboardType="numeric"
+                      value={customMedQty}
+                      onChangeText={setCustomMedQty}
+                    />
+                    <TextInput
+                      style={[styles.customInput, { flex: 1 }]}
+                      placeholder="Total Price (₹)"
+                      keyboardType="numeric"
+                      value={customMedAmount}
+                      onChangeText={setCustomMedAmount}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={styles.addCustomBtn}
+                    onPress={handleAddCustomMedicine}
+                  >
+                    <Text style={styles.addCustomBtnText}>+ Add Custom Medicine</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Search from Inventory */}
+                <View style={{ marginTop: 12, marginBottom: 8 }}>
+                  <Text style={styles.quickListHeading}>Or Select from Pharmacy Stock:</Text>
+                  <View style={styles.searchBarContainer}>
+                    <Ionicons name="search" size={16} color="#64748b" style={{ marginRight: 6 }} />
+                    <TextInput
+                      style={styles.searchBarInput}
+                      placeholder="Search medicine name..."
+                      value={medSearch}
+                      onChangeText={setMedSearch}
+                    />
+                    {medSearch ? (
+                      <TouchableOpacity onPress={() => setMedSearch('')}>
+                        <Ionicons name="close-circle" size={16} color="#94a3b8" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+
+                {inventoryLoading ? (
+                  <ActivityIndicator size="small" color="#5C0B0B" style={{ marginVertical: 14 }} />
+                ) : (
+                  (inventoryItems || [])
+                    .filter(item => {
+                      if (!medSearch.trim()) return true;
+                      return (item.medicine_name || '').toLowerCase().includes(medSearch.toLowerCase().trim());
+                    })
+                    .slice(0, 25)
+                    .map((item, iIdx) => (
+                      <TouchableOpacity
+                        key={item.id || iIdx}
+                        style={styles.quickProcItem}
+                        onPress={() => {
+                          handleAddMedicine({
+                            name: item.medicine_name,
+                            qty: 1,
+                            amount: item.mrp || 0,
+                            batch: item.batch_number || ''
+                          });
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.quickProcName}>{item.medicine_name}</Text>
+                          <Text style={styles.quickProcSub}>
+                            Stock: {item.quantity || 0} {item.unit || 'units'} {item.batch_number ? `• Batch: ${item.batch_number}` : ''}
+                          </Text>
+                        </View>
+                        <Text style={styles.quickProcAmount}>₹{(parseFloat(item.mrp) || 0).toLocaleString('en-IN')}</Text>
+                        <Ionicons name="add-circle-outline" size={20} color="#5C0B0B" style={{ marginLeft: 8 }} />
+                      </TouchableOpacity>
+                    ))
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -859,10 +1339,10 @@ const styles = StyleSheet.create({
   },
   restrictionBanner: {
     flexDirection: 'row',
-    backgroundColor: '#fef2f2',
+    backgroundColor: '#fee2e2',
+    borderColor: '#fca5a5',
     borderWidth: 1,
-    borderColor: '#f87171',
-    borderRadius: 10,
+    borderRadius: 8,
     padding: 12,
     marginBottom: 14
   },
@@ -880,18 +1360,18 @@ const styles = StyleSheet.create({
   permissionSuccessBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0fdf4',
-    borderWidth: 1,
+    backgroundColor: '#dcfce7',
     borderColor: '#86efac',
+    borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginBottom: 12
+    marginBottom: 14
   },
   permissionSuccessText: {
-    color: '#166534',
     fontSize: 13,
-    fontWeight: '600'
+    fontWeight: 'bold',
+    color: '#166534'
   },
   sectionCard: {
     backgroundColor: '#fff',
@@ -901,16 +1381,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
     elevation: 1
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10
+    alignItems: 'flex-start',
+    marginBottom: 12
   },
   sectionTitle: {
     fontSize: 15,
@@ -920,71 +1399,41 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 12,
     color: '#64748b',
-    marginTop: 1
+    marginTop: 2
+  },
+  countBadge: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: '#cbd5e1'
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#475569'
   },
   feeInputRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10
+    alignItems: 'center'
   },
   currencyPrefix: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#475569',
+    color: '#334155',
     marginRight: 6
   },
   numericInput: {
+    flex: 1,
     borderWidth: 1,
     borderColor: '#cbd5e1',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#0f172a',
-    backgroundColor: '#fff',
-    minWidth: 90
-  },
-  quickFeeGroup: {
-    flexDirection: 'row',
-    marginLeft: 10,
-    gap: 6,
-    flex: 1
-  },
-  quickFeeBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-    backgroundColor: '#f8fafc'
-  },
-  quickFeeBtnActive: {
-    backgroundColor: '#5C0B0B',
-    borderColor: '#5C0B0B'
-  },
-  quickFeeBtnText: {
-    fontSize: 13,
     fontWeight: '600',
-    color: '#334155'
-  },
-  quickFeeBtnTextActive: {
-    color: '#fff'
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 4
-  },
-  textInputArea: {
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 13,
     color: '#0f172a',
-    minHeight: 50,
     backgroundColor: '#fff'
   },
   singleTextInput: {
@@ -995,7 +1444,33 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: 13,
     color: '#0f172a',
-    backgroundColor: '#fff'
+    backgroundColor: '#fff',
+    marginTop: 4
+  },
+  quickFeeGroup: {
+    flexDirection: 'row',
+    marginLeft: 10,
+    gap: 6
+  },
+  quickFeeBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#cbd5e1'
+  },
+  quickFeeBtnActive: {
+    backgroundColor: '#5C0B0B',
+    borderColor: '#5C0B0B'
+  },
+  quickFeeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155'
+  },
+  quickFeeBtnTextActive: {
+    color: '#fff'
   },
   addProcBtn: {
     flexDirection: 'row',
@@ -1004,6 +1479,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 6
+  },
+  addMedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284c7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 4
   },
   addProcBtnText: {
     color: '#fff',
@@ -1104,52 +1588,60 @@ const styles = StyleSheet.create({
     textAlign: 'right'
   },
   medsTotalBadge: {
-    backgroundColor: '#f0fdf4',
-    borderWidth: 1,
-    borderColor: '#86efac',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    color: '#166534',
+    fontSize: 13,
     fontWeight: 'bold',
-    fontSize: 13
+    color: '#0369a1'
   },
-  medItemRow: {
+  medItemCard: {
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8
+  },
+  medItemTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9'
+    marginBottom: 6
   },
-  medBullet: {
+  medBulletTag: {
     fontSize: 12,
+    fontWeight: 'bold',
+    color: '#0284c7',
     marginRight: 6
   },
-  medNameText: {
+  medNameInput: {
     flex: 1,
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     fontSize: 13,
-    color: '#334155'
+    fontWeight: '600',
+    color: '#0f172a',
+    backgroundColor: '#fff'
   },
-  medAmountText: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#0f172a'
+  medItemBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center'
   },
-  medsFootnote: {
+  medBatchNote: {
     fontSize: 11,
-    color: '#64748b',
-    fontStyle: 'italic',
-    marginTop: 6
+    color: '#0369a1',
+    marginTop: 4,
+    fontStyle: 'italic'
   },
   discountTypeRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     marginBottom: 10
   },
   discountTypeBtn: {
     flex: 1,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#cbd5e1',
     backgroundColor: '#f8fafc',
@@ -1161,35 +1653,41 @@ const styles = StyleSheet.create({
   },
   discountTypeBtnText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#334155'
   },
   discountTypeBtnTextActive: {
     color: '#fff'
   },
   discountValueRow: {
-    marginTop: 4
+    marginTop: 6
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+    marginBottom: 4
   },
   discountValueInput: {
+    width: 120,
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderRadius: 6,
+    paddingHorizontal: 8,
     paddingVertical: 6,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#0f172a',
-    backgroundColor: '#fff',
-    width: 100
+    backgroundColor: '#fff'
   },
   discountPreviewText: {
+    marginLeft: 12,
     fontSize: 13,
-    fontWeight: 'bold',
     color: '#dc2626',
-    marginLeft: 10
+    fontWeight: '600'
   },
   summaryCard: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#1e293b',
     borderRadius: 12,
     padding: 14,
     marginBottom: 12
@@ -1269,12 +1767,117 @@ const styles = StyleSheet.create({
     borderColor: '#15803d'
   },
   paymentModeChipText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: 'bold',
     color: '#334155'
   },
   paymentModeChipTextActive: {
     color: '#fff'
+  },
+  splitBox: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#86efac',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10
+  },
+  splitHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8
+  },
+  splitBoxTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#15803d'
+  },
+  splitInputsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8
+  },
+  splitInputLabel: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 3
+  },
+  splitNumericInput: {
+    borderWidth: 1,
+    borderColor: '#86efac',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#0f172a',
+    backgroundColor: '#fff'
+  },
+  upiModeSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8
+  },
+  upiSubLabel: {
+    fontSize: 11,
+    color: '#475569',
+    fontWeight: '600'
+  },
+  upiChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1'
+  },
+  upiChipActive: {
+    backgroundColor: '#0284c7',
+    borderColor: '#0284c7'
+  },
+  upiChipText: {
+    fontSize: 11,
+    color: '#475569',
+    fontWeight: '600'
+  },
+  upiChipTextActive: {
+    color: '#fff'
+  },
+  splitStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1
+  },
+  splitStatusOk: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#86efac'
+  },
+  splitStatusWarning: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#fcd34d'
+  },
+  splitStatusText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontWeight: '600'
+  },
+  autoBalanceBtn: {
+    backgroundColor: '#0284c7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    marginLeft: 6
+  },
+  autoBalanceBtnText: {
+    color: '#fff',
+    fontSize: 10.5,
+    fontWeight: 'bold'
   },
   disabledInput: {
     backgroundColor: '#f1f5f9',
@@ -1285,19 +1888,22 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     flexDirection: 'row',
-    padding: 14,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'android' ? 38 : 28, // High elevation above Android 3-button & gesture nav bar
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     backgroundColor: '#fff',
-    gap: 10
+    gap: 12
   },
   cancelBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    alignItems: 'center'
+    alignItems: 'center',
+    backgroundColor: '#f8fafc'
   },
   cancelBtnText: {
     fontSize: 14,
@@ -1307,13 +1913,18 @@ const styles = StyleSheet.create({
   saveBtn: {
     flex: 2,
     backgroundColor: '#5C0B0B',
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 14,
+    borderRadius: 10,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#5C0B0B',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84
   },
   saveBtnText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#fff'
   },
@@ -1384,6 +1995,21 @@ const styles = StyleSheet.create({
     color: '#475569',
     marginBottom: 8
   },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0f172a'
+  },
   quickProcItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1396,6 +2022,11 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '600',
     color: '#1e293b'
+  },
+  quickProcSub: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2
   },
   quickProcAmount: {
     fontSize: 13,
