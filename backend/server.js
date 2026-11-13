@@ -2157,11 +2157,13 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
     const {
       consultation_fee,
       procedures = [],
+      medicines: reqMeds,
       discount_type = 'NONE',
       discount_value = 0,
       discount_amount: reqDiscountAmount,
       planned_procedures,
       payment_mode = 'CASH',
+      split_payments,
       amount_received,
       reason = 'Bill edited by user'
     } = req.body;
@@ -2169,9 +2171,14 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
     // Calculate procedure total
     const procTotal = (procedures || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
-    // Calculate medicine total (preserve existing medicines)
-    const existingMeds = await db.allAsync('SELECT amount FROM medicines WHERE visit_id = ?', [visitId]);
-    const medTotal = (existingMeds || []).reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+    // Calculate medicine total
+    let medTotal = 0;
+    if (Array.isArray(reqMeds)) {
+      medTotal = reqMeds.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+    } else {
+      const existingMeds = await db.allAsync('SELECT amount FROM medicines WHERE visit_id = ?', [visitId]);
+      medTotal = (existingMeds || []).reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
+    }
 
     const cFee = parseFloat(consultation_fee) || 0;
     const subtotal = cFee + procTotal + medTotal;
@@ -2189,9 +2196,17 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
     }
 
     const netPayable = Math.max(0, subtotal - finalDiscountAmount);
-    const finalPayment = (amount_received !== undefined && amount_received !== null)
-      ? parseFloat(amount_received)
-      : netPayable;
+    
+    // Check if split payment
+    const isSplit = (payment_mode === 'SPLIT' || (Array.isArray(split_payments) && split_payments.length > 0));
+    let finalPayment = 0;
+    if (isSplit && Array.isArray(split_payments) && split_payments.length > 0) {
+      finalPayment = split_payments.reduce((sum, sp) => sum + (parseFloat(sp.amount) || 0), 0);
+    } else {
+      finalPayment = (amount_received !== undefined && amount_received !== null)
+        ? parseFloat(amount_received)
+        : netPayable;
+    }
 
     await db.withTransaction(async (tx) => {
       // 1. Update visit details
@@ -2233,14 +2248,35 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
         ]);
       }
 
-      // 3. Update payment
-      const existingPay = await tx.get('SELECT id FROM payments WHERE visit_id = ? ORDER BY id ASC LIMIT 1', [visitId]);
-      if (existingPay) {
-        await tx.run(`
-          UPDATE payments
-          SET mode = ?, amount_received = ?
-          WHERE id = ?
-        `, [payment_mode, finalPayment, existingPay.id]);
+      // 3. Replace medicines list if provided
+      if (Array.isArray(reqMeds)) {
+        await tx.run('DELETE FROM medicines WHERE visit_id = ?', [visitId]);
+        for (const m of reqMeds) {
+          const medName = (m.name || m.details || '').trim();
+          if (!medName) continue;
+          const qty = parseInt(m.qty || m.quantity, 10) || 1;
+          const batchStr = m.batch ? ` [Batch: ${m.batch.trim()}]` : '';
+          const detailsString = `${medName}${batchStr} (Qty: ${qty})`;
+          const itemAmt = parseFloat(m.amount) || 0;
+          await tx.run(
+            'INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)',
+            [visitId, detailsString, itemAmt]
+          );
+        }
+      }
+
+      // 4. Update payments
+      await tx.run('DELETE FROM payments WHERE visit_id = ?', [visitId]);
+      if (isSplit && Array.isArray(split_payments) && split_payments.length > 0) {
+        for (const sp of split_payments) {
+          const spAmt = parseFloat(sp.amount) || 0;
+          if (spAmt > 0) {
+            await tx.run(`
+              INSERT INTO payments (visit_id, mode, amount_received, payment_date, patient_id, purpose)
+              VALUES (?, ?, ?, ?, ?, 'VISIT')
+            `, [visitId, (sp.mode || 'CASH').toUpperCase(), spAmt, visitDate, existingVisit.patient_id]);
+          }
+        }
       } else if (finalPayment > 0) {
         await tx.run(`
           INSERT INTO payments (visit_id, mode, amount_received, payment_date, patient_id, purpose)
@@ -2255,7 +2291,7 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
       'VISITS',
       visitId,
       { consultation_fee: existingVisit.consultation_fee, subtotal: existingVisit.subtotal, net_payable: existingVisit.net_payable },
-      { consultation_fee: cFee, subtotal, net_payable: netPayable, procCount: (procedures || []).length },
+      { consultation_fee: cFee, subtotal, net_payable: netPayable, procCount: (procedures || []).length, medCount: Array.isArray(reqMeds) ? reqMeds.length : undefined },
       reason
     );
 
