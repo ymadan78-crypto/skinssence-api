@@ -18,6 +18,7 @@ import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
+import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
 
 const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
 
@@ -84,6 +85,9 @@ function DailyDiaryScreenContent({ navigation, route }) {
   const [confirmEndModal, setConfirmEndModal] = useState({ visible: false, sessionNum: 1 });
   const [reopenModal, setReopenModal] = useState({ visible: false, sessionNum: 1, reason: '' });
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Existing Staff Submission Report Form Modal
+  const [staffReportModalVisible, setStaffReportModalVisible] = useState(false);
 
   const fetchDiary = async (dateToFetch) => {
     const target = dateToFetch || selectedDate;
@@ -177,12 +181,20 @@ function DailyDiaryScreenContent({ navigation, route }) {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setConfirmEndModal({ visible: false, sessionNum: 1 });
-      Alert.alert(
-        'Session Closed',
-        `Session ${sessionNum} (${sessionNum === 1 ? 'Morning' : 'Evening'}) has ended successfully! Its financial reports are now finalized.`,
-        [{ text: 'OK' }]
-      );
-      fetchDiary(selectedDate);
+
+      if (sessionNum === 1) {
+        Alert.alert(
+          'Session 1 Closed',
+          'Session 1 (Morning) has ended successfully! Its financial reports are now locked. Session 2 (Evening) is now active.',
+          [{ text: 'OK' }]
+        );
+        fetchDiary(selectedDate);
+      } else {
+        // Step 2 complete: Session 2 financial totals locked!
+        // Step 3 triggered automatically: Open the existing Staff Submission Report form
+        await fetchDiary(selectedDate);
+        setStaffReportModalVisible(true);
+      }
     } catch (err) {
       console.error('Error ending session:', err?.response?.data || err.message);
       Alert.alert('Error', err?.response?.data?.error || `Failed to end Session ${sessionNum}. Please try again.`);
@@ -236,6 +248,9 @@ function DailyDiaryScreenContent({ navigation, route }) {
   const s1Status = diaryData?.session_1 || { status: 'OPEN' };
   const s2Status = diaryData?.session_2 || { status: 'NOT_STARTED' };
   const isAdminOrDoc = userRole === 'ADMIN' || userRole === 'DOCTOR';
+  const staffSubmission = diaryData?.staff_submission || { submitted: false, report: null };
+  const isSession2Closed = s2Status.status === 'CLOSED';
+  const isStaffReportSubmitted = !!staffSubmission.submitted;
 
   // Current active report view data
   const activeReport = selectedSessionView === 'SESSION_1'
@@ -581,6 +596,47 @@ function DailyDiaryScreenContent({ navigation, route }) {
                     ) : null
                   )}
                 </View>
+
+                {/* Staff Submission Status Row (When Session 2 is closed) */}
+                {isSession2Closed && (
+                  <View style={styles.staffSubmissionBannerRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons
+                          name={isStaffReportSubmitted ? "checkmark-circle" : "alert-circle"}
+                          size={16}
+                          color={isStaffReportSubmitted ? "#15803d" : "#b45309"}
+                          style={{ marginRight: 6 }}
+                        />
+                        <Text style={[styles.staffSubBannerTitle, isStaffReportSubmitted ? { color: '#15803d' } : { color: '#b45309' }]}>
+                          {isStaffReportSubmitted
+                            ? `Staff Day-End Report: Submitted by ${staffSubmission.staff_name || 'Staff'} ✅`
+                            : 'Staff Day-End Report: PENDING ⚠️'}
+                        </Text>
+                      </View>
+                      <Text style={styles.staffSubBannerSub}>
+                        {isStaffReportSubmitted
+                          ? 'Review requests, follow-ups, birthdays & handover remarks recorded.'
+                          : 'Required step after Session 2 to unlock Final Full Day Summary.'}
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.openReportActionBtn, isStaffReportSubmitted ? styles.openReportActionBtnDone : styles.openReportActionBtnPending]}
+                      onPress={() => setStaffReportModalVisible(true)}
+                    >
+                      <Ionicons
+                        name={isStaffReportSubmitted ? "eye-outline" : "clipboard-outline"}
+                        size={13}
+                        color={isStaffReportSubmitted ? "#15803d" : "#fff"}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={[styles.openReportActionBtnText, isStaffReportSubmitted ? { color: '#15803d' } : { color: '#fff' }]}>
+                        {isStaffReportSubmitted ? 'View / Revise' : 'Complete Report'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
 
               {/* THREE-VIEW REPORT SWITCHER */}
@@ -610,84 +666,177 @@ function DailyDiaryScreenContent({ navigation, route }) {
                     onPress={() => setSelectedSessionView('FULL_DAY')}
                   >
                     <Text style={[styles.segmentBtnText, selectedSessionView === 'FULL_DAY' && styles.segmentBtnTextActive]}>
-                      📅 Full Day (S1+S2)
+                      📅 Full Day {isSession2Closed && !isStaffReportSubmitted ? '🔒' : '(S1+S2)'}
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* MANDATORY 2-CATEGORY FINANCIAL REPORT TABLE */}
-              <View style={styles.twoCategoryReportCard}>
-                <View style={styles.repCardHeader}>
-                  <View>
-                    <Text style={styles.repCardHeaderTitle}>
-                      {selectedSessionView === 'SESSION_1' ? '🌅 Session 1 Collection (Morning)' : (selectedSessionView === 'SESSION_2' ? '🌆 Session 2 Collection (Evening)' : '📅 Full Day Collection Summary')}
-                    </Text>
-                    <Text style={styles.repCardSub}>Two standardized collection categories</Text>
+              {/* VIEW DISPLAY: CHECK IF FULL DAY IS PREMATURELY LOCKED */}
+              {selectedSessionView === 'FULL_DAY' && isSession2Closed && !isStaffReportSubmitted ? (
+                /* PREVENT PREMATURE FULL DAY SUMMARY DISPLAY */
+                <View style={styles.pendingSubmissionLockCard}>
+                  <View style={styles.lockIconCircle}>
+                    <Ionicons name="lock-closed" size={32} color="#b45309" />
                   </View>
-                  <View style={styles.repStatusTag}>
-                    <Text style={styles.repStatusTagText}>
-                      {selectedSessionView === 'SESSION_1'
-                        ? (s1Status.status === 'CLOSED' ? 'LOCKED' : 'IN PROGRESS')
-                        : (selectedSessionView === 'SESSION_2'
-                            ? (s2Status.status === 'CLOSED' ? 'LOCKED' : (s2Status.status === 'OPEN' ? 'IN PROGRESS' : 'PENDING'))
-                            : (s1Status.status === 'CLOSED' && s2Status.status === 'CLOSED' ? 'FINALIZED' : 'LIVE'))}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* CATEGORY 1: PROCEDURE */}
-                <View style={styles.categoryRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.categoryTitle}>1. Procedure Collection</Text>
-                    <Text style={styles.categoryDetails}>Includes consultation fees + all procedure charges + prepaid packages</Text>
-                  </View>
-                  <Text style={styles.categoryAmount}>
-                    ₹{formatCurrency(activeReport.procedure_collection)}
+                  <Text style={styles.lockCardTitle}>Full Day Final Summary Locked</Text>
+                  <Text style={styles.lockCardSub}>
+                    Evening Session 2 is closed and financial totals are safely locked.
+                    As per clinical protocol, staff must complete and submit the <Text style={{ fontWeight: 'bold' }}>Staff Daily Submission Report</Text> (Follow-up calls, birthday messages, Google review requests & handover notes) before the final Full Day Summary can be displayed.
                   </Text>
+                  <TouchableOpacity
+                    style={styles.completeReportBigBtn}
+                    onPress={() => setStaffReportModalVisible(true)}
+                  >
+                    <Ionicons name="clipboard-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.completeReportBigBtnText}>📝 Complete & Submit Staff Report Now</Text>
+                  </TouchableOpacity>
                 </View>
-
-                <View style={styles.rowDivider} />
-
-                {/* CATEGORY 2: MEDICINE */}
-                <View style={styles.categoryRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.categoryTitle}>2. Medicine Collection</Text>
-                    <Text style={styles.categoryDetails}>Includes pharmacy medicines dispensed & OTC sales</Text>
+              ) : (
+                /* 2-CATEGORY FINANCIAL REPORT TABLE */
+                <View style={styles.twoCategoryReportCard}>
+                  <View style={styles.repCardHeader}>
+                    <View>
+                      <Text style={styles.repCardHeaderTitle}>
+                        {selectedSessionView === 'SESSION_1' ? '🌅 Session 1 Collection (Morning)' : (selectedSessionView === 'SESSION_2' ? '🌆 Session 2 Collection (Evening)' : '📅 Full Day Collection Summary')}
+                      </Text>
+                      <Text style={styles.repCardSub}>Two standardized collection categories</Text>
+                    </View>
+                    <View style={styles.repStatusTag}>
+                      <Text style={styles.repStatusTagText}>
+                        {selectedSessionView === 'SESSION_1'
+                          ? (s1Status.status === 'CLOSED' ? 'LOCKED' : 'IN PROGRESS')
+                          : (selectedSessionView === 'SESSION_2'
+                              ? (s2Status.status === 'CLOSED' ? 'LOCKED' : (s2Status.status === 'OPEN' ? 'IN PROGRESS' : 'PENDING'))
+                              : (s1Status.status === 'CLOSED' && s2Status.status === 'CLOSED' && isStaffReportSubmitted ? 'FINALIZED & VERIFIED' : 'LIVE'))}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.categoryAmount}>
-                    ₹{formatCurrency(activeReport.medicine_collection)}
-                  </Text>
-                </View>
 
-                <View style={[styles.rowDivider, { height: 2, backgroundColor: '#cbd5e1' }]} />
-
-                {/* GRAND TOTAL */}
-                <View style={[styles.categoryRow, styles.grandTotalRow]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.grandTotalTitle}>Grand Total Collection</Text>
-                    <Text style={styles.grandTotalSubtitle}>Procedure + Medicine Total</Text>
-                  </View>
-                  <Text style={styles.grandTotalAmount}>
-                    ₹{formatCurrency(activeReport.grand_total)}
-                  </Text>
-                </View>
-
-                {/* RECONCILIATION AUDIT FOOTER */}
-                <View style={styles.reconciliationCard}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="shield-checkmark" size={15} color="#16a34a" style={{ marginRight: 6 }} />
-                    <Text style={styles.reconcileText}>
-                      Reconciled: ₹{formatCurrency(activeReport.procedure_collection)} + ₹{formatCurrency(activeReport.medicine_collection)} = ₹{formatCurrency(activeReport.grand_total)}
+                  {/* CATEGORY 1: PROCEDURE */}
+                  <View style={styles.categoryRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.categoryTitle}>1. Procedure Collection</Text>
+                      <Text style={styles.categoryDetails}>Includes consultation fees + all procedure charges + prepaid packages</Text>
+                    </View>
+                    <Text style={styles.categoryAmount}>
+                      ₹{formatCurrency(activeReport.procedure_collection)}
                     </Text>
                   </View>
-                  {selectedSessionView === 'FULL_DAY' && (
-                    <Text style={styles.reconcileSubText}>
-                      Session 1 (₹{formatCurrency(finReports.session_1.grand_total)}) + Session 2 (₹{formatCurrency(finReports.session_2.grand_total)}) = Full Day (₹{formatCurrency(finReports.full_day.grand_total)})
+
+                  <View style={styles.rowDivider} />
+
+                  {/* CATEGORY 2: MEDICINE */}
+                  <View style={styles.categoryRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.categoryTitle}>2. Medicine Collection</Text>
+                      <Text style={styles.categoryDetails}>Includes pharmacy medicines dispensed & OTC sales</Text>
+                    </View>
+                    <Text style={styles.categoryAmount}>
+                      ₹{formatCurrency(activeReport.medicine_collection)}
                     </Text>
+                  </View>
+
+                  <View style={[styles.rowDivider, { height: 2, backgroundColor: '#cbd5e1' }]} />
+
+                  {/* GRAND TOTAL */}
+                  <View style={[styles.categoryRow, styles.grandTotalRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.grandTotalTitle}>Grand Total Collection</Text>
+                      <Text style={styles.grandTotalSubtitle}>Procedure + Medicine Total</Text>
+                    </View>
+                    <Text style={styles.grandTotalAmount}>
+                      ₹{formatCurrency(activeReport.grand_total)}
+                    </Text>
+                  </View>
+
+                  {/* RECONCILIATION AUDIT FOOTER */}
+                  <View style={styles.reconciliationCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="shield-checkmark" size={15} color="#16a34a" style={{ marginRight: 6 }} />
+                      <Text style={styles.reconcileText}>
+                        Reconciled: ₹{formatCurrency(activeReport.procedure_collection)} + ₹{formatCurrency(activeReport.medicine_collection)} = ₹{formatCurrency(activeReport.grand_total)}
+                      </Text>
+                    </View>
+                    {selectedSessionView === 'FULL_DAY' && (
+                      <View style={{ marginTop: 4 }}>
+                        <Text style={styles.reconcileSubText}>
+                          • Session 1: ₹{formatCurrency(finReports.session_1.procedure_collection)} (Proc) + ₹{formatCurrency(finReports.session_1.medicine_collection)} (Med) = ₹{formatCurrency(finReports.session_1.grand_total)}
+                        </Text>
+                        <Text style={styles.reconcileSubText}>
+                          • Session 2: ₹{formatCurrency(finReports.session_2.procedure_collection)} (Proc) + ₹{formatCurrency(finReports.session_2.medicine_collection)} (Med) = ₹{formatCurrency(finReports.session_2.grand_total)}
+                        </Text>
+                        <Text style={[styles.reconcileSubText, { fontWeight: 'bold', color: '#15803d', marginTop: 2 }]}>
+                          • Full Day Total: Session 1 (₹{formatCurrency(finReports.session_1.grand_total)}) + Session 2 (₹{formatCurrency(finReports.session_2.grand_total)}) = ₹{formatCurrency(finReports.full_day.grand_total)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* PART B: STAFF SUBMISSION STATUS & DETAILS (Shown in Full Day view when submitted) */}
+                  {selectedSessionView === 'FULL_DAY' && isStaffReportSubmitted && (
+                    <View style={styles.staffSubmissionFullSection}>
+                      <View style={styles.staffSubmissionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name="checkmark-circle" size={18} color="#15803d" style={{ marginRight: 6 }} />
+                          <Text style={styles.staffSubmissionHeaderTitle}>Staff Daily Report Concluded</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.reviseBtn}
+                          onPress={() => setStaffReportModalVisible(true)}
+                        >
+                          <Ionicons name="create-outline" size={12} color="#1d4ed8" style={{ marginRight: 3 }} />
+                          <Text style={styles.reviseBtnText}>Revise</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.staffMetaRow}>
+                        <Text style={styles.staffMetaLabel}>Staff Member:</Text>
+                        <Text style={styles.staffMetaVal}>{staffSubmission.staff_name || 'Staff'}</Text>
+                      </View>
+                      <View style={styles.staffMetaRow}>
+                        <Text style={styles.staffMetaLabel}>Submitted At:</Text>
+                        <Text style={styles.staffMetaVal}>{formatDisplayDate(selectedDate)} {formatTimeOnly(staffSubmission.submission_date)}</Text>
+                      </View>
+                      <View style={styles.staffMetaRow}>
+                        <Text style={styles.staffMetaLabel}>Report Status:</Text>
+                        <Text style={[styles.staffMetaVal, { color: '#15803d', fontWeight: 'bold' }]}>Completed & Finalized ✅</Text>
+                      </View>
+
+                      {/* TASK SUMMARY CHIPS */}
+                      <View style={styles.tasksChipsGrid}>
+                        <View style={styles.taskChip}>
+                          <Text style={styles.taskChipVal}>{staffSubmission.report?.followup_calls_count ?? 0}</Text>
+                          <Text style={styles.taskChipLabel}>📞 Calls</Text>
+                        </View>
+                        <View style={styles.taskChip}>
+                          <Text style={styles.taskChipVal}>{staffSubmission.report?.followup_whatsapp_count ?? 0}</Text>
+                          <Text style={styles.taskChipLabel}>💬 WA Followup</Text>
+                        </View>
+                        <View style={styles.taskChip}>
+                          <Text style={styles.taskChipVal}>{staffSubmission.report?.birthday_messages_count ?? 0}</Text>
+                          <Text style={styles.taskChipLabel}>🎂 Birthdays</Text>
+                        </View>
+                        <View style={styles.taskChip}>
+                          <Text style={styles.taskChipVal}>{staffSubmission.report?.reviews_collected_count ?? 0}</Text>
+                          <Text style={styles.taskChipLabel}>⭐ Reviews</Text>
+                        </View>
+                        <View style={styles.taskChip}>
+                          <Text style={styles.taskChipVal}>{staffSubmission.report?.total_visiting_patients ?? summary.total_visits}</Text>
+                          <Text style={styles.taskChipLabel}>👥 Visited</Text>
+                        </View>
+                      </View>
+
+                      {staffSubmission.report?.summary_notes ? (
+                        <View style={styles.notesContainer}>
+                          <Text style={styles.notesLabel}>Staff Handover Remarks:</Text>
+                          <Text style={styles.notesContent}>"{staffSubmission.report.summary_notes}"</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   )}
                 </View>
-              </View>
+              )}
 
               {/* TIMELINE SECTION HEADER */}
               <View style={styles.timelineSectionHeader}>
@@ -735,7 +884,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
             <Text style={[styles.modalHelp, { marginTop: 8 }]}>
               {confirmEndModal.sessionNum === 1
                 ? 'Session 1 will be closed and locked. All subsequent transactions will automatically belong to Session 2.'
-                : 'Session 2 will be closed and the complete day\'s final summary will be finalized.'}
+                : 'Session 2 financial summary will be locked. Next, the existing Staff Submission Report form will open automatically to conclude daily activities.'}
             </Text>
 
             <View style={styles.modalButtons}>
@@ -755,7 +904,9 @@ function DailyDiaryScreenContent({ navigation, route }) {
                 {actionLoading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>Confirm & End</Text>
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                    {confirmEndModal.sessionNum === 1 ? 'Confirm & End S1' : 'Confirm & Proceed to Report'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -812,6 +963,26 @@ function DailyDiaryScreenContent({ navigation, route }) {
           </View>
         </View>
       </Modal>
+
+      {/* EXISTING STAFF SUBMISSION REPORT FORM MODAL (INTEGRATED AFTER END SESSION 2) */}
+      <PendingFollowupReminderModal
+        visible={staffReportModalVisible}
+        onClose={() => setStaffReportModalVisible(false)}
+        navigation={navigation}
+        initialTab="summary"
+        reportDate={selectedDate}
+        onSummarySubmitted={(summaryData) => {
+          setStaffReportModalVisible(false);
+          fetchDiary(selectedDate);
+          Alert.alert(
+            'Full Day Finalized! 🎉',
+            'Staff Daily Submission Report recorded successfully. The final Full Day Summary is now unlocked.'
+          );
+        }}
+        onUpdated={() => {
+          fetchDiary(selectedDate);
+        }}
+      />
 
       {/* DATE PICKER MODAL */}
       <Modal visible={showDatePickerModal} transparent animationType="fade">
@@ -969,6 +1140,15 @@ const styles = StyleSheet.create({
   reopenBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   reopenBtnText: { fontSize: 11, fontWeight: 'bold', color: '#1d4ed8' },
 
+  // --- STAFF SUBMISSION BANNER IN SESSION CARD ---
+  staffSubmissionBannerRow: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  staffSubBannerTitle: { fontSize: 12, fontWeight: 'bold' },
+  staffSubBannerSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
+  openReportActionBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  openReportActionBtnPending: { backgroundColor: '#b45309' },
+  openReportActionBtnDone: { backgroundColor: '#dcfce7', borderWidth: 1, borderColor: '#86efac' },
+  openReportActionBtnText: { fontSize: 11, fontWeight: 'bold' },
+
   // --- THREE-VIEW SELECTOR STYLES ---
   reportSelectorSection: { marginBottom: 10 },
   reportSelectorTitle: { fontSize: 12, fontWeight: 'bold', color: '#475569', marginBottom: 6 },
@@ -977,6 +1157,14 @@ const styles = StyleSheet.create({
   segmentBtnActive: { backgroundColor: '#5C0B0B', elevation: 2 },
   segmentBtnText: { fontSize: 11, fontWeight: 'bold', color: '#475569' },
   segmentBtnTextActive: { color: '#fff' },
+
+  // --- PREVENT PREMATURE FULL DAY SUMMARY CARD (LOCKED STATE) ---
+  pendingSubmissionLockCard: { backgroundColor: '#fffbeb', borderWidth: 1.5, borderColor: '#fde68a', borderRadius: 12, padding: 18, alignItems: 'center', marginBottom: 14, elevation: 2 },
+  lockIconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#fef3c7', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  lockCardTitle: { fontSize: 16, fontWeight: 'bold', color: '#92400e', marginBottom: 6 },
+  lockCardSub: { fontSize: 12, color: '#78350f', textAlign: 'center', lineHeight: 18, marginBottom: 16, paddingHorizontal: 10 },
+  completeReportBigBtn: { backgroundColor: '#b45309', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 8, elevation: 2 },
+  completeReportBigBtnText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
 
   // --- TWO-CATEGORY REPORT CARD ---
   twoCategoryReportCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, elevation: 3, borderWidth: 1, borderColor: '#cbd5e1', marginBottom: 12 },
@@ -996,7 +1184,24 @@ const styles = StyleSheet.create({
   grandTotalAmount: { fontSize: 18, fontWeight: 'bold', color: '#15803d' },
   reconciliationCard: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
   reconcileText: { fontSize: 11, fontWeight: 'bold', color: '#15803d' },
-  reconcileSubText: { fontSize: 10, color: '#475569', marginTop: 2 },
+  reconcileSubText: { fontSize: 11, color: '#475569', marginTop: 2 },
+
+  // --- FULL DAY STAFF SUBMISSION DETAILS SECTION ---
+  staffSubmissionFullSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 2, borderTopColor: '#e2e8f0', backgroundColor: '#f0fdf4', marginHorizontal: -14, marginBottom: -14, padding: 14, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 },
+  staffSubmissionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  staffSubmissionHeaderTitle: { fontSize: 13, fontWeight: 'bold', color: '#166534' },
+  reviseBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#dbeafe', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  reviseBtnText: { fontSize: 11, fontWeight: 'bold', color: '#1d4ed8' },
+  staffMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 2 },
+  staffMetaLabel: { fontSize: 11, color: '#475569' },
+  staffMetaVal: { fontSize: 11, fontWeight: '600', color: '#1e293b' },
+  tasksChipsGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 8 },
+  taskChip: { flex: 1, backgroundColor: '#fff', borderRadius: 6, paddingVertical: 6, alignItems: 'center', marginHorizontal: 2, borderWidth: 1, borderColor: '#bbf7d0' },
+  taskChipVal: { fontSize: 13, fontWeight: 'bold', color: '#15803d' },
+  taskChipLabel: { fontSize: 9, color: '#475569', marginTop: 1 },
+  notesContainer: { backgroundColor: '#fff', borderRadius: 6, padding: 8, marginTop: 6, borderWidth: 1, borderColor: '#bbf7d0' },
+  notesLabel: { fontSize: 10, fontWeight: 'bold', color: '#166534', marginBottom: 2 },
+  notesContent: { fontSize: 11, color: '#334155', fontStyle: 'italic' },
 
   timelineSectionHeader: { marginTop: 6, marginBottom: 8 },
   timelineSectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#334155' },

@@ -34,7 +34,9 @@ export default function PendingFollowupReminderModal({
   navigation,
   onUpdated,
   initialPatients = null,
-  initialTab = 'followups'
+  initialTab = 'followups',
+  reportDate = null,
+  onSummarySubmitted = null
 }) {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab || 'followups');
@@ -81,7 +83,7 @@ export default function PendingFollowupReminderModal({
 
   const loadAllDailyTasks = async () => {
     setLoading(true);
-    const today = getTodayDateStr();
+    const today = reportDate || getTodayDateStr();
 
     // 1. Load cached activity counters for today
     try {
@@ -104,7 +106,7 @@ export default function PendingFollowupReminderModal({
     // 2. Fetch from backend API
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api-1.onrender.com/api/staff/daily-tasks', {
+      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/staff/daily-tasks?date=${today}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 10000
       });
@@ -293,7 +295,7 @@ export default function PendingFollowupReminderModal({
     setSubmittingSummary(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const today = getTodayDateStr();
+      const today = reportDate || getTodayDateStr();
 
       const payload = {
         report_date: today,
@@ -311,11 +313,12 @@ export default function PendingFollowupReminderModal({
 
       if (res.data?.success) {
         setSummarySubmitted(true);
-        setLastSummaryInfo(payload);
+        setLastSummaryInfo(res.data?.summary || payload);
         Alert.alert(
           'Daily Summary Submitted! ✅',
           `Thank you for concluding today's tasks!\n\n• Follow-up Calls: ${callsCount}\n• Follow-up WhatsApp: ${followupWaCount}\n• Birthday Wishes: ${birthdayWaCount}\n• Review Requests Sent: ${reviewsSentCount}\n• Total Visiting Patients: ${totalVisited || visitingPatients.length}`
         );
+        if (onSummarySubmitted) onSummarySubmitted(res.data?.summary || payload);
         if (onUpdated) onUpdated();
       }
     } catch (err) {

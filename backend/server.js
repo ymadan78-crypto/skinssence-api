@@ -5306,6 +5306,10 @@ app.get('/api/sessions/status', authenticateToken, async (req, res) => {
     const targetDate = (req.query.date || getISTDate()).slice(0, 10);
     const sessionInfo = await getActiveSessionForDate(targetDate);
     const reportData = await calculateSessionFinancialReports(targetDate);
+    const staffSummaryRow = await db.getAsync(
+      'SELECT * FROM staff_daily_reports WHERE report_date = ? ORDER BY id DESC LIMIT 1',
+      [targetDate]
+    );
 
     res.json({
       date: targetDate,
@@ -5326,7 +5330,13 @@ app.get('/api/sessions/status', authenticateToken, async (req, res) => {
         opened_at: sessionInfo.s1 ? sessionInfo.s1.closed_at : null,
         closed_at: null
       },
-      reports: reportData
+      reports: reportData,
+      staff_submission: {
+        submitted: !!staffSummaryRow,
+        report: staffSummaryRow || null,
+        staff_name: staffSummaryRow ? staffSummaryRow.staff_name : null,
+        submission_date: staffSummaryRow ? (staffSummaryRow.created_at || staffSummaryRow.report_date) : null
+      }
     });
   } catch (err) {
     console.error('Error in /api/sessions/status:', err);
@@ -5426,12 +5436,22 @@ app.post('/api/sessions/end', authenticateToken, async (req, res) => {
 
     const updatedReports = await calculateSessionFinancialReports(targetDate);
     const sessionStatus = await getActiveSessionForDate(targetDate);
+    const endStaffSummaryRow = await db.getAsync(
+      'SELECT * FROM staff_daily_reports WHERE report_date = ? ORDER BY id DESC LIMIT 1',
+      [targetDate]
+    );
 
     res.json({
       message: `Session ${sessionNum} closed successfully!`,
       session_number: sessionNum,
       reports: updatedReports,
-      session_status: sessionStatus
+      session_status: sessionStatus,
+      staff_submission: {
+        submitted: !!endStaffSummaryRow,
+        report: endStaffSummaryRow || null,
+        staff_name: endStaffSummaryRow ? endStaffSummaryRow.staff_name : null,
+        submission_date: endStaffSummaryRow ? (endStaffSummaryRow.created_at || endStaffSummaryRow.report_date) : null
+      }
     });
   } catch (err) {
     console.error('Error in /api/sessions/end:', err);
@@ -5905,7 +5925,12 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   });
                 });
 
-                // Return combined daily response with session status and financial reports
+                const staffReportRow = await db.getAsync(
+                  'SELECT * FROM staff_daily_reports WHERE report_date = ? ORDER BY id DESC LIMIT 1',
+                  [targetDate]
+                );
+
+                // Return combined daily response with session status, financial reports and staff submission
                 res.json({
                   date: targetDate,
                   active_session_num: sessionStatus.session_num,
@@ -5926,6 +5951,12 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                     closed_at: null
                   },
                   financial_reports: financialReports,
+                  staff_submission: {
+                    submitted: !!staffReportRow,
+                    report: staffReportRow || null,
+                    staff_name: staffReportRow ? staffReportRow.staff_name : null,
+                    submission_date: staffReportRow ? (staffReportRow.created_at || staffReportRow.report_date) : null
+                  },
                   summary: {
                     procedure_collection: financialReports.full_day.procedure_collection,
                     medicine_collection: financialReports.full_day.medicine_collection,
@@ -6552,29 +6583,60 @@ app.post('/api/staff/daily-summary', authenticateToken, async (req, res) => {
     const staff_id = req.user?.id || null;
     const staff_name = req.user?.username || req.user?.name || 'Staff';
 
-    const result = await db.runAsync(`
-      INSERT INTO staff_daily_reports (
-        report_date, staff_id, staff_name,
-        followup_calls_count, followup_whatsapp_count,
-        birthday_messages_count, reviews_collected_count,
-        total_visiting_patients, summary_notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      rDate,
-      staff_id,
-      staff_name,
-      parseInt(followup_calls_count, 10) || 0,
-      parseInt(followup_whatsapp_count, 10) || 0,
-      parseInt(birthday_messages_count, 10) || 0,
-      parseInt(reviews_collected_count, 10) || 0,
-      parseInt(total_visiting_patients, 10) || 0,
-      summary_notes || ''
-    ]);
+    // Check for existing submission for this date and staff to prevent duplicates
+    const existing = await db.getAsync(
+      'SELECT id FROM staff_daily_reports WHERE report_date = ? AND (staff_id = ? OR staff_name = ?) ORDER BY id DESC LIMIT 1',
+      [rDate, staff_id, staff_name]
+    );
+
+    let reportId;
+    if (existing) {
+      await db.runAsync(`
+        UPDATE staff_daily_reports
+        SET followup_calls_count = ?, followup_whatsapp_count = ?,
+            birthday_messages_count = ?, reviews_collected_count = ?,
+            total_visiting_patients = ?, summary_notes = ?, staff_name = ?, created_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [
+        parseInt(followup_calls_count, 10) || 0,
+        parseInt(followup_whatsapp_count, 10) || 0,
+        parseInt(birthday_messages_count, 10) || 0,
+        parseInt(reviews_collected_count, 10) || 0,
+        parseInt(total_visiting_patients, 10) || 0,
+        summary_notes || '',
+        staff_name,
+        existing.id
+      ]);
+      reportId = existing.id;
+    } else {
+      const result = await db.runAsync(`
+        INSERT INTO staff_daily_reports (
+          report_date, staff_id, staff_name,
+          followup_calls_count, followup_whatsapp_count,
+          birthday_messages_count, reviews_collected_count,
+          total_visiting_patients, summary_notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        rDate,
+        staff_id,
+        staff_name,
+        parseInt(followup_calls_count, 10) || 0,
+        parseInt(followup_whatsapp_count, 10) || 0,
+        parseInt(birthday_messages_count, 10) || 0,
+        parseInt(reviews_collected_count, 10) || 0,
+        parseInt(total_visiting_patients, 10) || 0,
+        summary_notes || ''
+      ]);
+      reportId = result?.lastID;
+    }
+
+    const savedSummary = await db.getAsync('SELECT * FROM staff_daily_reports WHERE id = ?', [reportId]);
 
     res.json({
       success: true,
-      id: result?.lastID || null,
-      message: 'Daily summary report submitted successfully'
+      id: reportId,
+      summary: savedSummary,
+      message: existing ? 'Daily summary report updated successfully' : 'Daily summary report submitted successfully'
     });
   } catch (err) {
     console.error('Error submitting staff daily summary:', err);
