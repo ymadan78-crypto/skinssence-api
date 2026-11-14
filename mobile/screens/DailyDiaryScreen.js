@@ -257,22 +257,42 @@ function DailyDiaryScreenContent({ navigation, route }) {
     ? finReports.session_1
     : (selectedSessionView === 'SESSION_2' ? finReports.session_2 : finReports.full_day);
 
-  // Filtering Timeline items
-  const timelineItems = diaryData?.timeline || [];
+  // Filtering Timeline items: ALL shows only money/medicine transactions & complimentary consultations
+  const isApptFilter = selectedFilter === 'APPOINTMENTS';
+  const timelineItems = isApptFilter
+    ? (diaryData?.appointments || []).map(a => {
+        const pId = a.skinssence_id || a.patient_id || '';
+        const status = (a.status || 'SCHEDULED').toUpperCase();
+        return {
+          id: `appt-${a.id}`,
+          category: 'APPOINTMENTS',
+          category_label: 'Appointment Booking',
+          title: `${a.patient_name || 'Patient'} (${pId || 'Appt #' + a.id})`,
+          subtitle: `Time: ${a.appointment_time || 'Not Set'} • Mobile: ${a.mobile || 'N/A'} ${a.notes ? '• Notes: ' + a.notes : ''}`,
+          amount: null,
+          is_debit: false,
+          badge: status,
+          badge_color: status === 'COMPLETED' ? '#16a34a' : (status === 'CANCELLED' || status === 'NO-SHOW' ? '#dc2626' : '#f59e0b'),
+          time: a.appointment_time || '',
+          patient_id: a.patient_id,
+          appointment_id: a.id
+        };
+      })
+    : (diaryData?.timeline || []);
+
   const filteredTimeline = timelineItems.filter(item => {
     // 0. Session Filter (Session 1 vs Session 2 vs Full Day)
     if (selectedSessionView === 'SESSION_1' && item.session_num && item.session_num !== 1) return false;
     if (selectedSessionView === 'SESSION_2' && item.session_num && item.session_num !== 2) return false;
 
     // 1. Category Filter
-    if (selectedFilter !== 'ALL') {
+    if (selectedFilter !== 'ALL' && selectedFilter !== 'APPOINTMENTS') {
       if (selectedFilter === 'VISITS' && item.category !== 'VISIT' && item.category !== 'CONSULTATION') return false;
       if (selectedFilter === 'PROCEDURES' && item.category !== 'PROCEDURES') return false;
       if (selectedFilter === 'MEDICINES' && item.category !== 'MEDICINES') return false;
       if (selectedFilter === 'PACKAGES' && item.category !== 'PACKAGES') return false;
       if (selectedFilter === 'PAYMENTS' && item.category !== 'PAYMENTS') return false;
       if (selectedFilter === 'EXPENSES' && item.category !== 'EXPENSES') return false;
-      if (selectedFilter === 'APPOINTMENTS' && item.category !== 'APPOINTMENTS') return false;
     }
 
     // 2. Search Query
@@ -464,12 +484,11 @@ function DailyDiaryScreenContent({ navigation, route }) {
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsScroll}>
           {[
-            { id: 'ALL', label: 'All Activities' },
-            { id: 'VISITS', label: `Visits (${summary.total_visits})` },
+            { id: 'ALL', label: 'All Transactions' },
+            { id: 'VISITS', label: `Consultations (${summary.total_visits})` },
             { id: 'PROCEDURES', label: 'Procedures' },
-            { id: 'MEDICINES', label: 'Medicines' },
+            { id: 'MEDICINES', label: 'Pharmacy' },
             { id: 'PACKAGES', label: 'Packages' },
-            { id: 'PAYMENTS', label: 'Collections' },
             { id: 'EXPENSES', label: 'Expenses' },
             { id: 'APPOINTMENTS', label: `Appts (${summary.appointments_count})` }
           ].map(pill => (

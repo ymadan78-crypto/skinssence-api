@@ -5722,23 +5722,43 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                 }
 
                 const timeline = [];
+                const todayVisitIdSet = new Set(visits.map(v => v.visit_id));
 
-                // 1. Consultations
+                // 1. Consultations (Paid and Complimentary)
                 visits.forEach(v => {
-                  const pName = `${v.first_name || ''} ${v.last_name || ''}`.trim();
+                  const pName = `${v.first_name || ''} ${v.last_name || ''}`.trim() || 'Patient';
                   const pId = v.skinssence_id || `S-${v.patient_id}`;
                   const time = formatISTTime(v.visit_date);
+                  const consFee = parseFloat(v.consultation_fee) || 0;
 
-                  if ((parseFloat(v.consultation_fee) || 0) > 0) {
+                  // Payments linked to this visit
+                  const vPayments = payments.filter(pay => pay.visit_id === v.visit_id);
+                  const totalPaidForVisit = vPayments.reduce((s, p) => s + (parseFloat(p.amount_received) || 0), 0);
+                  let vPayInfo = '';
+                  let vPayBadge = '';
+                  if (vPayments.length === 1) {
+                    const mode = (vPayments[0].mode || 'CASH').toUpperCase();
+                    vPayInfo = `Paid ₹${parseFloat(vPayments[0].amount_received) || 0} via ${mode}`;
+                    vPayBadge = mode;
+                  } else if (vPayments.length > 1) {
+                    const parts = vPayments.map(p => `${(p.mode || 'CASH').toUpperCase()}: ₹${parseFloat(p.amount_received) || 0}`);
+                    vPayInfo = `Paid ₹${totalPaidForVisit} (${parts.join(', ')})`;
+                    vPayBadge = 'SPLIT';
+                  } else if ((parseFloat(v.net_payable) || 0) > 0) {
+                    vPayInfo = `Unpaid (Due: ₹${v.net_payable})`;
+                    vPayBadge = 'UNPAID';
+                  }
+
+                  if (consFee > 0) {
                     timeline.push({
                       id: `cons-${v.visit_id}`,
                       category: 'CONSULTATION',
-                      category_label: 'Consultation Fee',
-                      title: `${pName} (${pId})`,
-                      subtitle: `Doctor Consultation • Staff: ${v.staff_name || 'Clinic'}`,
-                      amount: parseFloat(v.consultation_fee),
+                      category_label: 'Doctor Consultation',
+                      title: `${pName} (${pId}) — Doctor Consultation`,
+                      subtitle: `${vPayInfo ? vPayInfo + ' • ' : ''}Staff: ${v.staff_name || 'Clinic'}`,
+                      amount: consFee,
                       is_debit: false,
-                      badge: 'CONSULTATION',
+                      badge: vPayBadge ? `CONSULTATION (${vPayBadge})` : 'CONSULTATION',
                       badge_color: '#3b82f6',
                       time: time,
                       patient_id: v.patient_id,
@@ -5750,6 +5770,36 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                       visit_id: v.visit_id,
                       session_num: getItemSessionNum(v.visit_date)
                     });
+                  } else {
+                    // Check if complimentary / waived consultation
+                    const pProcsStr = (v.planned_procedures || '').toUpperCase();
+                    const hasProcs = procs.some(p => p.visit_id === v.visit_id);
+                    const hasMeds = meds.some(m => m.visit_id === v.visit_id);
+                    const isExplicitConsultation = pProcsStr.includes('CONSULTATION') || pProcsStr.includes('COMPLIMENTARY') || pProcsStr.includes('WAIVED');
+                    const isPureNoChargeVisit = !hasProcs && !hasMeds && (parseFloat(v.net_payable) || 0) === 0;
+
+                    if (isExplicitConsultation || isPureNoChargeVisit) {
+                      timeline.push({
+                        id: `cons-${v.visit_id}`,
+                        category: 'CONSULTATION',
+                        category_label: 'Complimentary Consultation',
+                        title: `${pName} (${pId}) — Doctor Consultation`,
+                        subtitle: `Doctor Consultation • Complimentary / Waived • Staff: ${v.staff_name || 'Clinic'}`,
+                        amount: 0,
+                        is_debit: false,
+                        badge: 'COMPLIMENTARY',
+                        badge_color: '#8b5cf6',
+                        time: time,
+                        patient_id: v.patient_id,
+                        first_name: v.first_name,
+                        last_name: v.last_name,
+                        skinssence_id: v.skinssence_id,
+                        mobile: v.mobile,
+                        patient_name: pName,
+                        visit_id: v.visit_id,
+                        session_num: getItemSessionNum(v.visit_date)
+                      });
+                    }
                   }
                 });
 
@@ -5762,16 +5812,27 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   const amt = parseFloat(p.amount) || 0;
                   const nameUpper = (p.name || '').toUpperCase();
 
+                  const vPayments = v ? payments.filter(pay => pay.visit_id === v.visit_id) : [];
+                  let procPayStr = '';
+                  let procPayMode = '';
+                  if (vPayments.length === 1) {
+                    procPayMode = (vPayments[0].mode || 'CASH').toUpperCase();
+                    procPayStr = `Paid via ${procPayMode}`;
+                  } else if (vPayments.length > 1) {
+                    procPayMode = 'SPLIT';
+                    procPayStr = `Paid via Split (${vPayments.map(pay => (pay.mode || 'CASH').toUpperCase()).join('/')})`;
+                  }
+
                   if (nameUpper.includes('[PACKAGE SOLD]')) {
                     timeline.push({
                       id: `procpkg-${p.id}`,
                       category: 'PACKAGES',
                       category_label: 'Package Sale',
                       title: `${pName} (${pId}) — ${p.name.replace(/\[Package Sold\]/i, '').trim()}`,
-                      subtitle: `Prepaid Package Booked • ₹${amt.toFixed(2)}`,
+                      subtitle: `Prepaid Package Booked • ₹${amt.toFixed(2)}${procPayStr ? ' • ' + procPayStr : ''}`,
                       amount: amt,
                       is_debit: false,
-                      badge: 'PACKAGE BOOKED',
+                      badge: procPayMode ? `PACKAGE BOOKED (${procPayMode})` : 'PACKAGE BOOKED',
                       badge_color: '#8b5cf6',
                       time: time,
                       patient_id: v ? v.patient_id : null,
@@ -5797,6 +5858,11 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                       badge_color: '#059669',
                       time: time,
                       patient_id: v ? v.patient_id : null,
+                      first_name: v ? v.first_name : null,
+                      last_name: v ? v.last_name : null,
+                      skinssence_id: v ? v.skinssence_id : null,
+                      mobile: v ? v.mobile : null,
+                      patient_name: pName,
                       visit_id: p.visit_id,
                       session_num: getItemSessionNum(v ? v.visit_date : targetDate)
                     });
@@ -5806,13 +5872,18 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                       category: 'PROCEDURES',
                       category_label: 'Procedure / Treatment',
                       title: `${pName} (${pId}) — ${p.name}`,
-                      subtitle: `${p.area ? 'Area: ' + p.area + ' | ' : ''}Billed: ₹${amt.toFixed(2)} ${p.notes ? '• ' + p.notes : ''}`,
+                      subtitle: `${p.area ? 'Area: ' + p.area + ' | ' : ''}Billed: ₹${amt.toFixed(2)}${procPayStr ? ' • ' + procPayStr : ''}${p.notes ? ' • ' + p.notes : ''}`,
                       amount: amt,
                       is_debit: false,
-                      badge: 'PROCEDURE',
+                      badge: procPayMode ? `PROCEDURE (${procPayMode})` : 'PROCEDURE',
                       badge_color: '#0284c7',
                       time: time,
                       patient_id: v ? v.patient_id : null,
+                      first_name: v ? v.first_name : null,
+                      last_name: v ? v.last_name : null,
+                      skinssence_id: v ? v.skinssence_id : null,
+                      mobile: v ? v.mobile : null,
+                      patient_name: pName,
                       visit_id: p.visit_id,
                       session_num: getItemSessionNum(v ? v.visit_date : targetDate)
                     });
@@ -5836,6 +5907,17 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   const time = v ? formatISTTime(v.visit_date) : '';
                   const visitMedsTotal = vMeds.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0);
 
+                  const vPayments = v ? payments.filter(pay => pay.visit_id === v.visit_id) : [];
+                  let medPayStr = '';
+                  let medPayMode = '';
+                  if (vPayments.length === 1) {
+                    medPayMode = (vPayments[0].mode || 'CASH').toUpperCase();
+                    medPayStr = `Paid via ${medPayMode}`;
+                  } else if (vPayments.length > 1) {
+                    medPayMode = 'SPLIT';
+                    medPayStr = `Paid via Split (${vPayments.map(p => (p.mode || 'CASH').toUpperCase()).join('/')})`;
+                  }
+
                   const medNamesList = vMeds.map(m => parseMedicineDetails(m.details).name).filter(Boolean);
                   const summaryText = medNamesList.length > 0
                     ? (medNamesList.length > 3 ? `${medNamesList.slice(0, 3).join(', ')} + ${medNamesList.length - 3} more` : medNamesList.join(', '))
@@ -5846,10 +5928,10 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                     category: 'MEDICINES',
                     category_label: 'Pharmacy Collection',
                     title: `${pName} (${pId}) — Pharmacy (${vMeds.length} ${vMeds.length === 1 ? 'item' : 'items'})`,
-                    subtitle: `${summaryText} • Total ₹${visitMedsTotal.toLocaleString('en-IN')}`,
+                    subtitle: `${summaryText} • Total ₹${visitMedsTotal.toLocaleString('en-IN')}${medPayStr ? ' • ' + medPayStr : ''}`,
                     amount: visitMedsTotal,
                     is_debit: false,
-                    badge: `PHARMACY (${vMeds.length} ITEMS)`,
+                    badge: medPayMode ? `PHARMACY (${medPayMode})` : `PHARMACY (${vMeds.length} ITEMS)`,
                     badge_color: '#d97706',
                     time: time,
                     patient_id: v ? v.patient_id : null,
@@ -5864,8 +5946,13 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   });
                 });
 
-                // 4. Payments
+                // 4. Standalone Payments ONLY (payments that do NOT belong to any visit of today)
+                // Visit payments are already unified with the visit service card to avoid duplicate entries!
                 payments.forEach(pay => {
+                  if (pay.visit_id && todayVisitIdSet.has(pay.visit_id)) {
+                    return; // Already cleanly represented inside consultation, procedure, or medicine card
+                  }
+
                   const pName = `${pay.first_name || ''} ${pay.last_name || ''}`.trim() || 'Patient';
                   const pId = pay.skinssence_id || (pay.patient_id ? `S-${pay.patient_id}` : '');
                   const time = formatISTTime(pay.payment_date);
@@ -5875,9 +5962,9 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   timeline.push({
                     id: `pay-${pay.id}`,
                     category: 'PAYMENTS',
-                    category_label: 'Payment Received',
+                    category_label: 'Direct Payment',
                     title: `₹${amt.toFixed(2)} Received via ${mode}`,
-                    subtitle: `From: ${pName} (${pId}) ${pay.purpose ? '• Purpose: ' + pay.purpose : ''} • Visit #${pay.visit_id || 'Direct'}`,
+                    subtitle: `From: ${pName} (${pId}) ${pay.purpose ? '• Purpose: ' + pay.purpose : ''} (Direct / Prior Due Payment)`,
                     amount: amt,
                     is_debit: false,
                     badge: `PAID (${mode})`,
@@ -5891,7 +5978,8 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                     patient_name: pName,
                     visit_id: pay.visit_id,
                     payment_id: pay.id,
-                    payment_mode: mode
+                    payment_mode: mode,
+                    session_num: getItemSessionNum(pay.payment_date, pay.session_num)
                   });
                 });
 
@@ -5917,26 +6005,12 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
                   });
                 });
 
-                // 6. Appointments
-                appts.forEach(a => {
-                  const pId = a.skinssence_id || a.patient_id || '';
-                  const status = (a.status || 'SCHEDULED').toUpperCase();
-
-                  timeline.push({
-                    id: `appt-${a.id}`,
-                    category: 'APPOINTMENTS',
-                    category_label: 'Appointment Booking',
-                    title: `${a.patient_name} (${pId || 'Appt #' + a.id})`,
-                    subtitle: `Time: ${a.appointment_time || 'Not Set'} • Mobile: ${a.mobile || 'N/A'} ${a.notes ? '• Notes: ' + a.notes : ''}`,
-                    amount: null,
-                    is_debit: false,
-                    badge: status,
-                    badge_color: status === 'COMPLETED' ? '#16a34a' : (status === 'CANCELLED' || status === 'NO-SHOW' ? '#dc2626' : '#f59e0b'),
-                    time: a.appointment_time || '',
-                    patient_id: a.patient_id,
-                    appointment_id: a.id,
-                    session_num: getItemSessionNum(a.appointment_date)
-                  });
+                // Sort timeline by session and time
+                timeline.sort((a, b) => {
+                  const sA = a.session_num || 1;
+                  const sB = b.session_num || 1;
+                  if (sA !== sB) return sA - sB;
+                  return (a.time || '').localeCompare(b.time || '');
                 });
 
                 const staffReportRow = await db.getAsync(
