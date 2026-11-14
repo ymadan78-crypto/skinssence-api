@@ -1863,6 +1863,20 @@ app.post('/api/visits', authenticateToken, idempotencyMiddleware, async (req, re
     const finalVisitDate = req.body.visit_date || new Date().toISOString();
     const targetDateStr = (finalVisitDate || '').split('T')[0];
 
+    const userRoleVisits = (req.user?.role || '').toUpperCase();
+    let currentActiveSessionNum = 1;
+    try {
+      const sessionInfoVisits = await getActiveSessionForDate(targetDateStr);
+      if (!sessionInfoVisits.can_transact && userRoleVisits !== 'ADMIN' && userRoleVisits !== 'DOCTOR') {
+        return res.status(403).json({
+          error: 'All clinic sessions for this date are closed. Please ask an Administrator to reopen the session before recording new transactions.'
+        });
+      }
+      currentActiveSessionNum = sessionInfoVisits?.session_num || 1;
+    } catch (eSess) {
+      console.warn('Session check warning in /api/visits:', eSess.message);
+    }
+
     let procSum = 0;
     if (req.body.procedures && Array.isArray(req.body.procedures)) {
       procSum = req.body.procedures.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
