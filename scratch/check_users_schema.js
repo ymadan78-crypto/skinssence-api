@@ -1,5 +1,8 @@
 const db = require('../backend/db');
 
-db.all("SELECT * FROM users LIMIT 5", [], (err, rows) => {
-  console.log('USERS SCHEMA & ROWS:', rows);
-});
+async function test() {
+  const schema = await db.allAsync("PRAGMA table_info(users)");
+  console.log('Users columns:', schema.map(c => c.name));
+}
+
+test().catch(console.error);

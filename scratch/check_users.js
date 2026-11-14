@@ -1,5 +1,6 @@
 const db = require('../backend/db');
-
-db.all("SELECT id, username, role, name FROM users", [], (err, rows) => {
-  console.log('Users in DB:', rows);
-});
+async function q() {
+  const users = await db.allAsync("SELECT id, username, role FROM users");
+  console.log('Users in DB:', users);
+}
+q();
