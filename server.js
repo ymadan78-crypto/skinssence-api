@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -80,9 +81,18 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Serve Skinssence Lite Staff Web Portal (0 MB install, ultra-lightweight)
-app.use(express.static(path.join(__dirname, 'public')));
+const publicDir = fs.existsSync(path.join(__dirname, 'public'))
+  ? path.join(__dirname, 'public')
+  : path.join(__dirname, '..', 'public');
+
+app.use(express.static(publicDir));
 app.get(['/lite', '/reception', '/staff'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'lite.html'));
+  const filePath = path.join(publicDir, 'lite.html');
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(fs.readFileSync(filePath, 'utf8'));
+  }
+  res.status(404).send('Skinssence Lite Portal is deploying, please refresh in a moment.');
 });
 
 // Lightweight Ping & Health Check Endpoints (Zero-dependency, immediate 200 response)
@@ -3563,7 +3573,6 @@ app.get('/api/inventory', authenticateToken, (req, res) => {
 });
 
 // --- LIVE STOCK RECONCILIATION ROUTES ---
-const fs = require('fs');
 let findDefaultStockFile = () => null;
 let parseStockFile = () => ({});
 let generatePreview = () => ({ items: [], summary: {} });
@@ -8422,8 +8431,6 @@ app.get('/api/admin/system/backups', backupExportLimiter, authenticateToken, (re
   }
 
   try {
-    const fs = require('fs');
-    const path = require('path');
     if (!fs.existsSync(BACKUP_DIR)) return res.json([]);
     const files = fs.readdirSync(BACKUP_DIR)
       .filter(f => f.startsWith('skinssence_backup_') && f.endsWith('.json.gz'))
