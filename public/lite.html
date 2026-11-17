@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Skinssence Lite — Staff Portal</title>
+  <meta name="theme-color" content="#5C0B0B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Skinssence Lite">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
+  
+  <style>
+    :root {
+      --primary: #5C0B0B;
+      --primary-dark: #3F0505;
+      --primary-light: #7E1515;
+      --gold: #D97706;
+      --gold-light: #FEF3C7;
+      --gold-dark: #B45309;
+      --bg: #F8FAFC;
+      --card-bg: #FFFFFF;
+      --text-main: #0F172A;
+      --text-muted: #64748B;
+      --border: #E2E8F0;
+      --green: #16A34A;
+      --green-light: #DCFCE7;
+      --red: #DC2626;
+      --red-light: #FEE2E2;
+      --blue: #2563EB;
+      --blue-light: #DBEAFE;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.08);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      padding-bottom: 74px; /* Space for bottom bar */
+    }
+
+    /* Top App Header */
+    header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: white;
+      padding: 12px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(92, 11, 11, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: white;
+      padding: 2px;
+      object-fit: contain;
+    }
+
+    .brand-text h1 {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      line-height: 1.1;
+    }
+
+    .brand-text span {
+      font-size: 11px;
+      color: #FCD34D;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+
+    .user-pill {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(4px);
+      padding: 6px 10px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: #FECACA;
+      font-size: 11px;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 2px 4px;
+      margin-left: 2px;
+    }
+
+    /* PWA Install Banner */
+    #install-banner {
+      background: #FEF3C7;
+      border-bottom: 1px solid #FDE68A;
+      color: #92400E;
+      padding: 10px 16px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    #install-banner button {
+      background: var(--gold-dark);
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Container */
+    .container {
+      max-width: 600px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 14px 14px 20px 14px;
+    }
+
+    /* Tabs Content */
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.15s ease-in-out;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Search Box */
+    .search-wrapper {
+      position: relative;
+      margin-bottom: 14px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 14px 44px 14px 42px;
+      border-radius: 12px;
+      border: 1.5px solid var(--border);
+      background: white;
+      font-size: 15px;
+      color: var(--text-main);
+      box-shadow: var(--shadow-sm);
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(92, 11, 11, 0.12);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 18px;
+      color: var(--text-muted);
+    }
+
+    .clear-search-btn {
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: #E2E8F0;
+      border: none;
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      font-size: 12px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #475569;
+    }
+
+    /* Section Subhead */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      padding: 0 2px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-count {
+      background: #E2E8F0;
+      color: #334155;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* Patient Cards */
+    .patient-card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.1s, box-shadow 0.1s;
+      cursor: pointer;
+    }
+
+    .patient-card:active {
+      transform: scale(0.99);
+      background: #FAFBFD;
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+
+    .pat-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      line-height: 1.2;
+    }
+
+    .sid-badge {
+      background: var(--gold-light);
+      color: var(--gold-dark);
+      font-weight: 800;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid #FDE68A;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    .card-mid {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .card-mid span {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      border-top: 1px dashed var(--border);
+      padding-top: 10px;
+      margin-top: 6px;
+    }
+
+    .btn-action {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: none;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+
+    .btn-call {
+      background: #F1F5F9;
+      color: #1E293B;
+      border: 1px solid #CBD5E1;
+    }
+
+    .btn-whatsapp {
+      background: #ECFDF5;
+      color: #065F46;
+      border: 1px solid #A7F3D0;
+    }
+
+    .btn-profile {
+      background: #EFF6FF;
+      color: var(--blue);
+      border: 1px solid #BFDBFE;
+    }
+
+    /* Forms */
+    .form-card {
+      background: white;
+      border-radius: var(--radius);
+      padding: 18px 16px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #334155;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .form-label .req {
+      color: var(--red);
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1.5px solid var(--border);
+      font-size: 15px;
+      color: var(--text-main);
+      background: #F8FAFC;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .form-control:focus {
+      background: white;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(92, 11, 11, 0.1);
+    }
+
+    .form-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+    }
+
+    .chip-group {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .chip {
+      flex: 1;
+      padding: 10px 4px;
+      text-align: center;
+      background: #F1F5F9;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #475569;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+
+    .chip.active {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    .duplicate-warning {
+      background: #FFFBEB;
+      border: 1.5px solid #FCD34D;
+      border-radius: 10px;
+      padding: 12px;
+      margin-top: 8px;
+      display: none;
+    }
+
+    .duplicate-warning p {
+      font-size: 12.5px;
+      color: #92400E;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+
+    .duplicate-warning button {
+      background: #92400E;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+
+    .btn-submit {
+      width: 100%;
+      background: linear-gradient(135deg, var(--green) 0%, #15803D 100%);
+      color: white;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(22, 163, 74, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 10px;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+
+    .btn-submit:active {
+      transform: scale(0.98);
+      opacity: 0.9;
+    }
+
+    .btn-submit:disabled {
+      background: #94A3B8;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    /* Bottom Navigation Bar */
+    nav.bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: white;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 100;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+    }
+
+    .nav-item {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .nav-item .nav-icon {
+      font-size: 20px;
+      margin-bottom: 2px;
+    }
+
+    .nav-item .nav-label {
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+    }
+
+    .nav-item.active .nav-icon {
+      transform: scale(1.1);
+    }
+
+    /* Login Overlay */
+    #login-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .login-box {
+      background: white;
+      border-radius: 16px;
+      padding: 28px 22px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .login-box img {
+      width: 60px;
+      height: 60px;
+      border-radius: 14px;
+      margin-bottom: 12px;
+    }
+
+    .login-box h2 {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--primary);
+      margin-bottom: 4px;
+    }
+
+    .login-box p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 22px;
+    }
+
+    .login-btn {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 13px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+
+    /* Modal Sheet */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 500;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background: white;
+      width: 100%;
+      max-width: 550px;
+      border-radius: 20px 20px 0 0;
+      padding: 20px;
+      max-height: 85vh;
+      overflow-y: auto;
+      animation: slideUp 0.2s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-close-btn {
+      background: #F1F5F9;
+      border: none;
+      font-size: 18px;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      color: #475569;
+    }
+
+    /* Success Card */
+    .success-card {
+      text-align: center;
+      padding: 24px 14px;
+    }
+
+    .success-icon {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+
+    .success-sid {
+      background: var(--gold-light);
+      border: 2px dashed var(--gold-dark);
+      padding: 12px 24px;
+      border-radius: 12px;
+      display: inline-block;
+      font-size: 26px;
+      font-weight: 900;
+      color: var(--primary);
+      margin: 14px 0;
+      letter-spacing: 1px;
+    }
+
+    /* Loader */
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 16px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .icon {
+      font-size: 40px;
+      margin-bottom: 8px;
+    }
+
+    .toast {
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1E293B;
+      color: white;
+      padding: 9px 18px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 1000;
+      box-shadow: var(--shadow-lg);
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">Notice message</div>
+
+  <!-- Login Overlay -->
+  <div id="login-overlay">
+    <div class="login-box">
+      <img src="/logo.png" alt="Skinssence Logo" onerror="this.src='https://placehold.co/80x80/5C0B0B/white?text=S'">
+      <h2>Skinssence Lite</h2>
+      <p>Staff Portal — Patient Search & Registration</p>
+      
+      <div id="login-error" style="display:none; color: var(--red); background: var(--red-light); padding: 8px 12px; border-radius: 8px; font-size: 12.5px; margin-bottom: 12px; font-weight: 500;"></div>
+
+      <div class="form-group" style="text-align:left;">
+        <label class="form-label">Username</label>
+        <input type="text" id="login-user" class="form-control" placeholder="Enter staff username" autocapitalize="none" autocomplete="username">
+      </div>
+
+      <div class="form-group" style="text-align:left;">
+        <label class="form-label">Password</label>
+        <input type="password" id="login-pass" class="form-control" placeholder="Enter password" autocomplete="current-password">
+      </div>
+
+      <button id="btn-do-login" class="login-btn" onclick="handleLoginSubmit()">
+        <span>Login to Reception</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Top App Header -->
+  <header>
+    <div class="brand">
+      <img src="/logo.png" alt="Logo" onerror="this.style.display='none'">
+      <div class="brand-text">
+        <h1>Skinssence Lite</h1>
+        <span>⚡ RECEPTION PORTAL</span>
+      </div>
+    </div>
+    <div class="user-pill">
+      <span id="user-display-name">Staff</span>
+      <button class="logout-btn" onclick="logout()" title="Logout">Exit</button>
+    </div>
+  </header>
+
+  <!-- PWA Install Banner -->
+  <div id="install-banner">
+    <span>📲 Add Skinssence Lite to your Home Screen for 1-tap instant access</span>
+    <button onclick="installPWA()">Add to Home</button>
+  </div>
+
+  <!-- Main Container -->
+  <div class="container">
+
+    <!-- TAB 1: SEARCH PATIENT -->
+    <div id="tab-search" class="tab-content active">
+      <div class="search-wrapper">
+        <span class="search-icon">🔍</span>
+        <input 
+          type="text" 
+          id="search-input" 
+          class="search-input" 
+          placeholder="Search Name, Mobile, or S-ID (e.g. S3430)..." 
+          autocomplete="off"
+          oninput="handleSearchInput(event)"
+        >
+        <button id="clear-search-btn" class="clear-search-btn" onclick="clearSearch()">✕</button>
+      </div>
+
+      <div class="section-header">
+        <span class="section-title" id="search-results-title">Recent Registrations</span>
+        <span class="badge-count" id="search-count">0</span>
+      </div>
+
+      <div id="patients-list">
+        <!-- Rendered via JS -->
+      </div>
+    </div>
+
+    <!-- TAB 2: NEW PATIENT REGISTRATION -->
+    <div id="tab-register" class="tab-content">
+      <div class="form-card">
+        <h2 style="font-size: 17px; font-weight: 800; color: var(--primary); margin-bottom: 4px;">New Patient Registration</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Fast registration for clinic reception</p>
+
+        <form id="reg-form" onsubmit="handleRegistrationSubmit(event)">
+          
+          <div class="form-group">
+            <label class="form-label">Full Name <span class="req">*</span></label>
+            <input type="text" id="reg-name" class="form-control" placeholder="e.g. Rahul Sharma" required autocapitalize="words">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mobile Number (10 digits) <span class="req">*</span></label>
+            <input 
+              type="tel" 
+              id="reg-mobile" 
+              class="form-control" 
+              placeholder="e.g. 9876543210" 
+              required 
+              maxlength="10" 
+              pattern="[0-9]{10}"
+              oninput="handleMobileChange(this.value)"
+            >
+            <div id="duplicate-warning" class="duplicate-warning">
+              <p>⚠️ <strong>Number Already Registered!</strong> A patient is already using this mobile number.</p>
+              <button type="button" onclick="searchExistingMobile()">View Existing Patient</button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">City <span class="req">*</span></label>
+              <input type="text" id="reg-city" class="form-control" value="Sri Ganganagar" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Age</label>
+              <input type="number" id="reg-age" class="form-control" placeholder="e.g. 28" min="1" max="110">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Gender</label>
+            <div class="chip-group">
+              <div class="chip active" data-val="Female" onclick="selectGender('Female')">Female</div>
+              <div class="chip" data-val="Male" onclick="selectGender('Male')">Male</div>
+              <div class="chip" data-val="Other" onclick="selectGender('Other')">Other</div>
+            </div>
+            <input type="hidden" id="reg-gender" value="Female">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Doctor Consultation</label>
+            <div class="chip-group">
+              <div class="chip active" data-val="400" onclick="selectConsultation('400')">₹400 (Paid)</div>
+              <div class="chip" data-val="0" onclick="selectConsultation('0')">₹0 (Waived)</div>
+              <div class="chip" data-val="NONE" onclick="selectConsultation('NONE')">No Visit</div>
+            </div>
+            <input type="hidden" id="reg-consultation" value="400">
+          </div>
+
+          <div class="form-group" id="payment-mode-group">
+            <label class="form-label">Payment Mode</label>
+            <div class="chip-group">
+              <div class="chip active" data-val="CASH" onclick="selectPayMode('CASH')">💵 Cash</div>
+              <div class="chip" data-val="UPI" onclick="selectPayMode('UPI')">📱 UPI / QR</div>
+            </div>
+            <input type="hidden" id="reg-paymode" value="CASH">
+          </div>
+
+          <button type="submit" id="btn-reg-submit" class="btn-submit">
+            <span>⚡ Register Patient & Generate S-ID</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TAB 3: RECENT REGISTRATIONS -->
+    <div id="tab-recent" class="tab-content">
+      <div class="section-header">
+        <span class="section-title">Latest 25 Registrations</span>
+        <button onclick="loadRecentPatients()" style="background:none; border:none; color:var(--primary); font-size:12px; font-weight:700; cursor:pointer;">🔄 Refresh</button>
+      </div>
+      <div id="recent-list">
+        <!-- Rendered via JS -->
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <div class="nav-item active" onclick="switchTab('search')">
+      <span class="nav-icon">🔍</span>
+      <span class="nav-label">Search</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('register')">
+      <span class="nav-icon">➕</span>
+      <span class="nav-label">New Patient</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('recent')">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">Recent</span>
+    </div>
+  </nav>
+
+  <!-- Patient Details Modal -->
+  <div id="patient-modal" class="modal-overlay" onclick="closePatientModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modal-patient-name" style="font-size: 18px; font-weight: 800; color: var(--text-main);">Patient Details</h3>
+        <button class="modal-close-btn" onclick="closeModal()">✕</button>
+      </div>
+      <div id="modal-patient-body">
+        <!-- Loaded via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Registration Success Modal -->
+  <div id="success-modal" class="modal-overlay">
+    <div class="modal-content" style="border-radius: 20px;">
+      <div class="success-card">
+        <div class="success-icon">🎉</div>
+        <h2 style="font-size: 20px; font-weight: 800; color: var(--green);">Patient Registered!</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Assigned Official Skinssence ID:</p>
+        
+        <div class="success-sid" id="new-sid-display">S0000</div>
+        
+        <p id="new-pat-summary" style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 16px;"></p>
+
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <button onclick="copyNewSid()" class="btn-action btn-call" style="padding:12px; font-size:14px;">
+            📋 Copy Skinssence ID
+          </button>
+          <a id="btn-send-whatsapp" href="#" target="_blank" class="btn-action btn-whatsapp" style="padding:12px; font-size:14px;">
+            💬 Send WhatsApp Welcome
+          </a>
+          <button onclick="closeSuccessModalAndReset()" class="btn-submit" style="margin-top:4px;">
+            ➕ Register Another Patient
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let deferredPrompt = null;
+    let currentPatients = [];
+    let searchDebounceTimer = null;
+
+    // PWA Install prompt listener
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById('install-banner').style.display = 'flex';
+    });
+
+    function installPWA() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === 'accepted') {
+            document.getElementById('install-banner').style.display = 'none';
+          }
+          deferredPrompt = null;
+        });
+      } else {
+        alert('To add to Home Screen:\n1. Tap browser menu (⋮ or Share)\n2. Select "Add to Home Screen"');
+      }
+    }
+
+    // Toast helper
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 2400);
+    }
+
+    // Token & Auth Management
+    function getToken() {
+      return localStorage.getItem('skinssence_token');
+    }
+
+    function checkAuth() {
+      const token = getToken();
+      const user = localStorage.getItem('skinssence_user_name') || 'Staff';
+      if (!token) {
+        document.getElementById('login-overlay').style.display = 'flex';
+      } else {
+        document.getElementById('login-overlay').style.display = 'none';
+        document.getElementById('user-display-name').innerText = user;
+        loadRecentPatients();
+      }
+    }
+
+    async function handleLoginSubmit() {
+      const u = document.getElementById('login-user').value.trim();
+      const p = document.getElementById('login-pass').value.trim();
+      const errBox = document.getElementById('login-error');
+      const btn = document.getElementById('btn-do-login');
+
+      if (!u || !p) {
+        errBox.innerText = 'Please enter both username and password';
+        errBox.style.display = 'block';
+        return;
+      }
+
+      errBox.style.display = 'none';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Logging in...';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.token) {
+          localStorage.setItem('skinssence_token', data.token);
+          localStorage.setItem('skinssence_user_name', data.name || u);
+          document.getElementById('user-display-name').innerText = data.name || u;
+          document.getElementById('login-overlay').style.display = 'none';
+          showToast('Welcome ' + (data.name || u));
+          loadRecentPatients();
+        } else {
+          errBox.innerText = data.error || 'Invalid credentials';
+          errBox.style.display = 'block';
+        }
+      } catch (err) {
+        errBox.innerText = 'Network error. Please check connection.';
+        errBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Login to Reception';
+      }
+    }
+
+    function logout() {
+      if (confirm('Are you sure you want to log out?')) {
+        localStorage.removeItem('skinssence_token');
+        localStorage.removeItem('skinssence_user_name');
+        document.getElementById('login-overlay').style.display = 'flex';
+      }
+    }
+
+    // Tab Switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+      document.getElementById(`tab-${tabId}`).classList.add('active');
+      
+      const navIndices = { 'search': 0, 'register': 1, 'recent': 2 };
+      const navItems = document.querySelectorAll('.nav-item');
+      if (navItems[navIndices[tabId]]) {
+        navItems[navIndices[tabId]].classList.add('active');
+      }
+
+      if (tabId === 'recent') {
+        loadRecentPatients();
+      }
+    }
+
+    // Patient Search
+    function handleSearchInput(e) {
+      const q = e.target.value.trim();
+      const clearBtn = document.getElementById('clear-search-btn');
+      clearBtn.style.display = q ? 'flex' : 'none';
+
+      clearTimeout(searchDebounceTimer);
+      if (!q) {
+        document.getElementById('search-results-title').innerText = 'Recent Registrations';
+        renderPatients(currentPatients, 'patients-list');
+        return;
+      }
+
+      searchDebounceTimer = setTimeout(() => {
+        executeSearch(q);
+      }, 220);
+    }
+
+    function clearSearch() {
+      const inp = document.getElementById('search-input');
+      inp.value = '';
+      inp.focus();
+      document.getElementById('clear-search-btn').style.display = 'none';
+      document.getElementById('search-results-title').innerText = 'Recent Registrations';
+      renderPatients(currentPatients, 'patients-list');
+    }
+
+    async function executeSearch(query) {
+      const container = document.getElementById('patients-list');
+      container.innerHTML = '<div class="empty-state"><div class="spinner" style="border-top-color:var(--primary); width:28px; height:28px;"></div><p style="margin-top:8px;">Searching...</p></div>';
+
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE}/api/patients/search?query=${encodeURIComponent(query)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.status === 401 || res.status === 403) {
+          return logout();
+        }
+        const data = await res.json();
+        const results = Array.isArray(data) ? data : [];
+        
+        document.getElementById('search-results-title').innerText = `Search Results for "${query}"`;
+        document.getElementById('search-count').innerText = results.length;
+        renderPatients(results, 'patients-list');
+      } catch (err) {
+        container.innerHTML = '<div class="empty-state"><p>Error searching. Please retry.</p></div>';
+      }
+    }
+
+    async function loadRecentPatients() {
+      try {
+        const token = getToken();
+        if (!token) return;
+
+        const res = await fetch(`${API_BASE}/api/patients/recent`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.status === 401 || res.status === 403) return logout();
+
+        let data = [];
+        if (res.ok) {
+          data = await res.json();
+        } else {
+          // Fallback to general search with empty string
+          const fb = await fetch(`${API_BASE}/api/patients/search?query=`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          data = await fb.json();
+        }
+
+        currentPatients = Array.isArray(data) ? data : [];
+        document.getElementById('search-count').innerText = currentPatients.length;
+        renderPatients(currentPatients, 'patients-list');
+        renderPatients(currentPatients, 'recent-list');
+      } catch (e) {
+        console.warn('Could not load recent patients:', e);
+      }
+    }
+
+    function renderPatients(list, containerId) {
+      const container = document.getElementById(containerId);
+      if (!list || list.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">👤</div>
+            <p>No patient records found.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = list.map(p => {
+        const pName = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown Patient';
+        const sid = p.skinssence_id || 'S--';
+        const mobile = p.mobile ? String(p.mobile).replace(/\D/g, '') : '';
+        const city = p.city || 'Sri Ganganagar';
+        const gender = p.gender || '';
+        const age = p.dob ? calculateAge(p.dob) : '';
+        const infoStr = [gender, age ? `${age}y` : '', city].filter(Boolean).join(' • ');
+
+        return `
+          <div class="patient-card" onclick="openPatientModal(${p.id})">
+            <div class="card-top">
+              <span class="pat-name">${escapeHtml(pName)}</span>
+              <span class="sid-badge">${escapeHtml(sid)}</span>
+            </div>
+            <div class="card-mid">
+              <span>📱 ${escapeHtml(mobile || 'No Mobile')}</span>
+              ${infoStr ? `<span>• ${escapeHtml(infoStr)}</span>` : ''}
+            </div>
+            <div class="card-actions" onclick="event.stopPropagation()">
+              ${mobile ? `
+                <a href="tel:${mobile}" class="btn-action btn-call">
+                  📞 Call
+                </a>
+                <a href="https://wa.me/91${mobile}?text=Hello%20${encodeURIComponent(pName)},%20greetings%20from%20Skinssence%20Clinic!" target="_blank" class="btn-action btn-whatsapp">
+                  💬 WhatsApp
+                </a>
+              ` : ''}
+              <button class="btn-action btn-profile" onclick="openPatientModal(${p.id})">
+                👁️ Details
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function calculateAge(dobStr) {
+      if (!dobStr) return '';
+      const birth = new Date(dobStr);
+      if (isNaN(birth.getTime())) return '';
+      const diff = Date.now() - birth.getTime();
+      const ageDate = new Date(diff);
+      return Math.abs(ageDate.getUTCFullYear() - 1970);
+    }
+
+    // Modal Details
+    async function openPatientModal(patientId) {
+      const modal = document.getElementById('patient-modal');
+      const body = document.getElementById('modal-patient-body');
+      body.innerHTML = '<div class="empty-state"><div class="spinner" style="border-top-color:var(--primary); width:28px; height:28px;"></div><p style="margin-top:8px;">Loading profile...</p></div>';
+      modal.style.display = 'flex';
+
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE}/api/patients/${patientId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const p = await res.json();
+        
+        const pName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+        document.getElementById('modal-patient-name').innerText = pName;
+
+        body.innerHTML = `
+          <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:14px; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-size:13px; color:#64748B;">Skinssence ID</span>
+              <span class="sid-badge" style="font-size:14px;">${p.skinssence_id}</span>
+            </div>
+            <div style="font-size:14px; color:#1E293B; margin-bottom:4px;">
+              <strong>Mobile:</strong> ${p.mobile || '—'}
+            </div>
+            <div style="font-size:14px; color:#1E293B; margin-bottom:4px;">
+              <strong>City / Address:</strong> ${p.city || '—'} ${p.address ? ', ' + p.address : ''}
+            </div>
+            <div style="font-size:14px; color:#1E293B;">
+              <strong>Gender / Age:</strong> ${p.gender || '—'} ${p.dob ? `(${calculateAge(p.dob)} yrs)` : ''}
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; margin-bottom:16px;">
+            ${p.mobile ? `
+              <a href="tel:${p.mobile}" class="btn-action btn-call" style="padding:10px;">
+                📞 Call Patient
+              </a>
+              <a href="https://wa.me/91${p.mobile}?text=Hello%20${encodeURIComponent(pName)},%20this%20is%20Skinssence%20Clinic." target="_blank" class="btn-action btn-whatsapp" style="padding:10px;">
+                💬 WhatsApp
+              </a>
+            ` : ''}
+          </div>
+
+          <h4 style="font-size:13px; text-transform:uppercase; color:#64748B; font-weight:700; margin-bottom:8px;">Recent Visits History</h4>
+          <div id="patient-visits-history" style="font-size:13px; color:#64748B;">
+            Loading visits...
+          </div>
+        `;
+
+        // Fetch visits
+        fetch(`${API_BASE}/api/patients/${patientId}/visits`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(r => r.json()).then(visits => {
+          const vList = Array.isArray(visits) ? visits : [];
+          const histContainer = document.getElementById('patient-visits-history');
+          if (vList.length === 0) {
+            histContainer.innerHTML = '<p style="color:#94A3B8;">No prior visits recorded for this patient.</p>';
+          } else {
+            histContainer.innerHTML = vList.slice(0, 5).map(v => `
+              <div style="border-bottom:1px solid #F1F5F9; padding:8px 0; display:flex; justify-content:space-between;">
+                <div>
+                  <strong style="color:#1E293B;">${v.visit_date || 'Recent'}</strong>
+                  <div style="font-size:12px; color:#64748B;">Fee: ₹${v.consultation_fee || 0} • Status: ${v.status || 'Done'}</div>
+                </div>
+                <span style="font-size:11px; background:#F1F5F9; padding:3px 6px; border-radius:6px; height:fit-content;">${v.consultation_payment_mode || 'CASH'}</span>
+              </div>
+            `).join('');
+          }
+        }).catch(() => {
+          document.getElementById('patient-visits-history').innerHTML = '<p>Unable to load visit history.</p>';
+        });
+
+      } catch (e) {
+        body.innerHTML = '<div class="empty-state"><p>Failed to load patient information.</p></div>';
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('patient-modal').style.display = 'none';
+    }
+
+    function closePatientModal(e) {
+      if (e.target.id === 'patient-modal') closeModal();
+    }
+
+    // New Patient Registration Logic
+    function selectGender(val) {
+      document.getElementById('reg-gender').value = val;
+      document.querySelectorAll('#tab-register .chip-group:nth-of-type(1) .chip').forEach(c => {
+        c.classList.toggle('active', c.getAttribute('data-val') === val);
+      });
+    }
+
+    function selectConsultation(val) {
+      document.getElementById('reg-consultation').value = val;
+      const chips = document.querySelectorAll('#tab-register .form-group:nth-of-type(5) .chip');
+      chips.forEach(c => {
+        c.classList.toggle('active', c.getAttribute('data-val') === val);
+      });
+      document.getElementById('payment-mode-group').style.display = val === 'NONE' ? 'none' : 'block';
+    }
+
+    function selectPayMode(val) {
+      document.getElementById('reg-paymode').value = val;
+      const chips = document.querySelectorAll('#payment-mode-group .chip');
+      chips.forEach(c => {
+        c.classList.toggle('active', c.getAttribute('data-val') === val);
+      });
+    }
+
+    let mobileCheckTimer = null;
+    function handleMobileChange(val) {
+      const clean = val.replace(/\D/g, '');
+      const warnBox = document.getElementById('duplicate-warning');
+      clearTimeout(mobileCheckTimer);
+
+      if (clean.length === 10) {
+        mobileCheckTimer = setTimeout(async () => {
+          try {
+            const token = getToken();
+            const res = await fetch(`${API_BASE}/api/patients/check-mobile/${clean}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+            warnBox.style.display = data.exists ? 'block' : 'none';
+          } catch (e) {}
+        }, 300);
+      } else {
+        warnBox.style.display = 'none';
+      }
+    }
+
+    function searchExistingMobile() {
+      const mob = document.getElementById('reg-mobile').value.trim();
+      switchTab('search');
+      const searchInp = document.getElementById('search-input');
+      searchInp.value = mob;
+      executeSearch(mob);
+    }
+
+    async function handleRegistrationSubmit(e) {
+      e.preventDefault();
+      const rawName = document.getElementById('reg-name').value.trim();
+      const rawMobile = document.getElementById('reg-mobile').value.trim().replace(/\D/g, '');
+      const city = document.getElementById('reg-city').value.trim() || 'Sri Ganganagar';
+      const age = document.getElementById('reg-age').value.trim();
+      const gender = document.getElementById('reg-gender').value;
+      const cType = document.getElementById('reg-consultation').value;
+      const payMode = document.getElementById('reg-paymode').value;
+      const submitBtn = document.getElementById('btn-reg-submit');
+
+      if (!rawName) return alert('Please enter patient name');
+      if (rawMobile.length !== 10) return alert('Please enter a valid 10-digit mobile number');
+
+      // Split name into first and last
+      const nameParts = rawName.split(/\s+/);
+      const firstName = nameParts[0];
+      const lastName = nameParts.slice(1).join(' ') || '.';
+
+      // Approximate DOB if age provided
+      let dob = null;
+      if (age && Number(age) > 0) {
+        const yr = new Date().getFullYear() - Number(age);
+        dob = `${yr}-01-01`;
+      }
+
+      const payload = {
+        first_name: firstName,
+        last_name: lastName,
+        mobile: rawMobile,
+        city: city,
+        gender: gender,
+        dob: dob,
+        charge_consultation: cType !== 'NONE',
+        consultation_fee: cType === '400' ? 400 : 0,
+        consultation_payment_mode: payMode
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner"></span> Registering patient...';
+
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE}/api/patients`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'x-idempotency-key': `reg_${Date.now()}_${Math.random().toString(36).substring(2,7)}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        if (res.ok && (data.skinssence_id || data.patient_id)) {
+          const newSid = data.skinssence_id || 'Assigned';
+          document.getElementById('new-sid-display').innerText = newSid;
+          document.getElementById('new-pat-summary').innerText = `${rawName} • 📱 ${rawMobile}`;
+          
+          const waLink = document.getElementById('btn-send-whatsapp');
+          const msg = encodeURIComponent(`Welcome to Skinssence Clinic, ${rawName}! Your official Patient ID is ${newSid}. Thank you for choosing us.`);
+          waLink.href = `https://wa.me/91${rawMobile}?text=${msg}`;
+
+          document.getElementById('success-modal').style.display = 'flex';
+          loadRecentPatients();
+        } else {
+          alert('Error registering: ' + (data.error || 'Server error'));
+        }
+      } catch (err) {
+        alert('Network error while registering patient. Please check internet connection.');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '⚡ Register Patient & Generate S-ID';
+      }
+    }
+
+    function copyNewSid() {
+      const sid = document.getElementById('new-sid-display').innerText;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sid).then(() => showToast(`Copied ${sid} to clipboard!`));
+      } else {
+        showToast(`Skinssence ID: ${sid}`);
+      }
+    }
+
+    function closeSuccessModalAndReset() {
+      document.getElementById('success-modal').style.display = 'none';
+      document.getElementById('reg-form').reset();
+      document.getElementById('reg-city').value = 'Sri Ganganagar';
+      selectGender('Female');
+      selectConsultation('400');
+      selectPayMode('CASH');
+      document.getElementById('duplicate-warning').style.display = 'none';
+      document.getElementById('reg-name').focus();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+</body>
+</html>

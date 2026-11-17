@@ -19,9 +19,7 @@
       },
       "package": "com.skinssence.app",
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_PHONE_STATE",
-        "android.permission.READ_CALL_LOG"
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {

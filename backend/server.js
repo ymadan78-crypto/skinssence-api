@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -49,7 +50,10 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
 
 // Phase 2C: Conservative CORS Configuration
 // Primary client is React Native native mobile app (non-browser), which does not send Origin headers.
@@ -74,6 +78,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Serve Skinssence Lite Staff Web Portal (0 MB install, ultra-lightweight)
+app.use(express.static(path.join(__dirname, 'public')));
+app.get(['/lite', '/reception', '/staff'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'lite.html'));
+});
 
 // Lightweight Ping & Health Check Endpoints (Zero-dependency, immediate 200 response)
 app.get(['/', '/ping', '/health', '/api/ping'], (req, res) => {
@@ -1444,6 +1454,20 @@ app.get('/api/patients/search', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     const sorted = sortPatientsNewestFirst(rows || []);
     res.json(sorted.slice(0, 50));
+  });
+});
+
+// Recent Patients for Skinssence Lite Portal
+app.get('/api/patients/recent', authenticateToken, (req, res) => {
+  const sql = `
+    SELECT id, skinssence_id, first_name, last_name, mobile, city, gender, dob, created_at
+    FROM patients 
+    ORDER BY id DESC 
+    LIMIT 25
+  `;
+  db.all(sql, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
   });
 });
 
@@ -3540,7 +3564,6 @@ app.get('/api/inventory', authenticateToken, (req, res) => {
 
 // --- LIVE STOCK RECONCILIATION ROUTES ---
 const fs = require('fs');
-const path = require('path');
 let findDefaultStockFile = () => null;
 let parseStockFile = () => ({});
 let generatePreview = () => ({ items: [], summary: {} });

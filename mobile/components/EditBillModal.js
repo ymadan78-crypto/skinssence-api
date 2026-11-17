@@ -529,9 +529,27 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                 </Text>
               )}
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#64748b" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {canEdit && !loading && (
+                <TouchableOpacity
+                  style={[styles.headerSaveBtn, saving && styles.disabledBtn]}
+                  onPress={handleSaveBill}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="save" size={14} color="#fff" style={{ marginRight: 4 }} />
+                      <Text style={styles.headerSaveBtnText}>SAVE</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                <Ionicons name="close" size={22} color="#64748b" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {loading ? (
@@ -2190,8 +2208,8 @@ const styles = StyleSheet.create({
   modalFooter: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'android' ? 38 : 28, // High elevation above Android 3-button & gesture nav bar
+    paddingTop: 14,
+    paddingBottom: Platform.OS === 'android' ? 56 : 34, // Extra high — covers 3-button nav AND gesture nav bars
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     backgroundColor: '#fff',
