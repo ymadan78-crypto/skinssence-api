@@ -5609,6 +5609,7 @@ app.get('/api/admin/diary', authenticateToken, authorizeDiaryAccess, (req, res) 
   const visitsSql = `
     SELECT v.id as visit_id, v.patient_id, v.visit_date, v.consultation_fee, v.planned_procedures,
            v.subtotal, v.discount_type, v.discount_value, v.discount_amount, v.net_payable,
+           v.bill_sent_at, v.bill_sent_by,
            p.first_name, p.last_name, p.skinssence_id, p.mobile,
            u.name as staff_name
     FROM visits v
@@ -6297,7 +6298,7 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
 
   const sql = `
     SELECT v.id as visit_id, v.patient_id, v.visit_date, v.consultation_fee, v.planned_procedures,
-           v.followup_status, v.followup_reason,
+           v.followup_status, v.followup_reason, v.bill_sent_at, v.bill_sent_by,
            p.first_name, p.last_name, p.skinssence_id, p.mobile, u.name as staff_name
     FROM visits v
     JOIN patients p ON v.patient_id = p.id
@@ -6339,6 +6340,8 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
                 staff_name: v.staff_name,
                 followup_status: v.followup_status || null,
                 followup_reason: v.followup_reason || null,
+                bill_sent_at: v.bill_sent_at || null,
+                bill_sent_by: v.bill_sent_by || null,
                 consultation_fee: 0,
                 procedures: [],
                 medicines: [],
@@ -6352,6 +6355,10 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
 
             const pat = patientMap.get(v.patient_id);
             pat.visit_ids.push(v.visit_id);
+            if (v.bill_sent_at && !pat.bill_sent_at) {
+              pat.bill_sent_at = v.bill_sent_at;
+              pat.bill_sent_by = v.bill_sent_by;
+            }
             if (v.followup_status) {
               pat.followup_status = v.followup_status;
               pat.followup_reason = v.followup_reason;
@@ -6416,6 +6423,46 @@ app.get('/api/dashboard/today-visits', authenticateToken, (req, res) => {
       });
     });
   });
+});
+
+// Mark Bill as Sent on WhatsApp / Shared
+app.post('/api/visits/:id/mark-bill-sent', authenticateToken, async (req, res) => {
+  const visitId = req.params.id;
+  const staffName = req.user?.name || req.user?.username || 'Staff';
+  const nowIso = new Date().toISOString();
+  try {
+    await db.runAsync(
+      'UPDATE visits SET bill_sent_at = ?, bill_sent_by = ? WHERE id = ?',
+      [nowIso, staffName, visitId]
+    );
+    await db.runAsync(
+      'UPDATE invoices SET bill_sent_at = ?, bill_sent_by = ? WHERE visit_id = ?',
+      [nowIso, staffName, visitId]
+    );
+    res.json({ success: true, message: 'Bill marked as sent', bill_sent_at: nowIso, bill_sent_by: staffName });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Dismiss Bill Requirement (e.g. Free checkup / ₹0 review / not required)
+app.post('/api/visits/:id/dismiss-bill-sent', authenticateToken, async (req, res) => {
+  const visitId = req.params.id;
+  const staffName = req.user?.name || req.user?.username || 'Staff';
+  const nowIso = new Date().toISOString();
+  try {
+    await db.runAsync(
+      'UPDATE visits SET bill_sent_at = ?, bill_sent_by = ? WHERE id = ?',
+      [nowIso, `DISMISSED by ${staffName}`, visitId]
+    );
+    await db.runAsync(
+      'UPDATE invoices SET bill_sent_at = ?, bill_sent_by = ? WHERE visit_id = ?',
+      [nowIso, `DISMISSED by ${staffName}`, visitId]
+    );
+    res.json({ success: true, message: 'Bill requirement dismissed', bill_sent_at: nowIso, bill_sent_by: `DISMISSED by ${staffName}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/events/upcoming', authenticateToken, (req, res) => {

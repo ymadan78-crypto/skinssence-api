@@ -21,6 +21,7 @@ export default function TodayPatientsScreen({ navigation }) {
   const [editBillModalVisible, setEditBillModalVisible] = useState(false);
   const [reminderModalVisible, setReminderModalVisible] = useState(false);
   const [selectedFollowupPatient, setSelectedFollowupPatient] = useState(null);
+  const [billFilter, setBillFilter] = useState('ALL'); // 'ALL' | 'PENDING_BILL' | 'SENT_BILL'
 
   const fetchTodayVisits = async () => {
     try {
@@ -48,7 +49,108 @@ export default function TodayPatientsScreen({ navigation }) {
     fetchTodayVisits();
   };
 
+  const handleMarkBillSent = async (visitId) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await axios.post(
+        `https://skinssence-api-1.onrender.com/api/visits/${visitId}/mark-bill-sent`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setVisits(prev => prev.map(v => v.visit_id === visitId ? { ...v, bill_sent_at: new Date().toISOString() } : v));
+      Alert.alert('✅ Bill Marked as Sent', 'Status updated successfully.');
+    } catch(e) {
+      Alert.alert('Error', 'Could not update bill status.');
+    }
+  };
+
+  const handleDismissBill = (visitId, patientName) => {
+    Alert.alert(
+      'Dismiss Bill Requirement?',
+      `Mark visit for "${patientName}" as "Bill Not Required / Free Visit"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Dismiss',
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.post(
+                `https://skinssence-api-1.onrender.com/api/visits/${visitId}/dismiss-bill-sent`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              setVisits(prev => prev.map(v => v.visit_id === visitId ? { ...v, bill_sent_at: new Date().toISOString(), bill_sent_by: 'DISMISSED' } : v));
+            } catch(e) {
+              Alert.alert('Error', 'Could not dismiss bill requirement.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleQuickSendBillWhatsApp = (item) => {
+    const pName = `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Patient';
+    const sId = item.skinssence_id || `ID: ${item.patient_id}`;
+    const cleanMob = item.mobile ? item.mobile.replace(/\D/g, '').slice(-10) : '';
+
+    if (!cleanMob || cleanMob.length !== 10) {
+      return Alert.alert('Invalid Mobile', `Patient "${pName}" (${sId}) does not have a valid 10-digit mobile number in records.`);
+    }
+
+    const grandTotal = parseFloat(item.total_amount) || 0;
+    const dateStr = item.visit_date ? new Date(item.visit_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Today';
+
+    const text = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
+      `---------------------------------\n` +
+      `*Receipt / Visit Summary*\n` +
+      `Date: ${dateStr}\n` +
+      `Patient: ${pName} (${sId})\n` +
+      (item.consultation_fee > 0 ? `• Consultation Fee: ₹${item.consultation_fee}\n` : '') +
+      (item.procedure_total > 0 ? `• Treatment/Procedure: ₹${item.procedure_total}\n` : '') +
+      (item.medicine_total > 0 ? `• Pharmacy Medicines: ₹${item.medicine_total}\n` : '') +
+      `*Total Paid: ₹${grandTotal.toFixed(0)}*\n` +
+      `---------------------------------\n` +
+      `Thank you for visiting Skinssence Clinic! For any questions or follow-up, feel free to WhatsApp us.\n` +
+      `📞 Clinic Contact: +91 91791 79191`;
+
+    const encoded = encodeURIComponent(text);
+    const url = `whatsapp://send?phone=91${cleanMob}&text=${encoded}`;
+
+    Alert.alert(
+      'Send Bill on WhatsApp?',
+      `Send visit receipt to ${pName} (${cleanMob}) for ₹${grandTotal.toFixed(0)}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Open WhatsApp',
+          onPress: async () => {
+            try {
+              await Linking.openURL(url);
+              if (item.visit_id) {
+                handleMarkBillSent(item.visit_id);
+              }
+            } catch(e) {
+              Alert.alert('Error', 'Could not open WhatsApp.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const pendingBillsCount = visits.filter(v => (parseFloat(v.total_amount) || 0) > 0 && !v.bill_sent_at).length;
+  const sentBillsCount = visits.filter(v => Boolean(v.bill_sent_at)).length;
+
+  const currentHour = new Date().getHours();
+  const showWrapupBanner = (currentHour >= 13 && pendingBillsCount > 0);
+
   const filteredVisits = visits.filter(v => {
+    const grandTotal = parseFloat(v.total_amount) || 0;
+    if (billFilter === 'PENDING_BILL' && (grandTotal <= 0 || v.bill_sent_at)) return false;
+    if (billFilter === 'SENT_BILL' && !v.bill_sent_at) return false;
+
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     const name = `${v.first_name || ''} ${v.last_name || ''}`.toLowerCase();
@@ -138,6 +240,17 @@ export default function TodayPatientsScreen({ navigation }) {
               <Text style={[styles.statusBadgeText, { color: statusBadge.text }]}>{statusBadge.label}</Text>
             </View>
             <Text style={styles.timeText}>{formatVisitTime(item.visit_date)}</Text>
+            {grandTotal > 0 ? (
+              item.bill_sent_at ? (
+                <View style={{ backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4, marginTop: 3, borderWidth: 1, borderColor: '#86efac' }}>
+                  <Text style={{ fontSize: 9.5, color: '#166534', fontWeight: 'bold' }}>✓ WhatsApp Bill Sent</Text>
+                </View>
+              ) : (
+                <View style={{ backgroundColor: '#fee2e2', paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4, marginTop: 3, borderWidth: 1, borderColor: '#fca5a5' }}>
+                  <Text style={{ fontSize: 9.5, color: '#b91c1c', fontWeight: 'bold' }}>⚠️ Bill NOT Sent</Text>
+                </View>
+              )
+            ) : null}
           </View>
         </View>
 
@@ -256,9 +369,48 @@ export default function TodayPatientsScreen({ navigation }) {
           </View>
         )}
 
-        {/* BILL ACTIONS: EDIT BILL, FEEDBACK, QUICK PAYMENT MODE */}
+        {/* BILL ACTIONS: SEND BILL, EDIT BILL, FEEDBACK, QUICK PAYMENT MODE */}
         {item.visit_id ? (
           <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 }}>
+            {grandTotal > 0 && !item.bill_sent_at && (
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#15803d',
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 6
+                }}
+                onPress={() => handleQuickSendBillWhatsApp(item)}
+              >
+                <Ionicons name="logo-whatsapp" size={13} color="#fff" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#fff' }}>
+                  📲 Send Bill
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {grandTotal > 0 && !item.bill_sent_at && (
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#f1f5f9',
+                  paddingHorizontal: 8,
+                  paddingVertical: 5,
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderColor: '#cbd5e1'
+                }}
+                onPress={() => handleDismissBill(item.visit_id, `${item.first_name || ''} ${item.last_name || ''}`.trim())}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '600', color: '#475569' }}>
+                  Dismiss
+                </Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={{
                 flexDirection: 'row',
@@ -423,6 +575,85 @@ export default function TodayPatientsScreen({ navigation }) {
             <Ionicons name="close-circle" size={18} color="#9ca3af" />
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* 1:00 PM / 7:00 PM WRAP-UP BANNER */}
+      {showWrapupBanner && (
+        <View style={{
+          marginHorizontal: 16,
+          marginTop: 8,
+          marginBottom: 4,
+          padding: 10,
+          backgroundColor: currentHour >= 19 ? '#fdf4ff' : '#fffbeb',
+          borderWidth: 1.5,
+          borderColor: currentHour >= 19 ? '#e879f9' : '#f59e0b',
+          borderRadius: 8,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+            <Ionicons name={currentHour >= 19 ? 'moon' : 'time'} size={20} color={currentHour >= 19 ? '#7e22ce' : '#b45309'} style={{ marginRight: 6 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 12, fontWeight: 'bold', color: currentHour >= 19 ? '#7e22ce' : '#b45309' }}>
+                {currentHour >= 19 ? '⏰ 7:00 PM Evening Wrap-Up' : '⏰ 1:00 PM Morning Wrap-Up'}
+              </Text>
+              <Text style={{ fontSize: 11, color: '#475569', marginTop: 1 }}>
+                {pendingBillsCount} patient bill(s) still unsent on WhatsApp!
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={{
+              backgroundColor: currentHour >= 19 ? '#7e22ce' : '#b45309',
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 6
+            }}
+            onPress={() => setBillFilter('PENDING_BILL')}
+          >
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>View Unsent ›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* BILL STATUS FILTER PILLS */}
+      <View style={{ backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', flexDirection: 'row', gap: 8 }}>
+        <TouchableOpacity
+          style={[
+            { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb' },
+            billFilter === 'ALL' && { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' }
+          ]}
+          onPress={() => setBillFilter('ALL')}
+        >
+          <Text style={[{ fontSize: 12, color: '#4b5563', fontWeight: '600' }, billFilter === 'ALL' && { color: '#fff', fontWeight: 'bold' }]}>
+            All ({visits.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5' },
+            billFilter === 'PENDING_BILL' && { backgroundColor: '#b91c1c', borderColor: '#b91c1c' }
+          ]}
+          onPress={() => setBillFilter('PENDING_BILL')}
+        >
+          <Text style={[{ fontSize: 12, color: '#b91c1c', fontWeight: '600' }, billFilter === 'PENDING_BILL' && { color: '#fff', fontWeight: 'bold' }]}>
+            ⚠️ Unsent Bills ({pendingBillsCount})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#86efac' },
+            billFilter === 'SENT_BILL' && { backgroundColor: '#15803d', borderColor: '#15803d' }
+          ]}
+          onPress={() => setBillFilter('SENT_BILL')}
+        >
+          <Text style={[{ fontSize: 12, color: '#166534', fontWeight: '600' }, billFilter === 'SENT_BILL' && { color: '#fff', fontWeight: 'bold' }]}>
+            ✅ Sent ({sentBillsCount})
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* LIST CONTENT */}

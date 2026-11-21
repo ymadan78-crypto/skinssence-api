@@ -102,7 +102,7 @@ export async function previewBillPdfAsync(pdfUri, filename = 'Bill Preview') {
  * @param {Object} params.patient - Patient object containing skinssence_id and/or id
  * @param {Object} params.inFlightRef - Optional ref object to prevent duplicate simultaneous taps
  */
-export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFlightRef }) {
+export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFlightRef, visitId, onSentSuccess }) {
   // Prevent duplicate taps
   if (inFlightRef && inFlightRef.current) {
     return;
@@ -144,6 +144,7 @@ export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFl
 
     const patientDisplayName = `${activePatient.first_name || patient?.first_name || ''} ${activePatient.last_name || patient?.last_name || ''}`.trim() || 'Patient';
     const displaySId = activePatient.skinssence_id || patient?.skinssence_id || permanentSId || 'N/A';
+    const targetVisitId = visitId || activePatient?.visit_id || patient?.visit_id;
 
     // 3. Mobile Number Validation
     if (!normalizedMobile) {
@@ -179,6 +180,10 @@ export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFl
                   mimeType: 'application/pdf',
                   UTI: 'com.adobe.pdf'
                 });
+                if (targetVisitId) {
+                  markBillSentAsync(targetVisitId).catch(console.error);
+                }
+                onSentSuccess?.();
               } finally {
                 releaseLock();
               }
@@ -209,12 +214,19 @@ export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFl
                 return;
               }
 
+              // Record bill sent in database
+              if (targetVisitId) {
+                markBillSentAsync(targetVisitId).catch(console.error);
+              }
+
               // Pass the actual branded PDF to the share sheet with WhatsApp targeted
               await Sharing.shareAsync(pdfUri, {
                 dialogTitle: `Share ${filename} to WhatsApp (${patientDisplayName})`,
                 mimeType: 'application/pdf',
                 UTI: 'com.adobe.pdf'
               });
+
+              onSentSuccess?.();
             } catch (shareErr) {
               console.error('[WhatsAppShare] Share error:', shareErr);
               Alert.alert('Share Failed', `Could not complete sharing: ${shareErr.message || 'Unknown error'}`);
@@ -230,5 +242,39 @@ export async function shareBillToWhatsAppAsync({ pdfUri, filename, patient, inFl
     console.error('[WhatsAppShare] Error:', err);
     Alert.alert('Error', `WhatsApp sharing encountered an issue: ${err.message || 'Unknown error'}`);
     releaseLock();
+  }
+}
+
+/**
+ * Marks a visit's bill as sent on WhatsApp in the backend database.
+ */
+export async function markBillSentAsync(visitId) {
+  if (!visitId) return;
+  try {
+    const token = await AsyncStorage.getItem('userToken');
+    await axios.post(
+      `${API_BASE_URL}/api/visits/${visitId}/mark-bill-sent`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (e) {
+    console.log('[WhatsAppShare] markBillSent notice:', e?.response?.data || e.message);
+  }
+}
+
+/**
+ * Dismisses the bill requirement for a visit (e.g. ₹0 follow-up or free checkup).
+ */
+export async function dismissBillSentAsync(visitId) {
+  if (!visitId) return;
+  try {
+    const token = await AsyncStorage.getItem('userToken');
+    await axios.post(
+      `${API_BASE_URL}/api/visits/${visitId}/dismiss-bill-sent`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (e) {
+    console.log('[WhatsAppShare] dismissBillSent notice:', e?.response?.data || e.message);
   }
 }

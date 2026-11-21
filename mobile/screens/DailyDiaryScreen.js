@@ -10,7 +10,8 @@ import {
   RefreshControl,
   ScrollView,
   Modal,
-  Alert
+  Alert,
+  Linking
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -85,6 +86,8 @@ function DailyDiaryScreenContent({ navigation, route }) {
   const [confirmEndModal, setConfirmEndModal] = useState({ visible: false, sessionNum: 1 });
   const [reopenModal, setReopenModal] = useState({ visible: false, sessionNum: 1, reason: '' });
   const [actionLoading, setActionLoading] = useState(false);
+  const [pendingBillsModal, setPendingBillsModal] = useState({ visible: false, sessionNum: 1, pendingList: [] });
+  const [pendingWarningStep, setPendingWarningStep] = useState(1);
 
   // Existing Staff Submission Report Form Modal
   const [staffReportModalVisible, setStaffReportModalVisible] = useState(false);
@@ -238,6 +241,121 @@ function DailyDiaryScreenContent({ navigation, route }) {
     }
   };
 
+  const getPendingVisitsForSession = (sessionNum) => {
+    const map = new Map();
+    (diaryData?.timeline || []).forEach(item => {
+      if (item.category !== 'EXPENSES' && (item.amount > 0 || item.category === 'CONSULTATION')) {
+        const itemSNum = item.session_num || 1;
+        const belongsToSession = (sessionNum === 1) ? (itemSNum === 1) : (itemSNum === 2);
+        if (belongsToSession && !item.bill_sent_at && item.patient_id) {
+          if (!map.has(item.patient_id)) {
+            map.set(item.patient_id, {
+              patient_id: item.patient_id,
+              patient_name: item.patient_name || `${item.first_name || ''} ${item.last_name || ''}`.trim(),
+              skinssence_id: item.skinssence_id || `ID:${item.patient_id}`,
+              mobile: item.mobile,
+              visit_id: item.visit_id,
+              amount: item.amount,
+              time: item.time,
+              title: item.title
+            });
+          }
+        }
+      }
+    });
+    return Array.from(map.values());
+  };
+
+  const handleInitiateEndSession = (sessionNum) => {
+    const pendingList = getPendingVisitsForSession(sessionNum);
+    if (pendingList.length > 0) {
+      setPendingWarningStep(1);
+      setPendingBillsModal({
+        visible: true,
+        sessionNum,
+        pendingList
+      });
+    } else {
+      setConfirmEndModal({ visible: true, sessionNum });
+    }
+  };
+
+  const handleMarkBillSent = async (visitId) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await axios.post(
+        `${API_BASE_URL}/api/visits/${visitId}/mark-bill-sent`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setDiaryData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          timeline: (prev.timeline || []).map(t => t.visit_id === visitId ? { ...t, bill_sent_at: new Date().toISOString() } : t)
+        };
+      });
+      setPendingBillsModal(prev => ({
+        ...prev,
+        pendingList: prev.pendingList.filter(p => p.visit_id !== visitId)
+      }));
+      Alert.alert('✅ Bill Marked as Sent', 'Status updated.');
+    } catch (e) {
+      Alert.alert('Error', 'Could not update bill status.');
+    }
+  };
+
+  const handleDismissBill = async (visitId) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await axios.post(
+        `${API_BASE_URL}/api/visits/${visitId}/dismiss-bill-sent`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setDiaryData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          timeline: (prev.timeline || []).map(t => t.visit_id === visitId ? { ...t, bill_sent_at: new Date().toISOString(), bill_sent_by: 'DISMISSED' } : t)
+        };
+      });
+      setPendingBillsModal(prev => ({
+        ...prev,
+        pendingList: prev.pendingList.filter(p => p.visit_id !== visitId)
+      }));
+    } catch (e) {
+      Alert.alert('Error', 'Could not dismiss bill requirement.');
+    }
+  };
+
+  const handleQuickSendWhatsAppDiary = (patient) => {
+    const cleanMob = patient.mobile ? patient.mobile.replace(/\D/g, '').slice(-10) : '';
+    if (!cleanMob || cleanMob.length !== 10) {
+      return Alert.alert('Invalid Mobile', `Patient "${patient.patient_name}" does not have a valid 10-digit mobile number.`);
+    }
+    const amt = parseFloat(patient.amount) || 0;
+    const text = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
+      `---------------------------------\n` +
+      `*Receipt / Visit Summary*\n` +
+      `Date: ${selectedDate}\n` +
+      `Patient: ${patient.patient_name} (${patient.skinssence_id})\n` +
+      `• Details: ${patient.title || 'Treatment / Medicines'}\n` +
+      `*Total Amount: ₹${amt.toFixed(0)}*\n` +
+      `---------------------------------\n` +
+      `Thank you for visiting Skinssence Clinic! Please let us know if you have any questions.\n` +
+      `📞 Clinic Contact: +91 91791 79191`;
+
+    const url = `whatsapp://send?phone=91${cleanMob}&text=${encodeURIComponent(text)}`;
+    Linking.openURL(url).then(() => {
+      if (patient.visit_id) {
+        handleMarkBillSent(patient.visit_id);
+      }
+    }).catch(() => {
+      Alert.alert('Error', 'Could not open WhatsApp.');
+    });
+  };
+
   // Financial Reports data
   const finReports = diaryData?.financial_reports || {
     session_1: { procedure_collection: 0, medicine_collection: 0, grand_total: 0, count: 0 },
@@ -323,6 +441,11 @@ function DailyDiaryScreenContent({ navigation, route }) {
   };
 
   const isToday = selectedDate === formatDateToYMD(new Date());
+  const currentHour = new Date().getHours();
+  const pendingS1Count = getPendingVisitsForSession(1).length;
+  const pendingS2Count = getPendingVisitsForSession(2).length;
+  const pendingAllCount = pendingS1Count + pendingS2Count;
+  const showWrapupBanner = isToday && (currentHour >= 13 && pendingAllCount > 0);
 
   const navigateToPatient = (item) => {
     if (!item?.patient_id) return;
@@ -392,7 +515,24 @@ function DailyDiaryScreenContent({ navigation, route }) {
           ) : <View />}
 
           {item.visit_id ? (
-            <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {item.bill_sent_at ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: '#86efac' }}>
+                  <Ionicons name="checkmark-done" size={12} color="#15803d" style={{ marginRight: 3 }} />
+                  <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#15803d' }}>Bill Sent</Text>
+                </View>
+              ) : (
+                (item.amount > 0 || item.category === 'CONSULTATION') ? (
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fee2e2', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: '#fca5a5' }}
+                    onPress={() => handleQuickSendWhatsAppDiary(item)}
+                  >
+                    <Ionicons name="logo-whatsapp" size={12} color="#991b1b" style={{ marginRight: 3 }} />
+                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#991b1b' }}>📲 Unsent Bill</Text>
+                  </TouchableOpacity>
+                ) : null
+              )}
+
               <TouchableOpacity
                 style={[styles.correctActionBtn, { backgroundColor: '#fef3c7', borderColor: '#fcd34d' }]}
                 onPress={() => {
@@ -520,6 +660,32 @@ function DailyDiaryScreenContent({ navigation, route }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListHeaderComponent={
             <View style={styles.summaryContainer}>
+              {/* 1:00 PM / 7:00 PM WRAP-UP REMINDER BANNER */}
+              {showWrapupBanner && (
+                <View style={[styles.wrapupBannerContainer, currentHour >= 19 ? { backgroundColor: '#fdf4ff', borderColor: '#e879f9' } : {}]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                    <Ionicons name="notifications-circle" size={24} color={currentHour >= 19 ? '#7e22ce' : '#b45309'} style={{ marginRight: 8 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.wrapupBannerTitle, { color: currentHour >= 19 ? '#7e22ce' : '#b45309' }]}>
+                        {currentHour >= 19 ? '⏰ 7:00 PM Evening Wrap-Up Reminder' : '⏰ 1:00 PM Morning Wrap-Up Reminder'}
+                      </Text>
+                      <Text style={styles.wrapupBannerSub}>
+                        {pendingAllCount} patient(s) have unshared bills (S1: {pendingS1Count}, S2: {pendingS2Count}). Please send receipts or verify before ending sessions.
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.wrapupBannerBtn, { backgroundColor: currentHour >= 19 ? '#7e22ce' : '#b45309' }]}
+                    onPress={() => {
+                      const sNum = (pendingS1Count > 0 && s1Status.status !== 'CLOSED') ? 1 : 2;
+                      handleInitiateEndSession(sNum);
+                    }}
+                  >
+                    <Text style={styles.wrapupBannerBtnText}>Review Bills</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {/* STAFF-CONTROLLED SESSION CONTROL CARD */}
               <View style={styles.sessionControlCard}>
                 <View style={styles.sessionControlHeader}>
@@ -552,7 +718,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
                   {s1Status.status !== 'CLOSED' ? (
                     <TouchableOpacity
                       style={styles.endSessionBtn}
-                      onPress={() => setConfirmEndModal({ visible: true, sessionNum: 1 })}
+                      onPress={() => handleInitiateEndSession(1)}
                     >
                       <Ionicons name="checkmark-done" size={14} color="#78350f" style={{ marginRight: 4 }} />
                       <Text style={styles.endSessionBtnText}>End Session 1</Text>
@@ -598,7 +764,7 @@ function DailyDiaryScreenContent({ navigation, route }) {
                   {s2Status.status === 'OPEN' ? (
                     <TouchableOpacity
                       style={[styles.endSessionBtn, { backgroundColor: '#fef3c7', borderColor: '#fcd34d' }]}
-                      onPress={() => setConfirmEndModal({ visible: true, sessionNum: 2 })}
+                      onPress={() => handleInitiateEndSession(2)}
                     >
                       <Ionicons name="checkmark-done" size={14} color="#78350f" style={{ marginRight: 4 }} />
                       <Text style={styles.endSessionBtnText}>End Session 2</Text>
@@ -878,6 +1044,144 @@ function DailyDiaryScreenContent({ navigation, route }) {
           }
         />
       )}
+
+      {/* PENDING BILLS SAFETY WARNING MODAL (NON-BLOCKING) */}
+      <Modal visible={pendingBillsModal.visible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 420, maxHeight: '85%' }]}>
+            {pendingWarningStep === 1 ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="warning" size={24} color="#d97706" style={{ marginRight: 8 }} />
+                  <Text style={[styles.modalTitle, { flex: 1 }]}>
+                    Pending Bills (Session {pendingBillsModal.sessionNum})
+                  </Text>
+                </View>
+
+                <Text style={[styles.modalBodyText, { marginBottom: 6 }]}>
+                  <Text style={{ fontWeight: 'bold' }}>{pendingBillsModal.pendingList.length} patient(s)</Text> in Session {pendingBillsModal.sessionNum} have not received their bill on WhatsApp yet:
+                </Text>
+
+                <ScrollView style={{ maxHeight: 240, marginVertical: 8 }}>
+                  {pendingBillsModal.pendingList.map(p => (
+                    <View key={p.visit_id || p.patient_id} style={styles.pendingBillCard}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.pendingPatientName}>{p.patient_name}</Text>
+                        <Text style={styles.pendingPatientSub}>
+                          {p.skinssence_id} • ₹{formatCurrency(p.amount)} • {p.title || 'Treatment'}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <TouchableOpacity
+                          style={styles.sendWhatsAppSmallBtn}
+                          onPress={() => handleQuickSendWhatsAppDiary(p)}
+                        >
+                          <Ionicons name="logo-whatsapp" size={13} color="#fff" style={{ marginRight: 3 }} />
+                          <Text style={styles.sendWhatsAppSmallText}>Send</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.dismissSmallBtn}
+                          onPress={() => handleDismissBill(p.visit_id)}
+                        >
+                          <Text style={styles.dismissSmallText}>Skip</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+
+                <Text style={{ fontSize: 11, color: '#64748b', marginVertical: 4 }}>
+                  Tip: Sending bills immediately ensures accurate payment recording and prevents missing collection entries.
+                </Text>
+
+                <View style={[styles.modalButtons, { marginTop: 12, flexDirection: 'column', gap: 8 }]}>
+                  {pendingBillsModal.sessionNum === 1 ? (
+                    <TouchableOpacity
+                      style={[styles.modalBtn, { backgroundColor: '#b45309', marginHorizontal: 0, paddingVertical: 12 }]}
+                      onPress={() => setPendingWarningStep(2)}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
+                        ⏩ Carry Forward to Session 2 & Close S1
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.modalBtn, { backgroundColor: '#b45309', marginHorizontal: 0, paddingVertical: 12 }]}
+                      onPress={() => setPendingWarningStep(2)}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
+                        ⚠️ Proceed to End S2 with Unsent Bills
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.modalBtn, { backgroundColor: '#e2e8f0', marginHorizontal: 0 }]}
+                    onPress={() => setPendingBillsModal({ visible: false, sessionNum: 1, pendingList: [] })}
+                  >
+                    <Text style={{ color: '#475569', fontWeight: 'bold', textAlign: 'center' }}>
+                      Cancel & Complete Bills Now
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              /* STEP 2: BUSY DAY EXCEPTION OVERRIDE CONFIRMATION */
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                  <Ionicons name="flash-outline" size={24} color="#b45309" style={{ marginRight: 8 }} />
+                  <Text style={[styles.modalTitle, { flex: 1, color: '#b45309' }]}>
+                    Busy Clinic Day Override
+                  </Text>
+                </View>
+
+                <Text style={[styles.modalBodyText, { lineHeight: 20 }]}>
+                  {pendingBillsModal.sessionNum === 1 ? (
+                    <>
+                      If the clinic is experiencing rush, you can close <Text style={{ fontWeight: 'bold' }}>Session 1</Text> now so Session 2 starts without hindrance.
+                      {'\n\n'}
+                      Pending bills will <Text style={{ fontWeight: 'bold', color: '#15803d' }}>carry forward</Text> and can be sent or checked anytime today from <Text style={{ fontWeight: 'bold' }}>Today's Patients</Text>.
+                    </>
+                  ) : (
+                    <>
+                      Session 2 financial summary will be locked. Remaining unsent bills can still be sent or resolved from <Text style={{ fontWeight: 'bold' }}>Today's Patients</Text>.
+                      {'\n\n'}
+                      Proceed to complete the Staff Day-End Submission Report?
+                    </>
+                  )}
+                </Text>
+
+                <View style={[styles.modalButtons, { marginTop: 16 }]}>
+                  <TouchableOpacity
+                    style={[styles.modalBtn, { backgroundColor: '#e2e8f0' }]}
+                    onPress={() => setPendingWarningStep(1)}
+                  >
+                    <Text style={{ color: '#475569', fontWeight: 'bold' }}>Back</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalBtn, { backgroundColor: '#5C0B0B' }]}
+                    disabled={actionLoading}
+                    onPress={() => {
+                      const sNum = pendingBillsModal.sessionNum;
+                      setPendingBillsModal({ visible: false, sessionNum: 1, pendingList: [] });
+                      executeEndSession(sNum);
+                    }}
+                  >
+                    {actionLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                        {pendingBillsModal.sessionNum === 1 ? 'Close S1 & Start S2' : 'Close S2 & Continue'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* CONFIRMATION MODAL TO END SESSION */}
       <Modal visible={confirmEndModal.visible} transparent animationType="fade">
@@ -1254,5 +1558,21 @@ const styles = StyleSheet.create({
   modalHelp: { fontSize: 11, color: '#64748b', marginBottom: 12 },
   modalInput: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 16, color: '#1e293b' },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between' },
-  modalBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 }
+  modalBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
+
+  // --- WRAP-UP BANNER STYLES ---
+  wrapupBannerContainer: { backgroundColor: '#fffbeb', borderWidth: 1.5, borderColor: '#f59e0b', borderRadius: 10, padding: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  wrapupBannerTitle: { fontSize: 13, fontWeight: 'bold' },
+  wrapupBannerSub: { fontSize: 11, color: '#475569', marginTop: 2, lineHeight: 15 },
+  wrapupBannerBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6 },
+  wrapupBannerBtnText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+
+  // --- PENDING BILLS MODAL STYLES ---
+  pendingBillCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, padding: 8, marginBottom: 6 },
+  pendingPatientName: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
+  pendingPatientSub: { fontSize: 11, color: '#64748b', marginTop: 1 },
+  sendWhatsAppSmallBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15803d', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5 },
+  sendWhatsAppSmallText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+  dismissSmallBtn: { backgroundColor: '#f1f5f9', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 5, borderWidth: 1, borderColor: '#cbd5e1' },
+  dismissSmallText: { color: '#64748b', fontSize: 10, fontWeight: '600' }
 });
