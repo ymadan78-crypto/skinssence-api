@@ -3195,12 +3195,15 @@ app.put('/api/inventory/:id', authenticateToken, (req, res) => {
     const finalExp = expiry_date !== undefined ? expiry_date : existingRow.expiry_date;
     const finalInst = default_instructions !== undefined ? default_instructions : existingRow.default_instructions;
     const finalCompany = company !== undefined ? company.trim() : (existingRow.company || '');
+    const finalDiscontinued = req.body.is_discontinued !== undefined 
+      ? (req.body.is_discontinued ? 1 : 0) 
+      : (existingRow.is_discontinued || 0);
 
     const delta = newQty - existingQty;
 
     db.run(
-      'UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=?, unit=?, reorder_level=?, company=? WHERE id=?',
-      [finalName, finalBatch, finalMrp, newQty, finalExp, finalInst, finalUnit, finalReorder, finalCompany, id],
+      'UPDATE inventory SET medicine_name=?, batch_number=?, mrp=?, quantity=?, expiry_date=?, default_instructions=?, unit=?, reorder_level=?, company=?, is_discontinued=? WHERE id=?',
+      [finalName, finalBatch, finalMrp, newQty, finalExp, finalInst, finalUnit, finalReorder, finalCompany, finalDiscontinued, id],
       function(errUpd) {
         if (errUpd) return res.status(500).json({ error: errUpd.message });
 
@@ -3560,8 +3563,33 @@ app.delete('/api/inventory/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/api/inventory/:id/toggle-discontinue', authenticateToken, async (req, res) => {
+  const id = req.params.id;
+  try {
+    const item = await db.getAsync('SELECT id, is_discontinued, medicine_name FROM inventory WHERE id = ?', [id]);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const newStatus = (item.is_discontinued === 1) ? 0 : 1;
+    await db.runAsync('UPDATE inventory SET is_discontinued = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: newStatus ? 'Item marked as discontinued' : 'Item marked as active', is_discontinued: newStatus });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventory/toggle-medicine-discontinue', authenticateToken, async (req, res) => {
+  const { medicine_name, is_discontinued } = req.body;
+  if (!medicine_name) return res.status(400).json({ error: 'medicine_name is required' });
+  const statusVal = is_discontinued ? 1 : 0;
+  try {
+    await db.runAsync('UPDATE inventory SET is_discontinued = ? WHERE LOWER(TRIM(medicine_name)) = LOWER(TRIM(?))', [statusVal, medicine_name]);
+    res.json({ message: statusVal ? 'Medicine marked as discontinued' : 'Medicine marked as active', is_discontinued: statusVal });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/inventory', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM inventory WHERE quantity > 0 ORDER BY medicine_name ASC', [], (err, rows) => {
+  db.all('SELECT * FROM inventory WHERE quantity > 0 AND (is_discontinued IS NULL OR is_discontinued = 0) ORDER BY medicine_name ASC', [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     // Remove expired items and zero quantity items for the purpose of billing
     const activeForBilling = (rows || []).filter(item => {

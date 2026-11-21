@@ -40,17 +40,17 @@ const SORT_OPTIONS = [
   },
   {
     key: 'QTY_ASC',
-    label: 'Quantity: Low to High (Min to Max)',
-    badgeText: '📉 Min Qty First',
+    label: 'Quantity: Low to High (Total Stock)',
+    badgeText: '📉 Min Stock First',
     category: 'Stock Level',
-    description: 'Out-of-stock (0 units) & lowest stock medicines first'
+    description: 'Medicines with lowest total available stock across all batches first (1, 2, 3...)'
   },
   {
     key: 'QTY_DESC',
-    label: 'Quantity: High to Low (Max to Min)',
-    badgeText: '📈 Max Qty First',
+    label: 'Quantity: High to Low (Total Stock)',
+    badgeText: '📈 Max Stock First',
     category: 'Stock Level',
-    description: 'Well-stocked medicines with maximum quantity first'
+    description: 'Well-stocked medicines with maximum total quantity across batches first'
   },
   {
     key: 'TIMES_DESC',
@@ -154,6 +154,12 @@ function InventoryManagementScreenContent({ navigation }) {
   const [inventory, setInventory] = useState([]);
   const [searchQ, setSearchQ] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('ALL');
+  const [stockStatusFilter, setStockStatusFilter] = useState('ALL');
+  const [hideZeroQtyBatches, setHideZeroQtyBatches] = useState(true);
+  const [hideDiscontinued, setHideDiscontinued] = useState(true);
+  const [discontinuedMeds, setDiscontinuedMeds] = useState({});
+  const [discontinuedBatchIds, setDiscontinuedBatchIds] = useState({});
+  const [expandedDepletedMeds, setExpandedDepletedMeds] = useState({});
   const [selectedSort, setSelectedSort] = useState('ALPHA_ASC');
   const [isSortModalVisible, setIsSortModalVisible] = useState(false);
   const [brandOverrides, setBrandOverrides] = useState({});
@@ -212,6 +218,16 @@ function InventoryManagementScreenContent({ navigation }) {
         } catch (e) {}
       }
       fetchInventory(initialOverrides);
+    });
+    AsyncStorage.getItem('@skinssence_discontinued_meds').then(stored => {
+      if (stored) {
+        try { setDiscontinuedMeds(JSON.parse(stored) || {}); } catch(e){}
+      }
+    });
+    AsyncStorage.getItem('@skinssence_discontinued_batches').then(stored => {
+      if (stored) {
+        try { setDiscontinuedBatchIds(JSON.parse(stored) || {}); } catch(e){}
+      }
     });
     AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
   }, []);
@@ -743,26 +759,217 @@ Do you want to proceed?`,
 
   const existingMedicineNames = Array.from(new Set(inventory.map(i => i.medicine_name).filter(Boolean)));
 
+  const handleToggleDiscontinueMedicine = (medicineName, currentStatus) => {
+    const norm = (medicineName || '').trim().toLowerCase();
+    const newStatus = !currentStatus;
+    Alert.alert(
+      newStatus ? '🚫 Discontinue Medicine' : '✅ Restore Medicine',
+      newStatus 
+        ? `Are you sure you want to mark "${medicineName}" as DISCONTINUED?\n\nIt will be hidden from active inventory and billing unless viewed in the Discontinued filter.`
+        : `Restore "${medicineName}" to active pharmacy stock?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: newStatus ? 'Mark Discontinued' : 'Mark Active',
+          style: newStatus ? 'destructive' : 'default',
+          onPress: async () => {
+            const updated = { ...discontinuedMeds, [norm]: newStatus };
+            setDiscontinuedMeds(updated);
+            await AsyncStorage.setItem('@skinssence_discontinued_meds', JSON.stringify(updated));
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.post(
+                `${BASE_URL}/toggle-medicine-discontinue`,
+                { medicine_name: medicineName, is_discontinued: newStatus },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (e) {
+              console.log('Discontinue API notice:', e.message);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleToggleDiscontinueBatch = (batch, groupName) => {
+    const newStatus = !batch.is_discontinued;
+    Alert.alert(
+      newStatus ? '🚫 Discontinue Batch' : '✅ Restore Batch',
+      newStatus
+        ? `Mark Batch "${batch.batch_number || 'N/A'}" of "${groupName}" as DISCONTINUED?`
+        : `Restore Batch "${batch.batch_number || 'N/A'}" of "${groupName}" to active stock?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: newStatus ? 'Mark Discontinued' : 'Mark Active',
+          style: newStatus ? 'destructive' : 'default',
+          onPress: async () => {
+            const updated = { ...discontinuedBatchIds, [batch.id]: newStatus };
+            setDiscontinuedBatchIds(updated);
+            await AsyncStorage.setItem('@skinssence_discontinued_batches', JSON.stringify(updated));
+            try {
+              const token = await AsyncStorage.getItem('userToken');
+              await axios.post(
+                `${BASE_URL}/${batch.id}/toggle-discontinue`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (e) {
+              console.log('Batch discontinue API notice:', e.message);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Group raw inventory rows by normalized medicine name
+  const groupedMedicines = useMemo(() => {
+    const groupsMap = {};
+
+    inventory.forEach(item => {
+      const rawName = (item.medicine_name || '').trim();
+      if (!rawName) return;
+      const normKey = rawName.toLowerCase();
+
+      if (!groupsMap[normKey]) {
+        const resolvedCompany = resolveItemBrand(rawName, item.company, brandOverrides);
+        groupsMap[normKey] = {
+          key: normKey,
+          medicine_name: rawName,
+          company: resolvedCompany,
+          unit: item.unit || 'units',
+          default_instructions: item.default_instructions || '',
+          batches: [],
+          total_quantity: 0,
+          active_batches_count: 0,
+          depleted_batches_count: 0,
+          min_mrp: Infinity,
+          max_mrp: -Infinity,
+          total_prescribed_qty: 0,
+          last_prescribed_date: null,
+          is_discontinued: false,
+          primaryItem: item
+        };
+      }
+
+      const group = groupsMap[normKey];
+      const qty = parseFloat(item.quantity) || 0;
+      const mrp = parseFloat(item.mrp) || 0;
+
+      const isItemDiscontinued = Boolean(
+        item.is_discontinued === 1 || 
+        item.is_discontinued === true || 
+        discontinuedBatchIds[item.id] || 
+        discontinuedMeds[normKey]
+      );
+
+      const batchObj = {
+        ...item,
+        quantity: qty,
+        mrp: mrp,
+        is_discontinued: isItemDiscontinued
+      };
+
+      group.batches.push(batchObj);
+      group.total_quantity += qty;
+      if (qty > 0) {
+        group.active_batches_count += 1;
+      } else {
+        group.depleted_batches_count += 1;
+      }
+
+      if (mrp > 0) {
+        if (mrp < group.min_mrp) group.min_mrp = mrp;
+        if (mrp > group.max_mrp) group.max_mrp = mrp;
+      }
+
+      const stats = getPrescriptionStats(item);
+      group.total_prescribed_qty += stats.total_prescribed_qty;
+      if (stats.last_prescribed_date) {
+        if (!group.last_prescribed_date || parsePrescribedTimestamp(stats.last_prescribed_date) > parsePrescribedTimestamp(group.last_prescribed_date)) {
+          group.last_prescribed_date = stats.last_prescribed_date;
+        }
+      }
+    });
+
+    return Object.values(groupsMap).map(group => {
+      // Sort batches: active batches first (earliest expiry first), then depleted batches
+      group.batches.sort((a, b) => {
+        const aActive = a.quantity > 0 ? 1 : 0;
+        const bActive = b.quantity > 0 ? 1 : 0;
+        if (aActive !== bActive) return bActive - aActive;
+        const expA = parseExpiryTimestamp(a.expiry_date);
+        const expB = parseExpiryTimestamp(b.expiry_date);
+        if (expA !== expB) return expA - expB;
+        return (b.quantity || 0) - (a.quantity || 0);
+      });
+
+      group.primaryItem = group.batches.find(b => b.quantity > 0) || group.batches[0];
+      const allBatchesDiscontinued = group.batches.length > 0 && group.batches.every(b => b.is_discontinued);
+      group.is_discontinued = Boolean(discontinuedMeds[group.key] || allBatchesDiscontinued);
+
+      if (group.min_mrp === Infinity) group.min_mrp = group.primaryItem?.mrp || 0;
+      if (group.max_mrp === -Infinity) group.max_mrp = group.primaryItem?.mrp || 0;
+
+      return group;
+    });
+  }, [inventory, brandOverrides, discontinuedMeds, discontinuedBatchIds]);
+
+  const stockCounts = useMemo(() => {
+    let all = 0;
+    let inStock = 0;
+    let lowStock = 0;
+    let outOfStock = 0;
+    let discontinued = 0;
+
+    groupedMedicines.forEach(g => {
+      if (g.is_discontinued) {
+        discontinued++;
+      } else {
+        all++;
+        if (g.total_quantity > 0) {
+          inStock++;
+          if (g.total_quantity <= 5) lowStock++;
+        } else {
+          outOfStock++;
+        }
+      }
+    });
+
+    return { all, inStock, lowStock, outOfStock, discontinued };
+  }, [groupedMedicines]);
+
   const filteredAndSortedInventory = useMemo(() => {
-    const filtered = inventory.filter(item => {
-      const itemBrand = (item.company || resolveItemBrand(item.medicine_name, item.company) || 'Other').trim();
+    const filtered = groupedMedicines.filter(group => {
+      if (stockStatusFilter === 'DISCONTINUED') {
+        if (!group.is_discontinued) return false;
+      } else {
+        if (hideDiscontinued && group.is_discontinued) return false;
+      }
+
+      if (stockStatusFilter === 'IN_STOCK' && group.total_quantity <= 0) return false;
+      if (stockStatusFilter === 'LOW_STOCK' && (group.total_quantity <= 0 || group.total_quantity > 5)) return false;
+      if (stockStatusFilter === 'OUT_OF_STOCK' && group.total_quantity > 0) return false;
+
+      const itemBrand = (group.company || 'Other').trim();
       if (selectedBrandFilter !== 'ALL' && itemBrand !== selectedBrandFilter) {
         return false;
       }
+
       if (!searchQ.trim()) return true;
       const q = searchQ.toLowerCase().trim();
-      return (
-        (item.medicine_name || '').toLowerCase().includes(q) ||
-        itemBrand.toLowerCase().includes(q) ||
-        (item.batch_number || '').toLowerCase().includes(q) ||
-        (item.expiry_date || '').toLowerCase().includes(q)
+      const nameMatch = group.medicine_name.toLowerCase().includes(q);
+      const brandMatch = itemBrand.toLowerCase().includes(q);
+      const batchMatch = group.batches.some(b => 
+        (b.batch_number || '').toLowerCase().includes(q) ||
+        (b.expiry_date || '').toLowerCase().includes(q)
       );
+      return nameMatch || brandMatch || batchMatch;
     });
 
     return filtered.slice().sort((a, b) => {
-      const statsA = getPrescriptionStats(a);
-      const statsB = getPrescriptionStats(b);
-
       switch (selectedSort) {
         case 'ALPHA_ASC':
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
@@ -770,59 +977,62 @@ Do you want to proceed?`,
           return (b.medicine_name || '').localeCompare(a.medicine_name || '');
 
         case 'PRESCRIBED_LONGEST': {
-          // Longest back prescribed first: never prescribed or oldest date first
-          const timeA = parsePrescribedTimestamp(statsA.last_prescribed_date);
-          const timeB = parsePrescribedTimestamp(statsB.last_prescribed_date);
+          const timeA = parsePrescribedTimestamp(a.last_prescribed_date);
+          const timeB = parsePrescribedTimestamp(b.last_prescribed_date);
           if (timeA !== timeB) return timeA - timeB;
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'PRESCRIBED_RECENT': {
-          // Recently prescribed first: newest date first, never prescribed at end
-          const timeA = parsePrescribedTimestamp(statsA.last_prescribed_date);
-          const timeB = parsePrescribedTimestamp(statsB.last_prescribed_date);
+          const timeA = parsePrescribedTimestamp(a.last_prescribed_date);
+          const timeB = parsePrescribedTimestamp(b.last_prescribed_date);
           if (timeA !== timeB) return timeB - timeA;
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'QTY_ASC': {
-          const qtyA = parseFloat(a.quantity) || 0;
-          const qtyB = parseFloat(b.quantity) || 0;
-          if (qtyA !== qtyB) return qtyA - qtyB;
+          // Lowest total medicine stock first (1, 2, 3... units)
+          if (a.total_quantity !== b.total_quantity) {
+            return a.total_quantity - b.total_quantity;
+          }
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'QTY_DESC': {
-          const qtyA = parseFloat(a.quantity) || 0;
-          const qtyB = parseFloat(b.quantity) || 0;
-          if (qtyA !== qtyB) return qtyB - qtyA;
+          if (a.total_quantity !== b.total_quantity) {
+            return b.total_quantity - a.total_quantity;
+          }
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'TIMES_ASC': {
-          const qA = statsA.total_prescribed_qty;
-          const qB = statsB.total_prescribed_qty;
-          if (qA !== qB) return qA - qB;
+          if (a.total_prescribed_qty !== b.total_prescribed_qty) {
+            return a.total_prescribed_qty - b.total_prescribed_qty;
+          }
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'TIMES_DESC': {
-          const qA = statsA.total_prescribed_qty;
-          const qB = statsB.total_prescribed_qty;
-          if (qA !== qB) return qB - qA;
+          if (a.total_prescribed_qty !== b.total_prescribed_qty) {
+            return b.total_prescribed_qty - a.total_prescribed_qty;
+          }
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'EXPIRY_ASC': {
-          const expA = parseExpiryTimestamp(a.expiry_date);
-          const expB = parseExpiryTimestamp(b.expiry_date);
+          const activeA = a.batches.find(b => b.quantity > 0) || a.batches[0];
+          const activeB = b.batches.find(b => b.quantity > 0) || b.batches[0];
+          const expA = parseExpiryTimestamp(activeA?.expiry_date);
+          const expB = parseExpiryTimestamp(activeB?.expiry_date);
           if (expA !== expB) return expA - expB;
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
         }
 
         case 'EXPIRY_DESC': {
-          const expA = parseExpiryTimestamp(a.expiry_date);
-          const expB = parseExpiryTimestamp(b.expiry_date);
+          const activeA = a.batches.find(b => b.quantity > 0) || a.batches[0];
+          const activeB = b.batches.find(b => b.quantity > 0) || b.batches[0];
+          const expA = parseExpiryTimestamp(activeA?.expiry_date);
+          const expB = parseExpiryTimestamp(activeB?.expiry_date);
           if (expA === Infinity && expB !== Infinity) return 1;
           if (expB === Infinity && expA !== Infinity) return -1;
           if (expA !== expB) return expB - expA;
@@ -833,7 +1043,7 @@ Do you want to proceed?`,
           return (a.medicine_name || '').localeCompare(b.medicine_name || '');
       }
     });
-  }, [inventory, selectedBrandFilter, searchQ, selectedSort, brandOverrides]);
+  }, [groupedMedicines, stockStatusFilter, hideDiscontinued, selectedBrandFilter, searchQ, selectedSort]);
 
   const isAdmin = userRole === 'ADMIN' || userRole === 'DOCTOR';
 
@@ -847,20 +1057,24 @@ Do you want to proceed?`,
     inventory.forEach(item => {
       const qty = Number(item.quantity) || 0;
       const mrp = Number(item.mrp) || 0;
-      if (qty > 0) {
+      const norm = (item.medicine_name || '').trim().toLowerCase();
+      const isDisc = Boolean(item.is_discontinued === 1 || discontinuedBatchIds[item.id] || discontinuedMeds[norm]);
+      if (qty > 0 && !isDisc) {
         totalInStockUnits += qty;
         totalInStockBatches += 1;
         totalInStockMrpValue += qty * mrp;
       }
     });
 
-    filteredAndSortedInventory.forEach(item => {
-      const qty = Number(item.quantity) || 0;
-      const mrp = Number(item.mrp) || 0;
-      if (qty > 0) {
-        filteredInStockUnits += qty;
-        filteredInStockMrpValue += qty * mrp;
-      }
+    filteredAndSortedInventory.forEach(group => {
+      group.batches.forEach(item => {
+        const qty = Number(item.quantity) || 0;
+        const mrp = Number(item.mrp) || 0;
+        if (qty > 0 && !item.is_discontinued) {
+          filteredInStockUnits += qty;
+          filteredInStockMrpValue += qty * mrp;
+        }
+      });
     });
   }
 
@@ -914,6 +1128,88 @@ Do you want to proceed?`,
           value={searchQ}
           onChangeText={setSearchQ}
         />
+      </View>
+
+      {/* STOCK STATUS & VISIBILITY FILTER BAR */}
+      <View style={{ backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+          {[
+            { key: 'ALL', label: `🏢 All Stock (${stockCounts.all})` },
+            { key: 'IN_STOCK', label: `✅ In Stock (>0) (${stockCounts.inStock})` },
+            { key: 'LOW_STOCK', label: `⚠️ Low Stock (1–5) (${stockCounts.lowStock})` },
+            { key: 'OUT_OF_STOCK', label: `🔴 Out of Stock (0) (${stockCounts.outOfStock})` },
+            { key: 'DISCONTINUED', label: `🚫 Discontinued (${stockCounts.discontinued})` },
+          ].map(pill => {
+            const isSelected = stockStatusFilter === pill.key;
+            return (
+              <TouchableOpacity
+                key={pill.key}
+                style={[
+                  { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#f3f4f6', marginRight: 6, borderWidth: 1, borderColor: '#e5e7eb' },
+                  isSelected && { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' }
+                ]}
+                onPress={() => setStockStatusFilter(pill.key)}
+              >
+                <Text style={[{ fontSize: 12, color: '#4b5563', fontWeight: '600' }, isSelected && { color: '#fff', fontWeight: 'bold' }]}>
+                  {pill.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* QUICK TOGGLES: HIDE 0-QTY BATCHES & HIDE DISCONTINUED */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8, flexWrap: 'wrap' }}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setHideZeroQtyBatches(v => !v)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: hideZeroQtyBatches ? '#eff6ff' : '#f8fafc',
+              paddingHorizontal: 8,
+              paddingVertical: 4.5,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: hideZeroQtyBatches ? '#93c5fd' : '#e2e8f0'
+            }}
+          >
+            <Ionicons
+              name={hideZeroQtyBatches ? 'checkbox' : 'square-outline'}
+              size={14}
+              color={hideZeroQtyBatches ? '#1d4ed8' : '#64748b'}
+              style={{ marginRight: 4 }}
+            />
+            <Text style={{ fontSize: 11, color: hideZeroQtyBatches ? '#1e40af' : '#64748b', fontWeight: '600' }}>
+              Hide 0-Qty Batches
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setHideDiscontinued(v => !v)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: hideDiscontinued ? '#fef2f2' : '#f8fafc',
+              paddingHorizontal: 8,
+              paddingVertical: 4.5,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: hideDiscontinued ? '#fca5a5' : '#e2e8f0'
+            }}
+          >
+            <Ionicons
+              name={hideDiscontinued ? 'checkbox' : 'square-outline'}
+              size={14}
+              color={hideDiscontinued ? '#b91c1c' : '#64748b'}
+              style={{ marginRight: 4 }}
+            />
+            <Text style={{ fontSize: 11, color: hideDiscontinued ? '#991b1b' : '#64748b', fontWeight: '600' }}>
+              Hide Discontinued Items
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* PHARMA BRAND FILTER PILLS */}
@@ -1037,90 +1333,321 @@ Do you want to proceed?`,
 
       {loading ? <ActivityIndicator size="large" color="#5C0B0B" style={{marginTop: 50}} /> : (
         <ScrollView style={styles.scrollContent}>
-          {filteredAndSortedInventory.map(item => {
-            const stats = getPrescriptionStats(item);
+          {filteredAndSortedInventory.map(group => {
+            const isZeroStock = group.total_quantity === 0;
+            const isLowStock = group.total_quantity > 0 && group.total_quantity <= 5;
+            const isMultipleBatches = group.batches.length > 1;
+            const isDepletedExpanded = Boolean(expandedDepletedMeds[group.key]);
+
+            const activeBatches = group.batches.filter(b => b.quantity > 0);
+            const depletedBatches = group.batches.filter(b => b.quantity === 0);
+
             return (
-            <TouchableOpacity
-              key={item.id}
-              activeOpacity={0.85}
-              onPress={() => openItemHistoryModal(item)}
-              style={[styles.itemCard, item.quantity === 0 && { borderColor: '#fca5a5', borderWidth: 1.5, backgroundColor: '#fff5f5' }]}
-            >
-              <View style={styles.itemInfo}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={styles.itemName}>{item.medicine_name}</Text>
-                  {item.quantity === 0 ? (
-                    <View style={styles.outOfStockBadge}><Text style={styles.outOfStockText}>OUT OF STOCK (0)</Text></View>
-                  ) : (
-                    <View style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#bfdbfe' }}>
-                      <Text style={{ fontSize: 10, color: '#1d4ed8', fontWeight: 'bold' }}>📋 History</Text>
+              <View
+                key={group.key}
+                style={[
+                  styles.groupCard,
+                  isZeroStock && styles.groupCardZero,
+                  group.is_discontinued && styles.groupCardDiscontinued
+                ]}
+              >
+                {/* Top Header of Consolidated Medicine Card */}
+                <View style={styles.groupCardHeader}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.groupMedName}>{group.medicine_name}</Text>
+                      {group.is_discontinued ? (
+                        <View style={styles.badgeDiscontinued}>
+                          <Text style={styles.badgeDiscontinuedText}>🚫 DISCONTINUED</Text>
+                        </View>
+                      ) : isZeroStock ? (
+                        <View style={styles.outOfStockBadge}>
+                          <Text style={styles.outOfStockText}>OUT OF STOCK (0)</Text>
+                        </View>
+                      ) : isLowStock ? (
+                        <View style={styles.badgeLowStock}>
+                          <Text style={styles.badgeLowStockText}>⚠️ LOW STOCK: {group.total_quantity} {group.unit}</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.badgeInStock}>
+                          <Text style={styles.badgeInStockText}>🟢 {group.total_quantity} {group.unit} in stock</Text>
+                        </View>
+                      )}
                     </View>
-                  )}
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 4 }}>
-                  <View style={{
-                    backgroundColor: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#fdf2f2' : '#eff6ff',
-                    paddingHorizontal: 8,
-                    paddingVertical: 2.5,
-                    borderRadius: 5,
-                    borderWidth: 1,
-                    borderColor: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#fca5a5' : '#bfdbfe'
-                  }}>
-                    <Text style={{
-                      fontSize: 11,
-                      color: (item.company || resolveItemBrand(item.medicine_name, item.company)) === 'Velnourish' ? '#991b1b' : '#1d4ed8',
-                      fontWeight: 'bold'
-                    }}>
-                      🏢 {item.company || resolveItemBrand(item.medicine_name, item.company) || 'Unassigned Brand'}
-                    </Text>
+
+                    {/* Brand & Batches Pill Row */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                      <View style={[
+                        styles.brandPill,
+                        group.company === 'Velnourish' && styles.brandPillVelnourish
+                      ]}>
+                        <Text style={[
+                          styles.brandPillText,
+                          group.company === 'Velnourish' && styles.brandPillTextVelnourish
+                        ]}>
+                          🏢 {group.company || 'Unassigned Brand'}
+                        </Text>
+                      </View>
+
+                      {isMultipleBatches ? (
+                        <View style={styles.batchCountPill}>
+                          <Text style={styles.batchCountPillText}>
+                            📦 {group.batches.length} Batches: {activeBatches.length} In-Stock • {depletedBatches.length} Depleted
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={styles.batchCountPillSingle}>
+                          <Text style={styles.batchCountPillSingleText}>
+                            📦 1 Batch
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
+
+                  {/* Quick Add Batch Button on Header */}
+                  <TouchableOpacity
+                    onPress={() => openAddBatchModal(group.primaryItem)}
+                    style={styles.headerAddBatchBtn}
+                  >
+                    <Text style={styles.headerAddBatchBtnText}>+ Batch</Text>
+                  </TouchableOpacity>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <Text style={styles.itemDetail}>Batch: <Text style={{fontWeight:'bold', color: '#1e40af'}}>{item.batch_number || 'N/A'}</Text></Text>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#9ca3af' }} />
-                  <Text style={styles.itemDetail}>Expiry: <Text style={{fontWeight:'bold', color: '#b91c1c'}}>{item.expiry_date || 'N/A'}</Text></Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 }}>
-                  <Text style={styles.itemDetail}>Stock: <Text style={{fontWeight:'bold', color: item.quantity > 5 ? '#10b981' : (item.quantity === 0 ? '#b91c1c' : '#f59e0b')}}>{item.quantity} {item.unit || 'units'}</Text></Text>
-                  <Text style={styles.itemDetail}>MRP: <Text style={{fontWeight: 'bold', color: '#111827'}}>₹{item.mrp}</Text></Text>
-                </View>
-                {/* PRESCRIPTION STATS & RECENCY ROW */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 5, backgroundColor: '#f8fafc', paddingHorizontal: 8, paddingVertical: 4.5, borderRadius: 6, borderWidth: 1, borderColor: '#f1f5f9' }}>
-                  <Text style={{ fontSize: 11, color: stats.total_prescribed_qty > 0 ? '#0f766e' : '#64748b', fontWeight: '600' }}>
-                    💊 Prescribed: <Text style={{ fontWeight: 'bold', color: stats.total_prescribed_qty > 0 ? '#0f766e' : '#334155' }}>{stats.total_prescribed_qty} units</Text>
+
+                {/* SINGLE BATCH MEDICINE DISPLAY */}
+                {!isMultipleBatches && group.batches.length === 1 && (() => {
+                  const batch = group.batches[0];
+                  return (
+                    <View style={styles.singleBatchSection}>
+                      <View style={styles.batchMetaRow}>
+                        <Text style={styles.batchMetaText}>
+                          Batch: <Text style={{ fontWeight: 'bold', color: '#1e40af' }}>{batch.batch_number || 'N/A'}</Text>
+                        </Text>
+                        <View style={styles.metaDot} />
+                        <Text style={styles.batchMetaText}>
+                          Exp: <Text style={{ fontWeight: 'bold', color: '#b91c1c' }}>{batch.expiry_date || 'N/A'}</Text>
+                        </Text>
+                        <View style={styles.metaDot} />
+                        <Text style={styles.batchMetaText}>
+                          MRP: <Text style={{ fontWeight: 'bold', color: '#111827' }}>₹{batch.mrp}</Text>
+                        </Text>
+                        <View style={styles.metaDot} />
+                        <Text style={styles.batchMetaText}>
+                          Stock: <Text style={{ fontWeight: 'bold', color: batch.quantity > 5 ? '#10b981' : (batch.quantity === 0 ? '#b91c1c' : '#f59e0b') }}>
+                            {batch.quantity} {batch.unit || 'units'}
+                          </Text>
+                        </Text>
+                      </View>
+
+                      {/* Action buttons for single batch */}
+                      <View style={styles.batchActionRow}>
+                        {batch.quantity > 0 && (
+                          <TouchableOpacity
+                            style={[styles.miniActionBtn, { backgroundColor: '#7c3aed' }]}
+                            onPress={() => handleQuickClinicUse(batch)}
+                          >
+                            <Text style={styles.miniActionBtnText}>🏥 Use 1</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={[styles.miniActionBtn, { backgroundColor: '#4338ca' }]}
+                          onPress={() => openItemHistoryModal(batch)}
+                        >
+                          <Text style={styles.miniActionBtnText}>📋 History</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.miniActionBtn, { backgroundColor: '#10b981' }]}
+                          onPress={() => openAddBatchModal(batch)}
+                        >
+                          <Text style={styles.miniActionBtnText}>+ Batch</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.miniActionBtn, { backgroundColor: '#3b82f6' }]}
+                          onPress={() => openEditModal(batch)}
+                        >
+                          <Text style={styles.miniActionBtnText}>✏️ Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.miniActionBtn, { backgroundColor: group.is_discontinued ? '#475569' : '#64748b' }]}
+                          onPress={() => handleToggleDiscontinueMedicine(group.medicine_name, group.is_discontinued)}
+                        >
+                          <Text style={styles.miniActionBtnText}>{group.is_discontinued ? '✅ Active' : '🚫 Hide'}</Text>
+                        </TouchableOpacity>
+                        {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
+                          <TouchableOpacity
+                            style={[styles.miniActionBtn, { backgroundColor: '#ef4444' }]}
+                            onPress={() => handleDelete(batch.id, group.medicine_name)}
+                          >
+                            <Text style={styles.miniActionBtnText}>🗑️ Delete</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })()}
+
+                {/* MULTIPLE BATCHES MEDICINE DISPLAY */}
+                {isMultipleBatches && (
+                  <View style={styles.multiBatchSection}>
+                    {/* Active Batches List */}
+                    {activeBatches.length > 0 && (
+                      <View style={{ marginBottom: 6 }}>
+                        <Text style={styles.batchSubheaderText}>🟢 Active Batches ({activeBatches.length}):</Text>
+                        {activeBatches.map(b => (
+                          <View key={b.id} style={styles.batchItemRow}>
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                <Text style={styles.batchNumberText}>Batch: {b.batch_number || 'N/A'}</Text>
+                                <View style={styles.batchQtyBadgeInStock}>
+                                  <Text style={styles.batchQtyBadgeInStockText}>{b.quantity} {b.unit || 'units'}</Text>
+                                </View>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                                <Text style={styles.batchSubMetaText}>Exp: <Text style={{ fontWeight: 'bold', color: '#b91c1c' }}>{b.expiry_date || 'N/A'}</Text></Text>
+                                <Text style={styles.batchSubMetaText}>MRP: <Text style={{ fontWeight: 'bold', color: '#111827' }}>₹{b.mrp}</Text></Text>
+                              </View>
+                            </View>
+                            <View style={styles.batchMiniActions}>
+                              <TouchableOpacity
+                                style={[styles.tinyActionBtn, { backgroundColor: '#7c3aed' }]}
+                                onPress={() => handleQuickClinicUse(b)}
+                              >
+                                <Text style={styles.tinyActionBtnText}>🏥 Use 1</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[styles.tinyActionBtn, { backgroundColor: '#4338ca' }]}
+                                onPress={() => openItemHistoryModal(b)}
+                              >
+                                <Text style={styles.tinyActionBtnText}>📋 History</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[styles.tinyActionBtn, { backgroundColor: '#3b82f6' }]}
+                                onPress={() => openEditModal(b)}
+                              >
+                                <Text style={styles.tinyActionBtnText}>✏️ Edit</Text>
+                              </TouchableOpacity>
+                              {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
+                                <TouchableOpacity
+                                  style={[styles.tinyActionBtn, { backgroundColor: '#fee2e2' }]}
+                                  onPress={() => handleDelete(b.id, group.medicine_name)}
+                                >
+                                  <Text style={[styles.tinyActionBtnText, { color: '#b91c1c' }]}>🗑️</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Depleted (0 Qty) Batches List */}
+                    {depletedBatches.length > 0 && (
+                      <View style={{ marginTop: 4 }}>
+                        {hideZeroQtyBatches && !isDepletedExpanded ? (
+                          <TouchableOpacity
+                            onPress={() => setExpandedDepletedMeds(prev => ({ ...prev, [group.key]: true }))}
+                            style={styles.showDepletedToggleBtn}
+                          >
+                            <Text style={styles.showDepletedToggleText}>
+                              ▶ Show {depletedBatches.length} Depleted Batch{depletedBatches.length > 1 ? 'es' : ''} (0 qty)
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View>
+                            <TouchableOpacity
+                              onPress={() => setExpandedDepletedMeds(prev => ({ ...prev, [group.key]: false }))}
+                              style={styles.hideDepletedToggleBtn}
+                            >
+                              <Text style={styles.hideDepletedToggleText}>
+                                ▼ Hide Depleted Batches ({depletedBatches.length})
+                              </Text>
+                            </TouchableOpacity>
+                            {depletedBatches.map(b => (
+                              <View key={b.id} style={[styles.batchItemRow, styles.batchItemRowDepleted]}>
+                                <View style={{ flex: 1 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <Text style={[styles.batchNumberText, { color: '#6b7280' }]}>Batch: {b.batch_number || 'N/A'}</Text>
+                                    <View style={styles.batchQtyBadgeDepleted}>
+                                      <Text style={styles.batchQtyBadgeDepletedText}>0 units (Depleted)</Text>
+                                    </View>
+                                  </View>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                                    <Text style={styles.batchSubMetaText}>Exp: {b.expiry_date || 'N/A'}</Text>
+                                    <Text style={styles.batchSubMetaText}>MRP: ₹{b.mrp}</Text>
+                                  </View>
+                                </View>
+                                <View style={styles.batchMiniActions}>
+                                  <TouchableOpacity
+                                    style={[styles.tinyActionBtn, { backgroundColor: '#4338ca' }]}
+                                    onPress={() => openItemHistoryModal(b)}
+                                  >
+                                    <Text style={styles.tinyActionBtnText}>📋 History</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.tinyActionBtn, { backgroundColor: '#3b82f6' }]}
+                                    onPress={() => openEditModal(b)}
+                                  >
+                                    <Text style={styles.tinyActionBtnText}>✏️ Edit</Text>
+                                  </TouchableOpacity>
+                                  {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
+                                    <TouchableOpacity
+                                      style={[styles.tinyActionBtn, { backgroundColor: '#fee2e2' }]}
+                                      onPress={() => handleDelete(b.id, group.medicine_name)}
+                                    >
+                                      <Text style={[styles.tinyActionBtnText, { color: '#b91c1c' }]}>🗑️</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* Group Footer Controls */}
+                    <View style={styles.groupFooterActions}>
+                      <TouchableOpacity
+                        onPress={() => openAddBatchModal(group.primaryItem)}
+                        style={styles.groupFooterAddBatchBtn}
+                      >
+                        <Text style={styles.groupFooterAddBatchBtnText}>+ Add New Batch</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => handleToggleDiscontinueMedicine(group.medicine_name, group.is_discontinued)}
+                        style={styles.groupFooterDiscontinueBtn}
+                      >
+                        <Text style={styles.groupFooterDiscontinueBtnText}>
+                          {group.is_discontinued ? '✅ Restore Medicine' : '🚫 Mark Discontinued'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
+                {/* Prescription Stats & Usage Instructions */}
+                <View style={styles.groupRxRow}>
+                  <Text style={{ fontSize: 11, color: group.total_prescribed_qty > 0 ? '#0f766e' : '#64748b', fontWeight: '600' }}>
+                    💊 Prescribed: <Text style={{ fontWeight: 'bold', color: group.total_prescribed_qty > 0 ? '#0f766e' : '#334155' }}>
+                      {group.total_prescribed_qty} units
+                    </Text>
                   </Text>
-                  <Text style={{ fontSize: 11, color: stats.last_prescribed_date ? '#1d4ed8' : '#94a3b8', fontWeight: '500' }}>
-                    🕒 {stats.last_prescribed_date ? `Last: ${formatLastPrescribed(stats.last_prescribed_date)}` : 'Never prescribed'}
+                  <Text style={{ fontSize: 11, color: group.last_prescribed_date ? '#1d4ed8' : '#94a3b8', fontWeight: '500' }}>
+                    🕒 {group.last_prescribed_date ? `Last: ${formatLastPrescribed(group.last_prescribed_date)}` : 'Never prescribed'}
                   </Text>
                 </View>
-                {item.default_instructions ? (
+
+                {group.default_instructions ? (
                   <View style={styles.instrBadgeRow}>
-                    {item.default_instructions.split(',').map((i, idx) => (
-                      <View key={idx} style={styles.instrBadge}><Text style={styles.instrBadgeText}>{i.trim()}</Text></View>
+                    {group.default_instructions.split(',').map((i, idx) => (
+                      <View key={idx} style={styles.instrBadge}>
+                        <Text style={styles.instrBadgeText}>{i.trim()}</Text>
+                      </View>
                     ))}
                   </View>
                 ) : null}
               </View>
-              <View style={styles.itemActions}>
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#7c3aed', marginBottom: 6}]} onPress={() => handleQuickClinicUse(item)}>
-                  <Text style={styles.actionBtnText}>🏥 Use 1</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#4338ca', marginBottom: 6}]} onPress={() => openItemHistoryModal(item)}>
-                  <Text style={styles.actionBtnText}>History</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10b981', marginBottom: 6}]} onPress={() => openAddBatchModal(item)}>
-                  <Text style={styles.actionBtnText}>+ Batch</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#3b82f6'}]} onPress={() => openEditModal(item)}>
-                  <Text style={styles.actionBtnText}>Edit</Text>
-                </TouchableOpacity>
-                {(userRole === 'ADMIN' || userRole === 'DOCTOR') && (
-                  <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#ef4444', marginTop: 6}]} onPress={() => handleDelete(item.id, item.medicine_name)}>
-                    <Text style={styles.actionBtnText}>Delete</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </TouchableOpacity>
             );
           })}
           {filteredAndSortedInventory.length === 0 && <Text style={{textAlign: 'center', marginTop: 50, color: '#6b7280', fontSize: 16}}>No matching stock found.</Text>}
@@ -2140,6 +2667,326 @@ const styles = StyleSheet.create({
   addBtn: { backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
   addBtnText: { color: '#5C0B0B', fontWeight: 'bold', fontSize: 13 },
   scrollContent: { padding: 15 },
+  groupCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 14,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    borderWidth: 1,
+    borderColor: '#e5e7eb'
+  },
+  groupCardZero: {
+    borderColor: '#fca5a5',
+    backgroundColor: '#fffbfa'
+  },
+  groupCardDiscontinued: {
+    borderColor: '#cbd5e1',
+    backgroundColor: '#f8fafc',
+    opacity: 0.85
+  },
+  groupCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 8
+  },
+  groupMedName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#111827'
+  },
+  badgeInStock: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#86efac'
+  },
+  badgeInStockText: {
+    color: '#166534',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  badgeLowStock: {
+    backgroundColor: '#fef3c7',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fcd34d'
+  },
+  badgeLowStockText: {
+    color: '#b45309',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  badgeDiscontinued: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1'
+  },
+  badgeDiscontinuedText: {
+    color: '#475569',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  brandPill: {
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#bfdbfe'
+  },
+  brandPillVelnourish: {
+    backgroundColor: '#fdf2f2',
+    borderColor: '#fca5a5'
+  },
+  brandPillText: {
+    fontSize: 11,
+    color: '#1d4ed8',
+    fontWeight: 'bold'
+  },
+  brandPillTextVelnourish: {
+    color: '#991b1b'
+  },
+  batchCountPill: {
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#bbf7d0'
+  },
+  batchCountPillText: {
+    fontSize: 11,
+    color: '#15803d',
+    fontWeight: '600'
+  },
+  batchCountPillSingle: {
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  batchCountPillSingleText: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '500'
+  },
+  headerAddBatchBtn: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6
+  },
+  headerAddBatchBtnText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  singleBatchSection: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  batchMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8
+  },
+  batchMetaText: {
+    fontSize: 12,
+    color: '#374151'
+  },
+  metaDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#9ca3af'
+  },
+  batchActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6
+  },
+  miniActionBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    alignItems: 'center'
+  },
+  miniActionBtnText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  multiBatchSection: {
+    backgroundColor: '#fafafa',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#f1f5f9'
+  },
+  batchSubheaderText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#374151',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3
+  },
+  batchItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#e5e7eb'
+  },
+  batchItemRowDepleted: {
+    backgroundColor: '#fff5f5',
+    borderColor: '#fed7d7'
+  },
+  batchNumberText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#1e40af'
+  },
+  batchQtyBadgeInStock: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4
+  },
+  batchQtyBadgeInStockText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#166534'
+  },
+  batchQtyBadgeDepleted: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 4
+  },
+  batchQtyBadgeDepletedText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#b91c1c'
+  },
+  batchSubMetaText: {
+    fontSize: 11,
+    color: '#4b5563'
+  },
+  batchMiniActions: {
+    flexDirection: 'row',
+    gap: 4,
+    alignItems: 'center',
+    marginLeft: 6
+  },
+  tinyActionBtn: {
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  tinyActionBtnText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold'
+  },
+  showDepletedToggleBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 6,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
+  },
+  showDepletedToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569'
+  },
+  hideDepletedToggleBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginBottom: 6,
+    alignItems: 'center'
+  },
+  hideDepletedToggleText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b'
+  },
+  groupFooterActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb'
+  },
+  groupFooterAddBatchBtn: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6
+  },
+  groupFooterAddBatchBtnText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  groupFooterDiscontinueBtn: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1'
+  },
+  groupFooterDiscontinueBtnText: {
+    color: '#475569',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  groupRxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 8,
+    paddingVertical: 4.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f1f5f9'
+  },
   itemCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 14, borderRadius: 10, marginBottom: 12, elevation: 2, alignItems: 'center' },
   itemInfo: { flex: 1 },
   itemName: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
