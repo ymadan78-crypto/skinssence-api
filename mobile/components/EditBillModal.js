@@ -802,15 +802,30 @@ export default function EditBillModal({ visible, visitId, initialVisit, initialP
                             <Text style={styles.medControlLabel}>Quantity</Text>
                             <View style={styles.qtyStepperBox}>
                               <TouchableOpacity
-                                style={styles.qtyStepBtn}
-                                disabled={!canEdit || currentQty <= 1}
+                                style={[styles.qtyStepBtn, currentQty <= 1 && { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}
+                                disabled={!canEdit}
                                 onPress={() => {
-                                  const newQ = Math.max(1, currentQty - 1);
-                                  handleMedicineChange(mIdx, 'qty', String(newQ));
-                                  handleMedicineChange(mIdx, 'amount', String(Math.round(newQ * unitPriceVal)));
+                                  if (currentQty <= 1) {
+                                    Alert.alert(
+                                      'Remove Medicine',
+                                      `Remove "${med.name}" from this bill?`,
+                                      [
+                                        { text: 'Cancel', style: 'cancel' },
+                                        { text: 'Remove', style: 'destructive', onPress: () => handleRemoveMedicine(mIdx) }
+                                      ]
+                                    );
+                                  } else {
+                                    const newQ = currentQty - 1;
+                                    handleMedicineChange(mIdx, 'qty', String(newQ));
+                                    handleMedicineChange(mIdx, 'amount', String(Math.round(newQ * unitPriceVal)));
+                                  }
                                 }}
                               >
-                                <Text style={styles.qtyStepBtnText}>−</Text>
+                                {currentQty <= 1 ? (
+                                  <Ionicons name="trash-outline" size={14} color="#dc2626" />
+                                ) : (
+                                  <Text style={styles.qtyStepBtnText}>−</Text>
+                                )}
                               </TouchableOpacity>
 
                               <TextInput
