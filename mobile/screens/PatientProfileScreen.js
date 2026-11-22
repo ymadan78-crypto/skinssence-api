@@ -1038,14 +1038,14 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
             </View>
           )}
 
-          {/* PREPAID PACKAGE WALLET BANNER */}
+          {/* ADVANCE & PREPAID PACKAGE WALLET BANNER */}
           <View style={styles.walletBanner}>
             <View>
-              <Text style={styles.walletTitle}>Prepaid Package Balance</Text>
+              <Text style={styles.walletTitle}>Advance / Prepaid Balance</Text>
               <Text style={styles.walletAmount}>₹ {patient.wallet_balance ? patient.wallet_balance.toFixed(2) : '0.00'}</Text>
             </View>
             <TouchableOpacity style={styles.walletBtn} onPress={() => setRechargeModalVisible(true)}>
-              <Text style={styles.walletBtnText}>+ Recharge</Text>
+              <Text style={styles.walletBtnText}>+ Advance / Top-Up</Text>
             </TouchableOpacity>
           </View>
 
@@ -1095,7 +1095,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
                 <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginRight: 5, backgroundColor: '#10b981', marginTop: 0}]} onPress={() => {
                   navigation.navigate('VisitEntry', { patient });
                 }}>
-                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>+ Current Visit</Text>
+                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>+ New / Today Visit</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginHorizontal: 5, backgroundColor: '#f59e0b', marginTop: 0}]} onPress={() => {

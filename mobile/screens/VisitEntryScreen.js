@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert,
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
 import DiscountControl from '../components/DiscountControl';
 import { getDailyClinicQrStatus, promptDailyClinicQrRequired } from '../utils/clinicQrHelper';
 
@@ -32,6 +33,7 @@ export default function VisitEntryScreen({ route, navigation }) {
   const [showProcModal, setShowProcModal] = useState(false);
   const [activeProcIndex, setActiveProcIndex] = useState(0);
   const [newProcName, setNewProcName] = useState('');
+  const [procSearchText, setProcSearchText] = useState('');
   const [addingNewProc, setAddingNewProc] = useState(false);
 
   // Synchronized Pharmacy Bill State
@@ -352,7 +354,7 @@ export default function VisitEntryScreen({ route, navigation }) {
         planned_procedures: formData.planned_procedures
       };
 
-      if (isPastVisit) payload.visit_date = visitDate.toISOString();
+      payload.visit_date = visitDate.toISOString();
 
       if (entryMode === 'STANDARD') {
         // Send real procedures only; consultation fee is stored in its dedicated field
@@ -460,17 +462,33 @@ export default function VisitEntryScreen({ route, navigation }) {
           <Text style={styles.patientBannerId}>{patient.skinssence_id} • 📞 {patient.mobile}</Text>
         </View>
 
-        {isPastVisit && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📅 Visit Date</Text>
-            <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
-              <Text style={styles.dateText}>{visitDate.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'})}</Text>
+        {/* VISIT DATE SELECTOR (ALWAYS VISIBLE FOR BOTH CURRENT & PAST / ADVANCE VISITS) */}
+        <View style={styles.section}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text style={styles.sectionTitle}>📅 Visit / Transaction Date</Text>
+            <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+              <Text style={{ color: '#5C0B0B', fontWeight: 'bold', fontSize: 13 }}>Change Date</Text>
             </TouchableOpacity>
-            {showDatePicker && (
-              <DateTimePicker value={visitDate} mode="date" display="default" maximumDate={new Date()} onChange={(event, d) => { setShowDatePicker(false); if(d) setVisitDate(d); }} />
-            )}
           </View>
-        )}
+          <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
+            <Ionicons name="calendar-outline" size={18} color="#5C0B0B" style={{ marginRight: 8 }} />
+            <Text style={styles.dateText}>
+              {visitDate.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'})}
+              {visitDate.toDateString() === new Date().toDateString() ? ' (Today)' : ''}
+            </Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={visitDate}
+              mode="date"
+              display="default"
+              onChange={(event, d) => {
+                setShowDatePicker(false);
+                if (d) setVisitDate(d);
+              }}
+            />
+          )}
+        </View>
 
         {/* 1. CONSULTATION FEE SECTION */}
         {entryMode === 'STANDARD' && (
@@ -547,10 +565,26 @@ export default function VisitEntryScreen({ route, navigation }) {
                 procedures.map((proc, index) => (
                   <View key={index} style={styles.procRow}>
                     <View style={{flex: 1, marginBottom: 10}}>
-                      <Text style={styles.label}>Procedure Name / Category</Text>
-                      <TouchableOpacity style={styles.dropdownBtn} onPress={() => { setActiveProcIndex(index); setShowProcModal(true); }}>
-                        <Text style={{color: proc.name ? '#000' : '#888', fontSize: 16}}>{proc.name || 'Tap to select procedure...'}</Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={styles.label}>Procedure Name / Service</Text>
+                        <TouchableOpacity onPress={() => { setActiveProcIndex(index); setProcSearchText(''); setShowProcModal(true); }}>
+                          <Text style={{ color: '#5C0B0B', fontWeight: 'bold', fontSize: 12 }}>📋 Select Catalog</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TextInput
+                          style={[styles.input, { flex: 1, marginRight: 6 }]}
+                          value={proc.name}
+                          onChangeText={(v) => updateProcedure(index, 'name', v)}
+                          placeholder="Type service name or tap catalog..."
+                        />
+                        <TouchableOpacity
+                          style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fca5a5', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8 }}
+                          onPress={() => { setActiveProcIndex(index); setProcSearchText(''); setShowProcModal(true); }}
+                        >
+                          <Ionicons name="list" size={18} color="#5C0B0B" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     
                     <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
@@ -958,21 +992,45 @@ export default function VisitEntryScreen({ route, navigation }) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Standardized Master Procedure Modal */}
+      {/* Standardized Master Procedure Modal with Custom Name Option */}
       <Modal visible={showProcModal} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={{ marginBottom: 12 }}>
-              <Text style={styles.modalTitle}>Select Master Procedure</Text>
+            <View style={{ marginBottom: 10 }}>
+              <Text style={styles.modalTitle}>Select or Enter Procedure</Text>
               <Text style={{ fontSize: 12, color: '#64748b' }}>
-                Standardized procedure catalog. Price is flexible and entered on the next step.
+                Pick from catalog or type custom procedure/advance booking.
               </Text>
+            </View>
+
+            <View style={{ marginBottom: 10 }}>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#f8fafc', borderColor: '#cbd5e1' }]}
+                placeholder="Search catalog or type custom name..."
+                value={procSearchText}
+                onChangeText={setProcSearchText}
+              />
+              {procSearchText.trim().length > 0 && (
+                <TouchableOpacity
+                  style={{ backgroundColor: '#15803d', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, marginTop: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+                  onPress={() => selectMasterProc(procSearchText.trim())}
+                >
+                  <Ionicons name="checkmark-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>
+                    Use "{procSearchText.trim()}" as Procedure
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
             
             <FlatList
-              data={masterProcedures.filter(p => p.active !== 0)}
+              data={masterProcedures.filter(p => {
+                if (p.active === 0) return false;
+                if (!procSearchText.trim()) return true;
+                return (p.name || '').toLowerCase().includes(procSearchText.toLowerCase().trim());
+              })}
               keyExtractor={(item) => item.id.toString()}
-              style={{ maxHeight: 380 }}
+              style={{ maxHeight: 320 }}
               renderItem={({item}) => (
                 <TouchableOpacity style={[styles.modalItem, { paddingVertical: 10 }]} onPress={() => selectMasterProc(item)}>
                   <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
