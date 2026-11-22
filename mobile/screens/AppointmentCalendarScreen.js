@@ -305,26 +305,47 @@ export default function AppointmentCalendarScreen({ navigation, route }) {
           {appointments.length === 0 ? (
             <Text style={styles.emptyText}>No appointments booked for this date yet.</Text>
           ) : (
-            appointments.map(a => (
-              <View key={a.id} style={styles.apptRow}>
-                <View style={{flex: 1}}>
-                  <Text style={styles.apptTime}>{a.appointment_time}</Text>
-                  <Text style={styles.apptName}>{a.patient_name} {a.patient_id ? `(${a.patient_id})` : ''}</Text>
-                  {a.notes ? <Text style={styles.apptNotes}>• {a.notes}</Text> : null}
-                  <Text style={{fontSize: 12, color: '#059669', marginTop: 2}}>📞 {a.mobile}</Text>
+            appointments.map(a => {
+              const isPriority = a.notes && (
+                a.notes.includes('Advance Paid') ||
+                a.notes.includes('Advance Booking') ||
+                a.notes.includes('Priority Booking') ||
+                a.notes.includes('PRIORITY')
+              );
+              return (
+                <View key={a.id} style={[styles.apptRow, isPriority && styles.apptRowPriority]}>
+                  <View style={{flex: 1}}>
+                    <View style={{flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2}}>
+                      <Text style={[styles.apptTime, isPriority && {color: '#7c3aed'}]}>{a.appointment_time}</Text>
+                      {isPriority && (
+                        <View style={styles.priorityBadge}>
+                          <Text style={styles.priorityBadgeText}>⭐ PRIORITY (PRE-PAID)</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.apptName, isPriority && {color: '#581c87', fontWeight: '800'}]}>
+                      {a.patient_name} {a.patient_id ? `(${a.patient_id})` : ''}
+                    </Text>
+                    {a.notes ? (
+                      <Text style={[styles.apptNotes, isPriority && {color: '#6b21a8', fontWeight: '600'}]}>
+                        • {a.notes}
+                      </Text>
+                    ) : null}
+                    <Text style={{fontSize: 12, color: '#059669', marginTop: 2}}>📞 {a.mobile}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={[styles.waIconBtn, isPriority && {backgroundColor: '#7c3aed'}]} 
+                    onPress={() => {
+                      const msg = generateFollowUpMessage(a);
+                      const cleanMobile = a.mobile.replace(/\D/g, '');
+                      const phoneWithCode = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
+                      Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}&phone=${phoneWithCode}`);
+                    }}>
+                    <Text style={[styles.waIconText, isPriority && {color: '#ffffff'}]}>💬 WA</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity 
-                  style={styles.waIconBtn} 
-                  onPress={() => {
-                    const msg = generateFollowUpMessage(a);
-                    const cleanMobile = a.mobile.replace(/\D/g, '');
-                    const phoneWithCode = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
-                    Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}&phone=${phoneWithCode}`);
-                  }}>
-                  <Text style={styles.waIconText}>💬 WA</Text>
-                </TouchableOpacity>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -371,6 +392,30 @@ const styles = StyleSheet.create({
   bookOnlyText: { color: '#374151', fontSize: 14, fontWeight: 'bold' },
   emptyText: { color: '#9ca3af', fontStyle: 'italic', marginVertical: 10 },
   apptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  apptRowPriority: {
+    backgroundColor: '#faf5ff',
+    borderLeftWidth: 4,
+    borderLeftColor: '#7c3aed',
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 4,
+  },
+  priorityBadge: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#f59e0b',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  priorityBadgeText: {
+    color: '#92400e',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
   apptTime: { fontSize: 13, fontWeight: 'bold', color: '#5C0B0B' },
   apptName: { fontSize: 15, fontWeight: 'bold', color: '#111827' },
   apptNotes: { fontSize: 12, color: '#6b7280', marginTop: 2 },

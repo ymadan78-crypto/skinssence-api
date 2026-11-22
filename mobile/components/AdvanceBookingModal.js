@@ -255,8 +255,8 @@ export function buildAdvanceReceiptHtml({
             <p class="addr">📞 +91 95091 97578 &nbsp;&nbsp;|&nbsp;&nbsp; 🌐 www.skinssence.in</p>
           </div>
           <div class="badge-box">
-            <div class="bill-badge">ADVANCE RECEIPT</div>
-            <div class="badge-sub">Official Clinic Voucher</div>
+            <div class="bill-badge">⭐ PRIORITY BOOKING RECEIPT</div>
+            <div class="badge-sub">Guaranteed & Pre-Paid Appointment Slot</div>
           </div>
         </div>
 
@@ -272,7 +272,8 @@ export function buildAdvanceReceiptHtml({
 
         <!-- SCHEDULED APPOINTMENT CARD -->
         <div class="appt-highlight">
-          <div class="appt-title">📅 Confirmed Future Appointment Details</div>
+          <div class="appt-title">⭐ PRIORITY RESERVED TREATMENT SLOT</div>
+          <div style="font-size:11px;color:#7c3aed;margin-bottom:8px;font-weight:600;">✨ Guaranteed Slot & Zero-Wait Priority Consultation</div>
           <div class="appt-grid">
             <div>
               <div class="info-label">Treatment Date</div>
@@ -295,7 +296,7 @@ export function buildAdvanceReceiptHtml({
             <tr>
               <th style="width:40px;text-align:center;">#</th>
               <th>Description / Service Booked</th>
-              <th style="width:140px;text-align:center;">Booking Status</th>
+              <th style="width:170px;text-align:center;">Booking Status</th>
               <th style="width:130px;text-align:right;">Advance Credited</th>
             </tr>
           </thead>
@@ -308,7 +309,7 @@ export function buildAdvanceReceiptHtml({
                 ${notes ? `<div style="font-size:11px;color:#0369a1;margin-top:2px;">Note: ${notes}</div>` : ''}
               </td>
               <td style="text-align:center;">
-                <span style="background:#dcfce7;color:#15803d;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;">Confirmed</span>
+                <span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold;border:1px solid #fde68a;">⭐ PRIORITY (PRE-PAID)</span>
               </td>
               <td style="text-align:right;font-weight:bold;color:#15803d;font-size:14px;">
                 Rs. ${advNum.toFixed(2)}
@@ -356,6 +357,7 @@ export function buildAdvanceReceiptHtml({
         <!-- TERMS & CONDITIONS (100% ENGLISH) -->
         <div class="terms-box">
           <div class="terms-title">Terms & Conditions:</div>
+          <div>• <strong>⭐ Priority Service:</strong> As an advance pre-paid client, your reserved time slot is guaranteed with priority consultation & zero wait time upon arrival.</div>
           <div>• This advance deposit of <strong>Rs. ${advNum.toFixed(2)}</strong> is securely credited to your clinic account.</div>
           <div>• The credited advance will be automatically deducted from your final bill on your appointment day.</div>
           <div>• Treatment choices can be tailored or customized upon doctor consultation during your visit.</div>
@@ -552,7 +554,7 @@ export default function AdvanceBookingModal({ visible, patient, onClose, onSucce
                 <Ionicons name="receipt-outline" size={20} color="#7c3aed" />
               </View>
               <View style={{ marginLeft: 10, flex: 1 }}>
-                <Text style={styles.headerTitle}>Advance Booking & PDF Receipt</Text>
+                <Text style={styles.headerTitle}>⭐ Priority Advance Booking</Text>
                 <Text style={styles.headerSubtitle}>
                   {patient.first_name} {patient.last_name || ''} ({patient.skinssence_id || 'Walk-in'})
                 </Text>
@@ -753,7 +755,7 @@ export default function AdvanceBookingModal({ visible, patient, onClose, onSucce
             <View style={styles.summaryBox}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <Ionicons name="document-text" size={16} color="#6d28d9" style={{ marginRight: 6 }} />
-                <Text style={styles.summaryTitle}>Official PDF Receipt Summary:</Text>
+                <Text style={styles.summaryTitle}>⭐ Priority Receipt Preview:</Text>
               </View>
               <Text style={styles.summaryRow}>• Patient: {patient.first_name} {patient.last_name || ''} ({patient.skinssence_id})</Text>
               <Text style={styles.summaryRow}>• Scheduled: {formatDisplayDate(appointmentDate)} at {appointmentTime}</Text>
@@ -762,7 +764,7 @@ export default function AdvanceBookingModal({ visible, patient, onClose, onSucce
                 • Advance Paid: ₹{advanceNum.toFixed(0)} ({paymentMode})
               </Text>
               <Text style={styles.summaryTerms}>
-                Notice: A formal PDF voucher with Dr. Ashima Madan's credentials & clinic banner will be generated in 100% English and shared directly to WhatsApp.
+                Notice: An official ⭐ PRIORITY BOOKING RECEIPT PDF with Dr. Ashima Madan's credentials & clinic banner will be generated in 100% English and shared directly to WhatsApp.
               </Text>
             </View>
           </ScrollView>

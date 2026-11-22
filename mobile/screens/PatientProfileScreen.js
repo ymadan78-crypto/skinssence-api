@@ -7,7 +7,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
-import AdvanceBookingModal from '../components/AdvanceBookingModal';
+import AdvanceBookingModal, { buildAdvanceReceiptHtml } from '../components/AdvanceBookingModal';
 import { sendFeedbackRequestWhatsApp } from '../utils/whatsappHelper';
 import { renameBillPdfAsync, formatSkinssenceBillFilename } from '../utils/billNaming';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
@@ -69,6 +69,8 @@ function PatientProfileScreenContent({ route, navigation }) {
   const [editBillModalVisible, setEditBillModalVisible] = useState(false);
   const [editingVisitId, setEditingVisitId] = useState(null);
   const [advanceBookingModalVisible, setAdvanceBookingModalVisible] = useState(false);
+  const [priorityAppt, setPriorityAppt] = useState(null);
+  const [isGeneratingPriorityReceipt, setIsGeneratingPriorityReceipt] = useState(false);
   const isSharingBillRef = useRef(false);
 
   // Wallet Modal
@@ -181,6 +183,95 @@ function PatientProfileScreenContent({ route, navigation }) {
     }
   };
 
+  const fetchPriorityAppointment = useCallback(async (overrideId) => {
+    const id = overrideId || patient?.id || patientId;
+    if (!id) return;
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const apptRes = await axios.get('https://skinssence-api-1.onrender.com/api/appointments', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (apptRes.data && Array.isArray(apptRes.data)) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const matched = apptRes.data.filter(a => {
+          const patMatch = (a.patient_id && (
+            String(a.patient_id) === String(id) ||
+            String(a.patient_id).toLowerCase() === String(patient?.skinssence_id || '').toLowerCase()
+          )) || (patient?.mobile && a.mobile && a.mobile.replace(/\D/g, '') === patient.mobile.replace(/\D/g, ''));
+          const isNotCancelled = !a.status || (!a.status.toUpperCase().includes('CANCEL'));
+          const isUpcoming = a.appointment_date && a.appointment_date >= todayStr;
+          const hasAdvanceNote = a.notes && (
+            a.notes.includes('Advance Paid') ||
+            a.notes.includes('Advance Booking') ||
+            a.notes.includes('Priority Booking') ||
+            a.notes.includes('PRIORITY')
+          );
+          return patMatch && isNotCancelled && isUpcoming && hasAdvanceNote;
+        }).sort((a, b) => new Date(a.appointment_date) - new Date(b.appointment_date));
+
+        setPriorityAppt(matched.length > 0 ? matched[0] : null);
+      }
+    } catch (e) {
+      console.log('Error fetching priority appointment:', e?.message);
+    }
+  }, [patient?.id, patient?.skinssence_id, patient?.mobile, patientId]);
+
+  const handleGeneratePriorityPdf = async (forShare = false) => {
+    if (!priorityAppt || !patient) return;
+    setIsGeneratingPriorityReceipt(true);
+    try {
+      const notes = priorityAppt.notes || '';
+      let plannedProcedures = 'Treatment / Procedure';
+      let advanceAmount = '500';
+      const procMatch = notes.match(/Advance Booking:\s*([^(]+)/i);
+      if (procMatch && procMatch[1]) plannedProcedures = procMatch[1].trim();
+      const advMatch = notes.match(/Advance Paid:\s*₹?([0-9.]+)/i);
+      if (advMatch && advMatch[1]) advanceAmount = advMatch[1].trim();
+      else if (patient?.wallet_balance) advanceAmount = String(patient.wallet_balance);
+
+      const apptDateObj = new Date(priorityAppt.appointment_date);
+      const apptDateStr = isNaN(apptDateObj.getTime())
+        ? priorityAppt.appointment_date
+        : apptDateObj.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+
+      const bookingDateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      const receiptNo = `ADV-${patient.skinssence_id || patient.id}-${priorityAppt.id}`;
+
+      const receiptHtml = buildAdvanceReceiptHtml({
+        patient,
+        receiptNo,
+        bookingDateStr,
+        appointmentDateStr: apptDateStr,
+        appointmentTime: priorityAppt.appointment_time || '11:00 AM',
+        plannedProcedures,
+        advanceAmount,
+        paymentMode: 'UPI (Store)',
+        estimatedTotal: null,
+        notes
+      });
+
+      const { uri } = await Print.printToFileAsync({ html: receiptHtml });
+      const pFullName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'Patient';
+      const { uri: namedPdfUri, filename } = await renameBillPdfAsync(uri, pFullName, receiptNo);
+
+      if (forShare) {
+        await shareBillToWhatsAppAsync({
+          pdfUri: namedPdfUri,
+          filename,
+          patient,
+          inFlightRef: isSharingBillRef
+        });
+      } else {
+        await previewBillPdfAsync(namedPdfUri, filename);
+      }
+    } catch (e) {
+      console.error('Error generating priority receipt PDF:', e);
+      Alert.alert('Error', 'Failed to generate PDF receipt: ' + e.message);
+    } finally {
+      setIsGeneratingPriorityReceipt(false);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       const currentId = patient?.id || patientId;
@@ -188,14 +279,15 @@ function PatientProfileScreenContent({ route, navigation }) {
         fetchHistory(currentId);
         fetchPackages(currentId);
         fetchTreatmentPlans(currentId);
+        fetchPriorityAppointment(currentId);
       }
       AsyncStorage.getItem('userRole').then(r => setUserRole(r ? r.toUpperCase() : ''));
-    }, [patient?.id, patientId])
+    }, [patient?.id, patientId, fetchPriorityAppointment])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    Promise.all([fetchHistory(), fetchPackages(), fetchTreatmentPlans()]).finally(() => setRefreshing(false));
+    Promise.all([fetchHistory(), fetchPackages(), fetchTreatmentPlans(), fetchPriorityAppointment()]).finally(() => setRefreshing(false));
   };
 
   const handleUpdateProfile = async () => {
@@ -1263,6 +1355,80 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           </View>
         </View>
 
+        {/* ⭐ UPCOMING PRIORITY APPOINTMENT CARD */}
+        {priorityAppt && (
+          <View style={styles.priorityCardContainer}>
+            <View style={styles.priorityCardHeader}>
+              <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                <Text style={styles.priorityCardBadge}>⭐ PRIORITY APPOINTMENT</Text>
+                <View style={styles.priorityGuaranteedPill}>
+                  <Text style={styles.priorityGuaranteedText}>Guaranteed Slot</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.priorityCardBody}>
+              <View style={styles.priorityDetailRow}>
+                <Text style={styles.priorityDetailLabel}>📅 Scheduled Date & Time:</Text>
+                <Text style={styles.priorityDetailValue}>
+                  {new Date(priorityAppt.appointment_date).toLocaleDateString('en-IN', {
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  })} at {priorityAppt.appointment_time}
+                </Text>
+              </View>
+
+              {priorityAppt.notes ? (
+                <View style={styles.priorityDetailRow}>
+                  <Text style={styles.priorityDetailLabel}>✨ Planned Service:</Text>
+                  <Text style={styles.priorityDetailValueNotes}>
+                    {priorityAppt.notes.replace(/^Advance Booking:\s*/i, '').split('(')[0].trim() || priorityAppt.notes}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.priorityDetailRow}>
+                <Text style={styles.priorityDetailLabel}>💰 Pre-Paid Advance:</Text>
+                <Text style={[styles.priorityDetailValue, {color: '#15803d', fontWeight: '800'}]}>
+                  ₹{parseFloat(patient?.wallet_balance || 500).toFixed(0)} (Credited in Wallet)
+                </Text>
+              </View>
+            </View>
+
+            {/* ACTION BUTTONS */}
+            <View style={styles.priorityActionsRow}>
+              <TouchableOpacity
+                style={[styles.priorityActionBtn, {backgroundColor: '#5C0B0B'}]}
+                onPress={() => handleGeneratePriorityPdf(false)}
+                disabled={isGeneratingPriorityReceipt}
+              >
+                {isGeneratingPriorityReceipt ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.priorityActionBtnText}>📄 PDF Receipt</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.priorityActionBtn, {backgroundColor: '#25D366'}]}
+                onPress={() => handleGeneratePriorityPdf(true)}
+                disabled={isGeneratingPriorityReceipt}
+              >
+                <Text style={styles.priorityActionBtnText}>📲 Share WA</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.priorityActionBtn, {backgroundColor: '#7c3aed', flex: 1.2}]}
+                onPress={() => navigation.navigate('VisitEntry', { patient })}
+              >
+                <Text style={styles.priorityActionBtnText}>🚀 Start Visit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* VISIT HISTORY HEADER */}
         <Text style={styles.sectionTitle}>Visit History</Text>
         
@@ -1800,6 +1966,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           fetchHistory();
           if (patient && (patient.id || patientId)) {
             fetchPatientDetails(patient.id || patientId);
+            fetchPriorityAppointment(patient.id || patientId);
           }
         }}
       />
@@ -1813,6 +1980,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           fetchHistory();
           if (patient && (patient.id || patientId)) {
             fetchPatientDetails(patient.id || patientId);
+            fetchPriorityAppointment(patient.id || patientId);
           }
         }}
       />
@@ -2082,5 +2250,97 @@ const styles = StyleSheet.create({
   followupChip: { paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#f1f5f9', borderRadius: 6, borderWidth: 1, borderColor: '#cbd5e1' },
   followupChipActive: { backgroundColor: '#5C0B0B', borderColor: '#5C0B0B' },
   followupChipText: { fontSize: 12, fontWeight: '600', color: '#475569' },
-  followupChipTextActive: { color: '#fff', fontWeight: 'bold' }
+  followupChipTextActive: { color: '#fff', fontWeight: 'bold' },
+  priorityCardContainer: {
+    backgroundColor: '#faf5ff',
+    borderWidth: 1.5,
+    borderColor: '#c084fc',
+    borderLeftWidth: 6,
+    borderLeftColor: '#7c3aed',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  priorityCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3e8ff',
+    paddingBottom: 6,
+  },
+  priorityCardBadge: {
+    color: '#6b21a8',
+    fontWeight: '900',
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  priorityGuaranteedPill: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#86efac',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  priorityGuaranteedText: {
+    color: '#15803d',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  priorityCardBody: {
+    marginBottom: 10,
+  },
+  priorityDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 3,
+    alignItems: 'flex-start',
+  },
+  priorityDetailLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '600',
+    flex: 1.2,
+  },
+  priorityDetailValue: {
+    fontSize: 13,
+    color: '#1f2937',
+    fontWeight: '700',
+    flex: 2,
+    textAlign: 'right',
+  },
+  priorityDetailValueNotes: {
+    fontSize: 13,
+    color: '#581c87',
+    fontWeight: '700',
+    flex: 2,
+    textAlign: 'right',
+  },
+  priorityActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  priorityActionBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priorityActionBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  }
 });

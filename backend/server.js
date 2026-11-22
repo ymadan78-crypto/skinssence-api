@@ -7538,29 +7538,31 @@ app.post('/api/advance-bookings', authenticateToken, async (req, res) => {
 
     const receiptText = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
       `---------------------------------\n` +
-      `*ADVANCE BOOKING RECEIPT*\n` +
+      `*⭐ PRIORITY BOOKING RECEIPT*\n` +
+      `Guaranteed & Pre-Paid Appointment Slot\n` +
       `Receipt No: ${receiptId}\n` +
       `Booking Date: ${effectiveBookingDate}\n` +
       `---------------------------------\n` +
       `*Patient Details:*\n` +
       `Name: ${pName} (${sId})\n` +
       `Phone: +91 ${cleanMobile}\n\n` +
-      `📅 *Appointment Scheduled:*\n` +
+      `📅 *⭐ Priority Appointment Scheduled:*\n` +
       `Date: ${appointment_date}\n` +
       `Time: ${appointment_time}\n` +
       `Planned Service: ${planned_procedures}\n\n` +
       `💰 *Payment Summary:*\n` +
       `• Advance Amount Paid Today: *₹${parsedAdvance.toFixed(0)}*\n` +
       `• Payment Mode: ${payment_mode}\n` +
-      `• Status: Successfully Credited to Account\n` +
+      `• Status: ⭐ Priority Confirmed & Credited to Account\n` +
       `${estPricingBlock}` +
       `---------------------------------\n` +
       `*Terms & Conditions:*\n` +
+      `• ⭐ Priority Service: As an advance pre-paid client, your reserved time slot is guaranteed with priority consultation & zero wait time upon arrival.\n` +
       `• This advance deposit of ₹${parsedAdvance.toFixed(0)} is securely credited to your clinic account.\n` +
       `• It will be automatically deducted from your final bill on your appointment day.\n` +
       `• Treatment choices may be customized or changed upon doctor consultation during your visit.\n\n` +
       `Thank you for booking with Skinssence!\n` +
-      `📞 Clinic Contact: +91 91791 79191\n` +
+      `📞 Clinic Contact: +91 95091 97578\n` +
       `📍 Skinssence Clinic, Kota`;
 
     res.json({
