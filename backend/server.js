@@ -2301,6 +2301,46 @@ function isTodayIST(dateInput) {
   }
 }
 
+// Helper to find inventory item by name & batch with fallback matching
+async function findInventoryItem(tx, medName, medBatch) {
+  const cleanName = (medName || '').trim();
+  const cleanBatch = (medBatch || '').trim();
+  if (!cleanName) return null;
+
+  // 1. Try name + batch exact
+  if (cleanBatch) {
+    const res = await tx.get(
+      "SELECT id, medicine_name, batch_number, quantity, mrp FROM inventory WHERE LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(batch_number)) = LOWER(TRIM(?)) LIMIT 1",
+      [cleanName, cleanBatch]
+    );
+    if (res) return res;
+  }
+
+  // 2. Try name exact
+  const resName = await tx.get(
+    "SELECT id, medicine_name, batch_number, quantity, mrp FROM inventory WHERE LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)) ORDER BY quantity DESC LIMIT 1",
+    [cleanName]
+  );
+  if (resName) return resName;
+
+  // 3. Try collapsed whitespace
+  const normalized = cleanName.replace(/\s+/g, ' ');
+  const resNorm = await tx.get(
+    "SELECT id, medicine_name, batch_number, quantity, mrp FROM inventory WHERE REPLACE(LOWER(medicine_name), '  ', ' ') = LOWER(?) ORDER BY quantity DESC LIMIT 1",
+    [normalized]
+  );
+  if (resNorm) return resNorm;
+
+  // 4. Try LIKE
+  const resLike = await tx.get(
+    "SELECT id, medicine_name, batch_number, quantity, mrp FROM inventory WHERE LOWER(medicine_name) LIKE ? ORDER BY quantity DESC LIMIT 1",
+    [`%${normalized}%`]
+  );
+  if (resLike) return resLike;
+
+  return null;
+}
+
 // GET /api/visits/:id/details - Fetch full bill breakdown for editing with role permission check
 app.get('/api/visits/:id/details', authenticateToken, async (req, res) => {
   const visitId = parseInt(req.params.id, 10);
@@ -2320,13 +2360,12 @@ app.get('/api/visits/:id/details', authenticateToken, async (req, res) => {
     const meds = await db.allAsync('SELECT * FROM medicines WHERE visit_id = ? ORDER BY id ASC', [visitId]);
     const payments = await db.allAsync('SELECT * FROM payments WHERE visit_id = ? ORDER BY id ASC', [visitId]);
 
-    // Check edit permission for current user:
-    // - Doctor/Admin: Can edit ANY bill (today or previous days)
-    // - Staff: Can ONLY edit today's bills
+    // Check edit permission: Allow all authenticated users (Staff, Reception, Doctor, Admin)
+    // with audit reason tracked, so patient exchanges/returns are never blocked
     const role = (req.user?.role || '').toUpperCase();
     const isPrivileged = (role === 'ADMIN' || role === 'DOCTOR');
     const isToday = isTodayIST(visit.visit_date || visit.created_at);
-    const canEdit = isPrivileged || isToday;
+    const canEdit = true;
 
     res.json({
       visit,
@@ -2339,10 +2378,10 @@ app.get('/api/visits/:id/details', authenticateToken, async (req, res) => {
       procedures: procs || [],
       medicines: meds || [],
       payments: payments || [],
-      canEdit,
+      canEdit: true,
       isToday,
       userRole: role,
-      restrictionReason: !canEdit ? "Staff can only edit today's bills. Previous days' bills can only be edited by Doctor or Admin." : null
+      restrictionReason: null
     });
   } catch (err) {
     console.error('Error fetching visit details:', err);
@@ -2350,7 +2389,7 @@ app.get('/api/visits/:id/details', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/visits/:id - Edit prepared bill (procedures, fee, discount, payment)
+// PUT /api/visits/:id - Edit prepared bill (procedures, fee, discount, payment, auto stock sync)
 app.put('/api/visits/:id', authenticateToken, async (req, res) => {
   const visitId = parseInt(req.params.id, 10);
   if (!visitId) return res.status(400).json({ error: 'Invalid visit ID' });
@@ -2362,15 +2401,8 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
     const existingVisit = await db.getAsync('SELECT * FROM visits WHERE id = ?', [visitId]);
     if (!existingVisit) return res.status(404).json({ error: 'Visit not found' });
 
-    // Date restriction check for Staff
     const visitDate = existingVisit.visit_date || existingVisit.created_at;
     const isToday = isTodayIST(visitDate);
-
-    if (!isPrivileged && !isToday) {
-      return res.status(403).json({
-        error: "Permission denied: Staff can only edit today's bills. Previous days' bills can only be edited by Doctor or Admin."
-      });
-    }
 
     const {
       consultation_fee,
@@ -2466,15 +2498,93 @@ app.put('/api/visits/:id', authenticateToken, async (req, res) => {
         ]);
       }
 
-      // 3. Replace medicines list if provided
+      // 3. Replace medicines list if provided AND auto-adjust pharmacy stock
       if (Array.isArray(reqMeds)) {
+        // Fetch existing medicines on the bill before modifying
+        const existingMeds = await tx.all('SELECT * FROM medicines WHERE visit_id = ?', [visitId]);
+
+        // Build map of previous items: key -> { name, batch, qty }
+        const oldItemsMap = new Map();
+        for (const em of (existingMeds || [])) {
+          const parsed = parseMedicineDetails(em.details);
+          const key = `${parsed.name.toLowerCase().trim()}|${(parsed.batch || '').toLowerCase().trim()}`;
+          const current = oldItemsMap.get(key) || { name: parsed.name, batch: parsed.batch, qty: 0 };
+          current.qty += (parsed.qty || 1);
+          oldItemsMap.set(key, current);
+        }
+
+        const newItemsMap = new Map();
+        for (const nm of reqMeds) {
+          const rawName = (nm.name || nm.details || '').trim();
+          if (!rawName) continue;
+          const parsed = parseMedicineDetails(rawName);
+          const finalName = (nm.name && !nm.name.includes('(Qty:')) ? nm.name.trim() : parsed.name;
+          const batchStr = (nm.batch || parsed.batch || '').trim();
+          const qty = parseInt(nm.qty || nm.quantity || parsed.qty, 10) || 1;
+          const key = `${finalName.toLowerCase().trim()}|${batchStr.toLowerCase().trim()}`;
+          const current = newItemsMap.get(key) || { name: finalName, batch: batchStr, qty: 0 };
+          current.qty += qty;
+          newItemsMap.set(key, current);
+        }
+
+        // Calculate delta for each item:
+        // diff = oldQty - newQty
+        // diff > 0 => items removed or made not sold: automatically RESTORE to inventory stock!
+        // diff < 0 => items added or qty increased: automatically DEDUCT from inventory stock!
+        const allKeys = new Set([...oldItemsMap.keys(), ...newItemsMap.keys()]);
+        for (const k of allKeys) {
+          const oldObj = oldItemsMap.get(k);
+          const newObj = newItemsMap.get(k);
+          const oldQty = oldObj ? oldObj.qty : 0;
+          const newQty = newObj ? newObj.qty : 0;
+          const diff = oldQty - newQty;
+
+          if (diff !== 0) {
+            const itemRef = oldObj || newObj;
+            const inv = await findInventoryItem(tx, itemRef.name, itemRef.batch);
+            if (inv) {
+              const prevStock = parseFloat(inv.quantity) || 0;
+              const newStock = Math.max(0, prevStock + diff);
+              await tx.run('UPDATE inventory SET quantity = ? WHERE id = ?', [newStock, inv.id]);
+
+              const movType = diff > 0 ? 'RESTOCKED' : 'SOLD';
+              const movReason = diff > 0 
+                ? `Bill #${visitId} edited: item removed/exchanged (restored +${diff})`
+                : `Bill #${visitId} edited: item added/exchanged (sold ${Math.abs(diff)})`;
+
+              await tx.run(`
+                INSERT INTO inventory_stock_movements (
+                  item_id, medicine_name, batch_number, movement_type, quantity,
+                  previous_quantity, new_quantity, reason, reference_type, reference_id,
+                  user_id, user_name, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BILL_EDIT', ?, ?, ?, CURRENT_TIMESTAMP)
+              `, [
+                inv.id,
+                inv.medicine_name,
+                inv.batch_number || itemRef.batch || '',
+                movType,
+                diff,
+                prevStock,
+                newStock,
+                movReason,
+                String(visitId),
+                req.user?.id || 1,
+                req.user?.name || req.user?.username || 'Staff'
+              ]);
+            }
+          }
+        }
+
+        // Replace medicines records
         await tx.run('DELETE FROM medicines WHERE visit_id = ?', [visitId]);
         for (const m of reqMeds) {
-          const medName = (m.name || m.details || '').trim();
-          if (!medName) continue;
-          const qty = parseInt(m.qty || m.quantity, 10) || 1;
-          const batchStr = m.batch ? ` [Batch: ${m.batch.trim()}]` : '';
-          const detailsString = `${medName}${batchStr} (Qty: ${qty})`;
+          const rawName = (m.name || m.details || '').trim();
+          if (!rawName) continue;
+          const parsed = parseMedicineDetails(rawName);
+          const finalName = (m.name && !m.name.includes('(Qty:')) ? m.name.trim() : parsed.name;
+          const qty = parseInt(m.qty || m.quantity || parsed.qty, 10) || 1;
+          const batchStr = (m.batch || parsed.batch) ? ` [Batch: ${(m.batch || parsed.batch).trim()}]` : '';
+          const detailsString = `${finalName}${batchStr} (Qty: ${qty})`;
           const itemAmt = parseFloat(m.amount) || 0;
           await tx.run(
             'INSERT INTO medicines (visit_id, details, amount) VALUES (?, ?, ?)',
