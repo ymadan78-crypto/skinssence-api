@@ -7,6 +7,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
+import AdvanceBookingModal from '../components/AdvanceBookingModal';
 import { sendFeedbackRequestWhatsApp } from '../utils/whatsappHelper';
 import { renameBillPdfAsync, formatSkinssenceBillFilename } from '../utils/billNaming';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
@@ -67,6 +68,7 @@ function PatientProfileScreenContent({ route, navigation }) {
   const [correctingVisitId, setCorrectingVisitId] = useState(null);
   const [editBillModalVisible, setEditBillModalVisible] = useState(false);
   const [editingVisitId, setEditingVisitId] = useState(null);
+  const [advanceBookingModalVisible, setAdvanceBookingModalVisible] = useState(false);
   const isSharingBillRef = useRef(false);
 
   // Wallet Modal
@@ -1044,9 +1046,17 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
               <Text style={styles.walletTitle}>Advance / Prepaid Balance</Text>
               <Text style={styles.walletAmount}>₹ {patient.wallet_balance ? patient.wallet_balance.toFixed(2) : '0.00'}</Text>
             </View>
-            <TouchableOpacity style={styles.walletBtn} onPress={() => setRechargeModalVisible(true)}>
-              <Text style={styles.walletBtnText}>+ Advance / Top-Up</Text>
-            </TouchableOpacity>
+            <View style={{flexDirection: 'row', gap: 6}}>
+              <TouchableOpacity
+                style={[styles.walletBtn, {backgroundColor: '#7c3aed'}]}
+                onPress={() => setAdvanceBookingModalVisible(true)}
+              >
+                <Text style={styles.walletBtnText}>🎫 Advance</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.walletBtn} onPress={() => setRechargeModalVisible(true)}>
+                <Text style={styles.walletBtnText}>+ Top-Up</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* EDIT & DELETE PROFILE (ADMIN/DOCTOR) */}
@@ -1092,22 +1102,28 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
 
               {/* ACTION BUTTONS ROW 1: Visits & Appointments */}
               <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 15}}>
-                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginRight: 5, backgroundColor: '#10b981', marginTop: 0}]} onPress={() => {
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginRight: 4, backgroundColor: '#10b981', marginTop: 0}]} onPress={() => {
                   navigation.navigate('VisitEntry', { patient });
                 }}>
-                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>+ New / Today Visit</Text>
+                  <Text style={[styles.actionBtnText, {fontSize: 13}]}>+ Today Visit</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginHorizontal: 5, backgroundColor: '#f59e0b', marginTop: 0}]} onPress={() => {
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1.25, marginHorizontal: 4, backgroundColor: '#7c3aed', marginTop: 0}]} onPress={() => {
+                  setAdvanceBookingModalVisible(true);
+                }}>
+                  <Text style={[styles.actionBtnText, {fontSize: 13, fontWeight: 'bold'}]}>🎫 Advance Booking</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.actionBtn, {flex: 0.9, marginHorizontal: 4, backgroundColor: '#f59e0b', marginTop: 0}]} onPress={() => {
                   navigation.navigate('VisitEntry', { patient, isPastVisit: true });
                 }}>
-                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>+ Past Visit</Text>
+                  <Text style={[styles.actionBtnText, {fontSize: 13}]}>+ Past Visit</Text>
                 </TouchableOpacity>
-  
-                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginLeft: 5, backgroundColor: '#3b82f6', marginTop: 0}]} onPress={() => {
+
+                <TouchableOpacity style={[styles.actionBtn, {flex: 0.8, marginLeft: 4, backgroundColor: '#3b82f6', marginTop: 0}]} onPress={() => {
                   navigation.navigate('AppointmentCalendar', { patient });
                 }}>
-                  <Text style={[styles.actionBtnText, {fontSize: 14}]}>📅 Book</Text>
+                  <Text style={[styles.actionBtnText, {fontSize: 13}]}>📅 Book</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1781,6 +1797,19 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           setEditingVisitId(null);
         }}
         onUpdated={() => {
+          fetchHistory();
+          if (patient && (patient.id || patientId)) {
+            fetchPatientDetails(patient.id || patientId);
+          }
+        }}
+      />
+
+      {/* DEDICATED ADVANCE BOOKING MODAL */}
+      <AdvanceBookingModal
+        visible={advanceBookingModalVisible}
+        patient={patient}
+        onClose={() => setAdvanceBookingModalVisible(false)}
+        onSuccess={() => {
           fetchHistory();
           if (patient && (patient.id || patientId)) {
             fetchPatientDetails(patient.id || patientId);

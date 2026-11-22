@@ -7442,6 +7442,142 @@ app.post('/api/patients/:id/wallet', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/advance-bookings - Dedicated advance booking creation with wallet credit, appointment scheduling, and English receipt
+app.post('/api/advance-bookings', authenticateToken, async (req, res) => {
+  const {
+    patient_id,
+    booking_date,
+    appointment_date,
+    appointment_time = '11:00 AM',
+    planned_procedures = 'Treatment / Procedure',
+    advance_amount,
+    payment_mode = 'CASH',
+    estimated_total,
+    notes = ''
+  } = req.body;
+
+  const staffId = req.user?.id;
+  const staffName = req.user?.name || req.user?.username || 'Staff';
+
+  const parsedAdvance = parseFloat(advance_amount);
+  if (!Number.isFinite(parsedAdvance) || parsedAdvance <= 0) {
+    return res.status(400).json({ error: 'Advance amount must be a positive number.' });
+  }
+
+  if (!patient_id) {
+    return res.status(400).json({ error: 'Patient ID is required.' });
+  }
+
+  if (!appointment_date) {
+    return res.status(400).json({ error: 'Appointment date is required.' });
+  }
+
+  const effectiveBookingDate = booking_date || new Date().toISOString().split('T')[0];
+  const nowIso = new Date().toISOString();
+  const txCreatedAt = `${effectiveBookingDate}T${nowIso.split('T')[1] || '12:00:00.000Z'}`;
+
+  try {
+    const pat = await db.getAsync('SELECT * FROM patients WHERE id = ?', [patient_id]);
+    if (!pat) return res.status(404).json({ error: 'Patient not found.' });
+
+    const pName = `${pat.first_name || ''} ${pat.last_name || ''}`.trim() || 'Patient';
+    const sId = pat.skinssence_id || `ID:${pat.id}`;
+    const cleanMobile = (pat.mobile || '').replace(/\D/g, '').slice(-10);
+
+    let appointmentId = null;
+    let newBal = 0;
+
+    await db.withTransaction(async (tx) => {
+      // 1. Create or update scheduled appointment
+      const apptNotes = `Advance Booking: ${planned_procedures} (Advance Paid: ₹${parsedAdvance.toFixed(0)} via ${payment_mode})${notes ? ' • Note: ' + notes : ''}`;
+      const insAppt = await tx.run(
+        `INSERT INTO appointments (patient_id, patient_name, mobile, appointment_date, appointment_time, status, notes)
+         VALUES (?, ?, ?, ?, ?, 'SCHEDULED', ?)`,
+        [String(patient_id), pName, pat.mobile || '', appointment_date, appointment_time, apptNotes]
+      );
+      appointmentId = insAppt.lastID;
+
+      // 2. Record advance credit in wallet_transactions (linked to today's ledger)
+      const walDesc = `Advance Booking for ${appointment_date} (${planned_procedures}) [Appt #${appointmentId}]`;
+      await tx.run(
+        `INSERT INTO wallet_transactions (patient_id, amount, type, description, mode, staff_id, created_at)
+         VALUES (?, ?, 'CREDIT', ?, ?, ?, ?)`,
+        [patient_id, parsedAdvance, walDesc, payment_mode, staffId, txCreatedAt]
+      );
+
+      // 3. Update patient wallet_balance
+      const curBal = parseFloat(pat.wallet_balance) || 0;
+      newBal = curBal + parsedAdvance;
+      await tx.run(
+        `UPDATE patients SET wallet_balance = COALESCE(wallet_balance, 0) + ? WHERE id = ?`,
+        [parsedAdvance, patient_id]
+      );
+    });
+
+    writeAudit(
+      req.user,
+      'ADVANCE_BOOKING',
+      'appointments',
+      appointmentId,
+      null,
+      { patient_id, advance_amount: parsedAdvance, appointment_date, appointment_time, planned_procedures, payment_mode },
+      notes || `Advance booking recorded by ${staffName}`
+    );
+
+    // Format English receipt text
+    const receiptId = `ADV-${pat.skinssence_id || pat.id}-${appointmentId}`;
+    const estTotalNum = parseFloat(estimated_total) || 0;
+    const approxBalance = Math.max(0, estTotalNum - parsedAdvance);
+
+    let estPricingBlock = '';
+    if (estTotalNum > 0) {
+      estPricingBlock = `• Estimated Service Total: ₹${estTotalNum.toFixed(0)}\n• Approx. Balance Due on Visit: *₹${approxBalance.toFixed(0)}*\n`;
+    } else {
+      estPricingBlock = `• Remaining Balance: To be settled on treatment day based on final services\n`;
+    }
+
+    const receiptText = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
+      `---------------------------------\n` +
+      `*ADVANCE BOOKING RECEIPT*\n` +
+      `Receipt No: ${receiptId}\n` +
+      `Booking Date: ${effectiveBookingDate}\n` +
+      `---------------------------------\n` +
+      `*Patient Details:*\n` +
+      `Name: ${pName} (${sId})\n` +
+      `Phone: +91 ${cleanMobile}\n\n` +
+      `📅 *Appointment Scheduled:*\n` +
+      `Date: ${appointment_date}\n` +
+      `Time: ${appointment_time}\n` +
+      `Planned Service: ${planned_procedures}\n\n` +
+      `💰 *Payment Summary:*\n` +
+      `• Advance Amount Paid Today: *₹${parsedAdvance.toFixed(0)}*\n` +
+      `• Payment Mode: ${payment_mode}\n` +
+      `• Status: Successfully Credited to Account\n` +
+      `${estPricingBlock}` +
+      `---------------------------------\n` +
+      `*Terms & Conditions:*\n` +
+      `• This advance deposit of ₹${parsedAdvance.toFixed(0)} is securely credited to your clinic account.\n` +
+      `• It will be automatically deducted from your final bill on your appointment day.\n` +
+      `• Treatment choices may be customized or changed upon doctor consultation during your visit.\n\n` +
+      `Thank you for booking with Skinssence!\n` +
+      `📞 Clinic Contact: +91 91791 79191\n` +
+      `📍 Skinssence Clinic, Kota`;
+
+    res.json({
+      success: true,
+      message: 'Advance booking recorded successfully!',
+      booking_id: receiptId,
+      appointment_id: appointmentId,
+      new_wallet_balance: newBal,
+      receipt_text: receiptText,
+      clean_mobile: cleanMobile
+    });
+  } catch (err) {
+    console.error('Error recording advance booking:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/staff/my-attendance', authenticateToken, (req, res) => {
   db.all('SELECT date, status FROM attendance WHERE user_id = ? ORDER BY date DESC LIMIT 30', [req.user.id], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
