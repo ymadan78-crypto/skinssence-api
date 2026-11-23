@@ -17,9 +17,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import * as Sharing from 'expo-sharing';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
 import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
+import { generateVisitBillPdfAsync } from '../utils/billGenerator';
+import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 
 const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
 
@@ -329,31 +332,74 @@ function DailyDiaryScreenContent({ navigation, route }) {
     }
   };
 
-  const handleQuickSendWhatsAppDiary = (patient) => {
+  const handleQuickSendWhatsAppDiary = async (patient) => {
     const cleanMob = patient.mobile ? patient.mobile.replace(/\D/g, '').slice(-10) : '';
     if (!cleanMob || cleanMob.length !== 10) {
       return Alert.alert('Invalid Mobile', `Patient "${patient.patient_name}" does not have a valid 10-digit mobile number.`);
     }
-    const amt = parseFloat(patient.amount) || 0;
-    const text = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
-      `---------------------------------\n` +
-      `*Receipt / Visit Summary*\n` +
-      `Date: ${selectedDate}\n` +
-      `Patient: ${patient.patient_name} (${patient.skinssence_id})\n` +
-      `• Details: ${patient.title || 'Treatment / Medicines'}\n` +
-      `*Total Amount: ₹${amt.toFixed(0)}*\n` +
-      `---------------------------------\n` +
-      `Thank you for visiting Skinssence Clinic! Please let us know if you have any questions.\n` +
-      `📞 Clinic Contact: +91 91791 79191`;
 
-    const url = `whatsapp://send?phone=91${cleanMob}&text=${encodeURIComponent(text)}`;
-    Linking.openURL(url).then(() => {
-      if (patient.visit_id) {
-        handleMarkBillSent(patient.visit_id);
-      }
-    }).catch(() => {
-      Alert.alert('Error', 'Could not open WhatsApp.');
-    });
+    try {
+      setLoading(true);
+      const patientObj = {
+        id: patient.patient_id,
+        name: patient.patient_name,
+        first_name: (patient.patient_name || '').split(' ')[0],
+        last_name: (patient.patient_name || '').split(' ').slice(1).join(' '),
+        skinssence_id: patient.skinssence_id,
+        mobile: patient.mobile
+      };
+
+      const visitObj = {
+        visit_id: patient.visit_id,
+        id: patient.visit_id,
+        patient_id: patient.patient_id,
+        total_amount: patient.amount,
+        amount_received: patient.amount,
+        visit_date: selectedDate
+      };
+
+      const result = await generateVisitBillPdfAsync({
+        patient: patientObj,
+        visit: visitObj
+      });
+
+      Alert.alert(
+        'Official Bill Ready — ' + result.invoiceNumber,
+        `📄 ${result.filename}\n\nPatient: ${patient.patient_name} (${patient.skinssence_id})\nAmount: ₹${(parseFloat(patient.amount) || 0).toFixed(0)}`,
+        [
+          {
+            text: '👁️ Preview PDF',
+            onPress: () => previewBillPdfAsync(result.pdfUri, result.filename)
+          },
+          {
+            text: '💬 WhatsApp PDF',
+            onPress: () => {
+              shareBillToWhatsAppAsync({
+                pdfUri: result.pdfUri,
+                filename: result.filename,
+                patient: patientObj,
+                visitId: patient.visit_id,
+                onSentSuccess: () => {
+                  if (patient.visit_id) {
+                    handleMarkBillSent(patient.visit_id);
+                  }
+                }
+              });
+            }
+          },
+          {
+            text: '📤 Share / Other',
+            onPress: () => Sharing.shareAsync(result.pdfUri, { dialogTitle: result.filename, UTI: '.pdf', mimeType: 'application/pdf' })
+          },
+          { text: 'Close', style: 'cancel' }
+        ]
+      );
+    } catch (e) {
+      console.error('Error generating diary bill PDF:', e);
+      Alert.alert('Error', 'Failed to generate PDF bill: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Financial Reports data

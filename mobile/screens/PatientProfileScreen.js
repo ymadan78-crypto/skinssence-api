@@ -685,7 +685,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           <div class="header-container">
             <div style="flex: 1;">
               <img src="${HEADER_BANNER_BASE64}" style="max-height:85px;max-width:350px;object-fit:contain;" />
-              <p class="doc" style="margin-top:6px;font-weight:bold;color:#222;font-size:14px;">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai</p>
+              <p class="doc" style="margin-top:6px;font-weight:bold;color:#222;font-size:14px;">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai &nbsp;|&nbsp; Reg. No. RMC 31793</p>
               <p class="addr" style="font-size:12px;color:#555;margin:2px 0;">4 C 15, Sector-4, Talwandi, Kota, Rajasthan 324005</p>
               <p class="addr" style="font-size:12px;color:#555;margin:2px 0;">📞 095091 97578 &nbsp;&nbsp;|&nbsp;&nbsp; 🌐 www.skinssence.in</p>
             </div>
@@ -698,7 +698,7 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
             <div><span class="info-label">Patient S ID: </span><span class="info-value">${patient.skinssence_id}</span></div>
             <div><span class="info-label">Date: </span><span class="info-value">${dateStr}</span></div>
             <div><span class="info-label">Mobile: </span><span class="info-value">${patient.mobile}</span></div>
-            <div><span class="info-label">Doctor: </span><span class="info-value">Dr. Ashima Madan</span></div>
+            <div><span class="info-label">Doctor: </span><span class="info-value">Dr. Ashima Madan (RMC 31793)</span></div>
           </div>
 
           <table>
@@ -795,7 +795,8 @@ https://maps.app.goo.gl/isSTuVrYSsRjpKqj9`;
           `}
 
           <div class="footer">
-            <p>Thank you for choosing Skinssence Laser and Skincare Clinic!</p>
+            <p>Thank you for choosing Skinssence Laser & Skincare Clinic!</p>
+            <p style="margin-top:2px;">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai &nbsp;|&nbsp; RMC Reg. No. 31793</p>
             <p>This is a computer generated digital invoice and does not require a physical signature.</p>
             <p class="go-green">🌿 Go Green — Thank you for choosing a digital receipt!</p>
           </div>

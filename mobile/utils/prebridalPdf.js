@@ -525,7 +525,7 @@ export function buildPrebridalProtocolHtml({
         <div class="clinic-header">
           <h1 class="clinic-name">SKINSSENCE</h1>
           <div class="clinic-tagline">Laser & Skincare Clinic • Est. Aesthetic Excellence</div>
-          <div class="clinic-sub">Opp. Medical College, Circular Road, Rewari | Helpline: 095091 97578 | www.skinssence.in</div>
+          <div class="clinic-sub">4 C 15, Sector-4, Talwandi, Kota, Rajasthan 324005 | Dr. Ashima Madan (MBBS, MD, FAM, Reg. No. RMC 31793) | 📞 +91 95091 97578</div>
         </div>
 
         <!-- Document Ribbon -->
@@ -614,7 +614,7 @@ export function buildPrebridalProtocolHtml({
             🌿 <em>Go Green! This is your official digital treatment protocol.</em>
           </div>
           <div class="sig-box">
-            <div class="sig-line">Doctor / Clinic Signatory</div>
+            <div class="sig-line">Dr. Ashima Madan (RMC 31793)<br>Consultant Dermatologist</div>
           </div>
         </div>
       </body>

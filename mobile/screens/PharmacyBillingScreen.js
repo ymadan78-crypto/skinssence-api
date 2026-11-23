@@ -537,7 +537,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
             <div class="header-container">
               <div style="flex: 1;">
                 <img src="${HEADER_BANNER_BASE64}" style="max-height:85px;max-width:350px;object-fit:contain;" />
-                <h2 style="color:#222;font-size:14px;font-weight:bold;margin:6px 0 2px 0;">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai</h2>
+                <h2 style="color:#222;font-size:14px;font-weight:bold;margin:6px 0 2px 0;">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai &nbsp;|&nbsp; Reg. No. RMC 31793</h2>
                 <h2 style="color:#555;font-size:12px;margin:2px 0;">4 C 15, Sector-4, Talwandi, Kota, Rajasthan 324005</h2>
                 <h2 style="color:#555;font-size:12px;margin:2px 0;">📞 095091 97578 &nbsp;&nbsp;|&nbsp;&nbsp; 🌐 www.skinssence.in</h2>
               </div>
@@ -561,7 +561,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
               </tr>
               <tr>
                 <td class="info-label">Doctor:</td>
-                <td>Dr. Ashima Madan</td>
+                <td>Dr. Ashima Madan (RMC 31793)</td>
                 <td class="info-label">Payment Mode:</td>
                 <td>${saleRecord.payload.payment_mode}</td>
               </tr>

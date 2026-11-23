@@ -5,10 +5,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import { Linking, Alert } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import PharmacyCorrectionModal from '../components/PharmacyCorrectionModal';
 import EditBillModal from '../components/EditBillModal';
 import { sendFeedbackRequestWhatsApp } from '../utils/whatsappHelper';
 import PendingFollowupReminderModal from '../components/PendingFollowupReminderModal';
+import { generateVisitBillPdfAsync } from '../utils/billGenerator';
+import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 
 export default function TodayPatientsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,7 @@ export default function TodayPatientsScreen({ navigation }) {
     );
   };
 
-  const handleQuickSendBillWhatsApp = (item) => {
+  const handleQuickSendBillWhatsApp = async (item) => {
     const pName = `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Patient';
     const sId = item.skinssence_id || `ID: ${item.patient_id}`;
     const cleanMob = item.mobile ? item.mobile.replace(/\D/g, '').slice(-10) : '';
@@ -99,45 +102,58 @@ export default function TodayPatientsScreen({ navigation }) {
       return Alert.alert('Invalid Mobile', `Patient "${pName}" (${sId}) does not have a valid 10-digit mobile number in records.`);
     }
 
-    const grandTotal = parseFloat(item.total_amount) || 0;
-    const dateStr = item.visit_date ? new Date(item.visit_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Today';
+    try {
+      setLoading(true);
+      const patientObj = {
+        id: item.patient_id,
+        first_name: item.first_name,
+        last_name: item.last_name,
+        skinssence_id: item.skinssence_id,
+        mobile: item.mobile
+      };
 
-    const text = `*Skinssence Aesthetic Clinic & Pharmacy*\n` +
-      `---------------------------------\n` +
-      `*Receipt / Visit Summary*\n` +
-      `Date: ${dateStr}\n` +
-      `Patient: ${pName} (${sId})\n` +
-      (item.consultation_fee > 0 ? `• Consultation Fee: ₹${item.consultation_fee}\n` : '') +
-      (item.procedure_total > 0 ? `• Treatment/Procedure: ₹${item.procedure_total}\n` : '') +
-      (item.medicine_total > 0 ? `• Pharmacy Medicines: ₹${item.medicine_total}\n` : '') +
-      `*Total Paid: ₹${grandTotal.toFixed(0)}*\n` +
-      `---------------------------------\n` +
-      `Thank you for visiting Skinssence Clinic! For any questions or follow-up, feel free to WhatsApp us.\n` +
-      `📞 Clinic Contact: +91 91791 79191`;
+      const result = await generateVisitBillPdfAsync({
+        patient: patientObj,
+        visit: item
+      });
 
-    const encoded = encodeURIComponent(text);
-    const url = `whatsapp://send?phone=91${cleanMob}&text=${encoded}`;
-
-    Alert.alert(
-      'Send Bill on WhatsApp?',
-      `Send visit receipt to ${pName} (${cleanMob}) for ₹${grandTotal.toFixed(0)}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Open WhatsApp',
-          onPress: async () => {
-            try {
-              await Linking.openURL(url);
-              if (item.visit_id) {
-                handleMarkBillSent(item.visit_id);
-              }
-            } catch(e) {
-              Alert.alert('Error', 'Could not open WhatsApp.');
+      Alert.alert(
+        'Official Bill Ready — ' + result.invoiceNumber,
+        `📄 ${result.filename}\n\nPatient: ${pName} (${sId})\nAmount: ₹${(parseFloat(item.total_amount) || 0).toFixed(0)}`,
+        [
+          {
+            text: '👁️ Preview PDF',
+            onPress: () => previewBillPdfAsync(result.pdfUri, result.filename)
+          },
+          {
+            text: '💬 WhatsApp PDF',
+            onPress: () => {
+              shareBillToWhatsAppAsync({
+                pdfUri: result.pdfUri,
+                filename: result.filename,
+                patient: patientObj,
+                visitId: item.visit_id,
+                onSentSuccess: () => {
+                  if (item.visit_id) {
+                    handleMarkBillSent(item.visit_id);
+                  }
+                }
+              });
             }
-          }
-        }
-      ]
-    );
+          },
+          {
+            text: '📤 Share / Other',
+            onPress: () => Sharing.shareAsync(result.pdfUri, { dialogTitle: result.filename, UTI: '.pdf', mimeType: 'application/pdf' })
+          },
+          { text: 'Close', style: 'cancel' }
+        ]
+      );
+    } catch (e) {
+      console.error('Error generating bill PDF:', e);
+      Alert.alert('Error', 'Failed to generate PDF bill: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const pendingBillsCount = visits.filter(v => (parseFloat(v.total_amount) || 0) > 0 && !v.bill_sent_at).length;
@@ -386,7 +402,7 @@ export default function TodayPatientsScreen({ navigation }) {
               >
                 <Ionicons name="logo-whatsapp" size={13} color="#fff" style={{ marginRight: 4 }} />
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#fff' }}>
-                  📲 Send Bill
+                  📲 Send Bill PDF
                 </Text>
               </TouchableOpacity>
             )}

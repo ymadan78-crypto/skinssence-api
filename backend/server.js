@@ -7545,7 +7545,8 @@ app.post('/api/advance-bookings', authenticateToken, async (req, res) => {
       `---------------------------------\n` +
       `*Patient Details:*\n` +
       `Name: ${pName} (${sId})\n` +
-      `Phone: +91 ${cleanMobile}\n\n` +
+      `Phone: +91 ${cleanMobile}\n` +
+      `Consultant: Dr. Ashima Madan (RMC Reg. No. 31793)\n\n` +
       `📅 *⭐ Priority Appointment Scheduled:*\n` +
       `Date: ${appointment_date}\n` +
       `Time: ${appointment_time}\n` +

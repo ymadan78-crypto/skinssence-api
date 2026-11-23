@@ -250,7 +250,7 @@ export function buildAdvanceReceiptHtml({
         <div class="header-container">
           <div style="flex: 1;">
             <img src="${HEADER_BANNER_BASE64}" style="max-height:80px;max-width:340px;object-fit:contain;" />
-            <p class="doc">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai</p>
+            <p class="doc">Dr. Ashima Madan &nbsp;|&nbsp; MBBS, MD, FAM – DJPIMAC, Mumbai &nbsp;|&nbsp; Reg. No. RMC 31793</p>
             <p class="addr">4 C 15, Sector-4, Talwandi, Kota, Rajasthan 324005</p>
             <p class="addr">📞 +91 95091 97578 &nbsp;&nbsp;|&nbsp;&nbsp; 🌐 www.skinssence.in</p>
           </div>
@@ -267,7 +267,7 @@ export function buildAdvanceReceiptHtml({
           <div><span class="info-label">Patient S ID: </span><span class="info-value">${pId}</span></div>
           <div><span class="info-label">Payment Date: </span><span class="info-value">${bookingDateStr}</span></div>
           <div><span class="info-label">Contact Phone: </span><span class="info-value">${pMobile || 'N/A'}</span></div>
-          <div><span class="info-label">Consultant: </span><span class="info-value">Dr. Ashima Madan</span></div>
+          <div><span class="info-label">Consultant: </span><span class="info-value">Dr. Ashima Madan (RMC 31793)</span></div>
         </div>
 
         <!-- SCHEDULED APPOINTMENT CARD -->
@@ -371,7 +371,8 @@ export function buildAdvanceReceiptHtml({
             <div style="font-size:10px;color:#94a3b8;margin-top:2px;">This is a computer-generated receipt.</div>
           </div>
           <div style="text-align:right;">
-            <div style="font-weight:bold;color:#0f172a;margin-bottom:28px;">For Skinssence Aesthetic Clinic & Pharmacy</div>
+            <div style="font-weight:bold;color:#0f172a;margin-bottom:4px;">For Skinssence Aesthetic Clinic & Pharmacy</div>
+            <div style="font-size:10.5px;color:#475569;margin-bottom:24px;">Dr. Ashima Madan (RMC 31793)</div>
             <div style="border-top:1px solid #334155;display:inline-block;padding-top:4px;min-width:140px;text-align:center;">Authorized Signatory</div>
           </div>
         </div>
