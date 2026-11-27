@@ -10,7 +10,7 @@ export default function LoginScreen({ navigation }) {
 
   // Note: For Android Emulator localhost is typically 10.0.2.2.
   // For Expo Go on physical device, you'd use your computer's IP address on the network (e.g. 192.168.1.100).
-  const API_URL = 'https://skinssence-api-1.onrender.com/api/login'; 
+  const API_URL = 'https://skinssence-api-ekmv.onrender.com/api/login'; 
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -40,7 +40,16 @@ export default function LoginScreen({ navigation }) {
       }
     } catch (error) {
       console.error(error);
-      if (error.response) { Alert.alert('Login Failed', 'Invalid username or password'); } else { Alert.alert('Network Error', 'Cannot reach the server. Make sure PC and Phone are on same WiFi, and Windows Firewall is off.'); }
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 400 || status === 401 || status === 403) {
+          Alert.alert('Login Failed', 'Invalid username or password');
+        } else {
+          Alert.alert('Server Unavailable', `The clinic server returned an error (HTTP ${status}). Please try again shortly or check Render status.`);
+        }
+      } else {
+        Alert.alert('Network Error', 'Cannot reach the server. Please check your internet connection.');
+      }
     } finally {
       setLoading(false);
     }

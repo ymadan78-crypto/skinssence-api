@@ -106,7 +106,7 @@ export default function PendingFollowupReminderModal({
     // 2. Fetch from backend API
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/staff/daily-tasks?date=${today}`, {
+      const res = await axios.get(`https://skinssence-api-ekmv.onrender.com/api/staff/daily-tasks?date=${today}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 10000
       });
@@ -142,7 +142,7 @@ export default function PendingFollowupReminderModal({
       // Fallback to legacy pending-followups if endpoint is still building
       try {
         const token = await AsyncStorage.getItem('userToken');
-        const fallbackRes = await axios.get('https://skinssence-api-1.onrender.com/api/appointments/pending-followups', {
+        const fallbackRes = await axios.get('https://skinssence-api-ekmv.onrender.com/api/appointments/pending-followups', {
           headers: { Authorization: `Bearer ${token}` }
         });
         const list = fallbackRes.data?.pendingPatients || [];
@@ -227,7 +227,7 @@ export default function PendingFollowupReminderModal({
         notes: customReasonNotes.trim()
       };
 
-      await axios.post('https://skinssence-api-1.onrender.com/api/appointments/followup-not-required', payload, {
+      await axios.post('https://skinssence-api-ekmv.onrender.com/api/appointments/followup-not-required', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -279,7 +279,7 @@ export default function PendingFollowupReminderModal({
     // Track on backend
     try {
       const token = await AsyncStorage.getItem('userToken');
-      await axios.post('https://skinssence-api-1.onrender.com/api/staff/review-requested', {
+      await axios.post('https://skinssence-api-ekmv.onrender.com/api/staff/review-requested', {
         patient_id: item.patient_id,
         visit_id: item.visit_id
       }, {
@@ -307,7 +307,7 @@ export default function PendingFollowupReminderModal({
         summary_notes: summaryNotes.trim()
       };
 
-      const res = await axios.post('https://skinssence-api-1.onrender.com/api/staff/daily-summary', payload, {
+      const res = await axios.post('https://skinssence-api-ekmv.onrender.com/api/staff/daily-summary', payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
 

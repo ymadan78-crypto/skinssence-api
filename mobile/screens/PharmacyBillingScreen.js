@@ -50,7 +50,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     setRecentBillsLoading(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get(`https://skinssence-api-1.onrender.com/api/pharmacy/recent-bills?search=${encodeURIComponent(search)}`, {
+      const res = await axios.get(`https://skinssence-api-ekmv.onrender.com/api/pharmacy/recent-bills?search=${encodeURIComponent(search)}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 10000
       });
@@ -95,7 +95,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     try {
       setInventoryLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      const res = await axios.get('https://skinssence-api-1.onrender.com/api/inventory', {
+      const res = await axios.get('https://skinssence-api-ekmv.onrender.com/api/inventory', {
         headers: { Authorization: `Bearer ${token}` }
       });
       const isExpClient = (expStr) => {
@@ -158,7 +158,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
     if (text.length > 2) {
       try {
         const token = await AsyncStorage.getItem('userToken');
-        const res = await axios.get(`https://skinssence-api-1.onrender.com/api/patients/search?q=${text}`, {
+        const res = await axios.get(`https://skinssence-api-ekmv.onrender.com/api/patients/search?q=${text}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPatients(res.data);
@@ -342,7 +342,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
 
       // STAGE 1: SAVE TRANSACTION TO DATABASE FIRST
       const idempotencyKey = `pharm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const res = await axios.post(`https://skinssence-api-1.onrender.com/api/pharmacy/sell`, payload, {
+      const res = await axios.post(`https://skinssence-api-ekmv.onrender.com/api/pharmacy/sell`, payload, {
         headers: {
           Authorization: `Bearer ${token}`,
           'x-idempotency-key': idempotencyKey
@@ -454,7 +454,7 @@ export default function PharmacyBillingScreen({ navigation, route }) {
 
       // 1. Create Invoice record in DB (non-blocking / resilient)
       try {
-        const invRes = await axios.post('https://skinssence-api-1.onrender.com/api/invoices', {
+        const invRes = await axios.post('https://skinssence-api-ekmv.onrender.com/api/invoices', {
           patient_id: saleRecord.payload.patient_id,
           visit_id: saleRecord.visitId,
           items_json: saleRecord.payload.medicines_sold.map(m => ({

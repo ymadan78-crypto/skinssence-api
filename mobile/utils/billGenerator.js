@@ -6,7 +6,7 @@ import { HEADER_BANNER_BASE64 } from './header_banner';
 import { renameBillPdfAsync } from './billNaming';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from './whatsappShare';
 
-const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
+const API_BASE_URL = 'https://skinssence-api-ekmv.onrender.com';
 
 function getCleanDoctorAdvice(plannedProcedures) {
   if (!plannedProcedures) return '';

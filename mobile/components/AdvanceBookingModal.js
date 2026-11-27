@@ -24,7 +24,7 @@ import { HEADER_BANNER_BASE64 } from '../utils/header_banner';
 import { renameBillPdfAsync } from '../utils/billNaming';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 
-const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
+const API_BASE_URL = 'https://skinssence-api-ekmv.onrender.com';
 
 const QUICK_PROCEDURES = [
   'Hydrafacial',

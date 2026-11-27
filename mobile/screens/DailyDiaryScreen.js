@@ -24,7 +24,7 @@ import PendingFollowupReminderModal from '../components/PendingFollowupReminderM
 import { generateVisitBillPdfAsync } from '../utils/billGenerator';
 import { previewBillPdfAsync, shareBillToWhatsAppAsync } from '../utils/whatsappShare';
 
-const API_BASE_URL = 'https://skinssence-api-1.onrender.com';
+const API_BASE_URL = 'https://skinssence-api-ekmv.onrender.com';
 
 function DailyDiaryScreenContent({ navigation, route }) {
   // Safe currency / number formatter
